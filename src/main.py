@@ -37,7 +37,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Cubi ServerManager",
-    version="1.0.0",
+    version="0.1.3",
     description="Universal pipeline orchestrator, dynamic schema mapper, and telemetry engine for cubi-server.",
     lifespan=lifespan,
 )
@@ -77,7 +77,7 @@ async def health_check():
     return {
         "status": "healthy",
         "app": "server-manager",
-        "version": "1.0.0",
+        "version": "0.1.3",
         "scheduler_running": scheduler.is_running(),
     }
 
