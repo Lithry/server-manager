@@ -37,6 +37,28 @@ class ServerManagerApp {
       });
     });
 
+    // Mobile sidebar toggle
+    const toggleBtn = document.getElementById('btn-toggle-sidebar');
+    const backdrop = document.getElementById('sidebar-backdrop');
+    const sidebar = document.querySelector('.sidebar');
+
+    if (toggleBtn && sidebar) {
+      toggleBtn.addEventListener('click', () => {
+        const isExpanded = sidebar.classList.toggle('expanded');
+        if (backdrop) {
+          if (isExpanded) backdrop.classList.remove('hidden');
+          else backdrop.classList.add('hidden');
+        }
+      });
+    }
+
+    if (backdrop && sidebar) {
+      backdrop.addEventListener('click', () => {
+        sidebar.classList.remove('expanded');
+        backdrop.classList.add('hidden');
+      });
+    }
+
     // Refresh button
     const refreshBtn = document.getElementById('btn-refresh');
     if (refreshBtn) {
@@ -160,6 +182,14 @@ class ServerManagerApp {
     };
     const titleEl = document.getElementById('page-title');
     if (titleEl) titleEl.innerText = titles[tabId] || 'ServerManager';
+
+    // Auto-collapse sidebar on mobile after choosing a tab
+    const sidebar = document.querySelector('.sidebar');
+    const backdrop = document.getElementById('sidebar-backdrop');
+    if (sidebar && sidebar.classList.contains('expanded')) {
+      sidebar.classList.remove('expanded');
+      if (backdrop) backdrop.classList.add('hidden');
+    }
 
     this.refreshCurrentTab();
   }
