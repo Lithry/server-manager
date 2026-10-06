@@ -34,7 +34,7 @@ class GitOpsManager:
         try:
             # Get current commit hash
             commit_proc = await asyncio.create_subprocess_exec(
-                "git", "-C", self.repo_path, "rev-parse", "HEAD",
+                "git", "-c", "safe.directory=*", "-C", self.repo_path, "rev-parse", "HEAD",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -43,7 +43,7 @@ class GitOpsManager:
 
             # Get current branch
             branch_proc = await asyncio.create_subprocess_exec(
-                "git", "-C", self.repo_path, "branch", "--show-current",
+                "git", "-c", "safe.directory=*", "-C", self.repo_path, "branch", "--show-current",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -52,7 +52,7 @@ class GitOpsManager:
 
             # Get commit subject
             log_proc = await asyncio.create_subprocess_exec(
-                "git", "-C", self.repo_path, "log", "-1", "--format=%s (%cd)", "--date=relative",
+                "git", "-c", "safe.directory=*", "-C", self.repo_path, "log", "-1", "--format=%s (%cd)", "--date=relative",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -61,7 +61,7 @@ class GitOpsManager:
 
             # Check dirty status
             status_proc = await asyncio.create_subprocess_exec(
-                "git", "-C", self.repo_path, "status", "--porcelain",
+                "git", "-c", "safe.directory=*", "-C", self.repo_path, "status", "--porcelain",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )

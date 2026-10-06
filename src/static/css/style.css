@@ -981,18 +981,38 @@ body {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    background: transparent;
-    border: none;
+    gap: 10px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-subtle);
     color: var(--text-primary);
-    padding: 6px;
+    padding: 8px;
     cursor: pointer;
     border-radius: var(--radius-sm);
-    margin-right: 10px;
-    transition: background-color 0.15s;
+    width: 48px;
+    margin: 0 auto 4px auto;
+    transition: all 0.15s ease-in-out;
   }
 
   .btn-toggle-sidebar:hover {
-    background-color: rgba(255, 255, 255, 0.08);
+    background-color: rgba(56, 189, 248, 0.15);
+    border-color: var(--accent-cyan);
+    color: var(--accent-cyan);
+  }
+
+  .btn-toggle-sidebar .toggle-text {
+    display: none;
+  }
+
+  .sidebar.expanded .btn-toggle-sidebar {
+    width: 100%;
+    justify-content: flex-start;
+    padding: 8px 12px;
+  }
+
+  .sidebar.expanded .btn-toggle-sidebar .toggle-text {
+    display: inline;
+    font-size: 0.8rem;
+    font-weight: 500;
   }
 
   /* Default collapsed icon-rail on mobile */
