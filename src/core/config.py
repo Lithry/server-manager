@@ -7,15 +7,32 @@ from typing import Any, Dict
 from pydantic import BaseModel, Field
 
 
+class StageConfig(BaseModel):
+    id: str  # semantic slug e.g. "ingest", "recognition", "library"
+    name: str
+    description: str = ""
+    order: int = 1
+    start_condition: str | None = None  # None or empty = Root producer stage
+    grace_period_minutes: int = 10
+    timeout_minutes: int = 30
+    enabled: bool = True
+
+
+class FieldMapping(BaseModel):
+    source_field: str
+    target_column: str  # Sanitized SQL identifier (^[A-Z0-9_]+$)
+    data_type: str = "TEXT"
+    transformer: str | None = None  # Optional expression e.g. "if 'anime' in value then 1 else 0"
+
+
 class AppConfig(BaseModel):
     name: str
     enabled: bool = False
     base_url: str = ""
     api_key: str = ""
     poll_interval_seconds: int = 300
-    stage: int = 1
-    prerequisites: list[str] = Field(default_factory=list)
-    field_mappings: Dict[str, str] = Field(default_factory=dict)
+    stage_id: str = ""  # References StageConfig.id
+    field_mappings: list[FieldMapping] = Field(default_factory=list)
 
 
 class NotificationTrigger(BaseModel):
@@ -35,81 +52,50 @@ class Settings(BaseModel):
     repo_path: str = Field(default_factory=lambda: os.getenv("REPO_PATH", "/repo"))
     custom_tools_path: str = Field(default_factory=lambda: os.getenv("CUSTOM_TOOLS_PATH", "/config/custom_tools"))
     retention_days: int = 30
+    stages: list[StageConfig] = Field(default_factory=list)
     apps: Dict[str, AppConfig] = Field(default_factory=dict)
     notification_triggers: list[NotificationTrigger] = Field(default_factory=list)
 
 
 def get_default_settings() -> Settings:
     return Settings(
+        stages=[],  # Clean default: fully configured via WebUI
         apps={
             "sonarr": AppConfig(
                 name="Sonarr",
-                enabled=True,
+                enabled=False,
                 base_url="http://host.docker.internal:8989",
                 api_key="",
                 poll_interval_seconds=300,
-                stage=1,
-                prerequisites=[],
-                field_mappings={
-                    "title": "SONARR_TITLE",
-                    "status": "SONARR_STATUS",
-                    "seriesId": "SONARR_SERIES_ID",
-                    "episodeId": "SONARR_EPISODE_ID",
-                },
+                stage_id="",
+                field_mappings=[],
             ),
             "radarr": AppConfig(
                 name="Radarr",
-                enabled=True,
+                enabled=False,
                 base_url="http://host.docker.internal:7878",
                 api_key="",
                 poll_interval_seconds=300,
-                stage=1,
-                prerequisites=[],
-                field_mappings={
-                    "title": "RADARR_TITLE",
-                    "status": "RADARR_STATUS",
-                    "movieId": "RADARR_MOVIE_ID",
-                },
+                stage_id="",
+                field_mappings=[],
             ),
             "shoko": AppConfig(
                 name="Shoko Server",
-                enabled=True,
+                enabled=False,
                 base_url="http://host.docker.internal:8111",
                 api_key="",
                 poll_interval_seconds=300,
-                stage=2,
-                prerequisites=["SONARR_STATUS=IMPORTED"],
-                field_mappings={
-                    "anidbId": "ANIDB_ID",
-                    "status": "SHOKO_STATUS",
-                    "vfsPath": "SHOKO_VFS_PATH",
-                },
+                stage_id="",
+                field_mappings=[],
             ),
             "jellyfin": AppConfig(
                 name="Jellyfin",
-                enabled=True,
+                enabled=False,
                 base_url="http://host.docker.internal:8096",
                 api_key="",
                 poll_interval_seconds=600,
-                stage=3,
-                prerequisites=["SHOKO_STATUS=RECOGNIZED"],
-                field_mappings={
-                    "itemId": "JELLYFIN_ITEM_ID",
-                    "status": "JELLYFIN_STATUS",
-                    "playCount": "JELLYFIN_PLAY_COUNT",
-                },
-            ),
-            "anibridge": AppConfig(
-                name="AniBridge",
-                enabled=True,
-                base_url="http://host.docker.internal:8098",
-                api_key="",
-                poll_interval_seconds=600,
-                stage=4,
-                prerequisites=["JELLYFIN_STATUS=AVAILABLE"],
-                field_mappings={
-                    "syncStatus": "ANIBRIDGE_SYNC",
-                },
+                stage_id="",
+                field_mappings=[],
             ),
         },
         notification_triggers=[

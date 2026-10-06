@@ -135,7 +135,63 @@ class ServerManagerApp {
       this.runSelectedTool();
     });
 
-    // Settings
+    // Settings Sub-navigation
+    document.querySelectorAll('.subnav-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const subtab = btn.getAttribute('data-subtab');
+        this.switchSettingsSubTab(subtab);
+      });
+    });
+
+    // Stage modal bindings
+    document.getElementById('btn-add-stage')?.addEventListener('click', () => {
+      this.openAddStageModal();
+    });
+    document.getElementById('chk-stage-root')?.addEventListener('change', (e) => {
+      const predBlock = document.getElementById('stage-predicate-block');
+      if (predBlock) {
+        if (e.target.checked) predBlock.classList.add('hidden');
+        else predBlock.classList.remove('hidden');
+      }
+    });
+    document.getElementById('btn-validate-condition')?.addEventListener('click', () => {
+      this.validateConditionSyntax();
+    });
+    document.getElementById('btn-submit-add-stage')?.addEventListener('click', () => {
+      this.saveStageFromModal();
+    });
+
+    // Mapping modal bindings
+    document.getElementById('select-mapping-app')?.addEventListener('change', () => {
+      this.renderSettingsMappings();
+    });
+    document.getElementById('btn-add-mapping')?.addEventListener('click', () => {
+      this.openAddMappingModal();
+    });
+    document.getElementById('btn-open-sample-modal')?.addEventListener('click', () => {
+      document.getElementById('modal-sample-api')?.classList.remove('hidden');
+    });
+    document.getElementById('btn-test-transformer')?.addEventListener('click', () => {
+      this.testTransformerExpr();
+    });
+    document.getElementById('btn-submit-add-mapping')?.addEventListener('click', () => {
+      this.saveMappingFromModal();
+    });
+
+    // Notification Trigger modal bindings
+    document.getElementById('btn-add-trigger')?.addEventListener('click', () => {
+      document.getElementById('modal-add-trigger')?.classList.remove('hidden');
+    });
+    document.getElementById('btn-submit-add-trigger')?.addEventListener('click', () => {
+      this.saveTriggerFromModal();
+    });
+
+    // Scheduler restart
+    document.getElementById('btn-restart-scheduler')?.addEventListener('click', () => {
+      this.restartScheduler();
+    });
+
+    // Settings Save & Alert
     document.getElementById('btn-save-settings')?.addEventListener('click', () => {
       this.saveSettings();
     });
@@ -687,23 +743,65 @@ class ServerManagerApp {
   }
 
   /* ------------------------------------------------------------------------
-     Settings Logic
+     Settings Logic (DAG Stages, Apps, Mappings, Notifications & Engine)
      ------------------------------------------------------------------------ */
+  switchSettingsSubTab(subtabId) {
+    document.querySelectorAll('.subnav-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.getAttribute('data-subtab') === subtabId);
+    });
+    document.querySelectorAll('.subtab-panel').forEach(panel => {
+      panel.classList.toggle('active', panel.id === `subpanel-${subtabId}`);
+    });
+    if (subtabId === 'stages') this.renderSettingsStages();
+    if (subtabId === 'mappings') this.renderSettingsMappings();
+    if (subtabId === 'apps') this.renderSettingsApps();
+  }
+
   async loadSettings() {
     try {
       const resp = await fetch('/api/v1/settings');
       this.settingsData = await resp.json();
 
-      const appsContainer = document.getElementById('settings-apps-container');
-      if (appsContainer && this.settingsData.apps) {
-        appsContainer.innerHTML = Object.entries(this.settingsData.apps).map(([appId, cfg]) => `
-          <div class="app-setting-item">
-            <div class="app-setting-header">
-              <strong>${this.escapeHtml(cfg.name)} (${appId})</strong>
-              <label>
-                <input type="checkbox" id="setting-${appId}-enabled" ${cfg.enabled ? 'checked' : ''}> Enabled
-              </label>
+      this.renderSettingsApps();
+      this.renderSettingsStages();
+      this.renderSettingsMappings();
+      this.renderSettingsNotifications();
+
+      const retEl = document.getElementById('input-retention-days');
+      if (retEl && this.settingsData.retention_days) {
+        retEl.value = this.settingsData.retention_days;
+      }
+    } catch (e) {
+      console.error('Error loading settings:', e);
+    }
+  }
+
+  renderSettingsApps() {
+    const appsContainer = document.getElementById('settings-apps-container');
+    if (!appsContainer || !this.settingsData || !this.settingsData.apps) return;
+
+    const stages = this.settingsData.stages || [];
+
+    appsContainer.innerHTML = Object.entries(this.settingsData.apps).map(([appId, cfg]) => {
+      const stageOptions = stages.map(st => `
+        <option value="${this.escapeHtml(st.id)}" ${cfg.stage_id === st.id ? 'selected' : ''}>
+          ${this.escapeHtml(st.name)} (${this.escapeHtml(st.id)})
+        </option>
+      `).join('');
+
+      return `
+        <div class="app-setting-item mb-4 p-3 bg-surface border rounded">
+          <div class="app-setting-header d-flex justify-content-between align-items-center mb-3">
+            <div class="d-flex align-items-center gap-2">
+              <strong style="font-size: 1.05rem;">${this.escapeHtml(cfg.name)}</strong>
+              <span class="badge badge-info">${appId}</span>
             </div>
+            <label class="d-flex align-items-center gap-2 cursor-pointer">
+              <input type="checkbox" id="setting-${appId}-enabled" ${cfg.enabled ? 'checked' : ''}>
+              <span>Active</span>
+            </label>
+          </div>
+          <div class="form-grid-2 mb-3">
             <div class="form-group">
               <label>Base URL</label>
               <input type="text" class="form-input" id="setting-${appId}-url" value="${this.escapeHtml(cfg.base_url || '')}">
@@ -713,46 +811,515 @@ class ServerManagerApp {
               <input type="password" class="form-input" id="setting-${appId}-key" value="${this.escapeHtml(cfg.api_key || '')}">
             </div>
           </div>
-        `).join('');
-      }
-
-      const notifContainer = document.getElementById('settings-notifications-container');
-      if (notifContainer && this.settingsData.notification_triggers) {
-        notifContainer.innerHTML = this.settingsData.notification_triggers.map(trig => `
-          <div class="app-setting-item">
-            <div class="app-setting-header">
-              <strong>${this.escapeHtml(trig.id)} (${trig.event})</strong>
-              <span class="badge badge-info">${trig.channel}</span>
+          <div class="form-grid-2">
+            <div class="form-group">
+              <label>Polling Interval (Seconds)</label>
+              <input type="number" class="form-input" id="setting-${appId}-poll" min="10" max="86400" value="${cfg.poll_interval_seconds || 300}">
             </div>
             <div class="form-group">
-              <label>Target URL</label>
-              <input type="text" class="form-input" id="setting-trig-${trig.id}-url" value="${this.escapeHtml(trig.target_url || '')}">
-            </div>
-            <div class="form-group">
-              <label>Topic / Endpoint</label>
-              <input type="text" class="form-input" id="setting-trig-${trig.id}-topic" value="${this.escapeHtml(trig.topic || '')}">
+              <label>Assigned DAG Stage</label>
+              <select class="form-select" id="setting-${appId}-stage">
+                <option value="">-- Unassigned --</option>
+                ${stageOptions}
+              </select>
             </div>
           </div>
-        `).join('');
+        </div>
+      `;
+    }).join('');
+  }
+
+  renderSettingsStages() {
+    const container = document.getElementById('settings-stages-container');
+    if (!container || !this.settingsData) return;
+
+    const stages = (this.settingsData.stages || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+
+    if (stages.length === 0) {
+      container.innerHTML = `
+        <div class="empty-state" id="stages-empty-state">
+          <p>No execution stages defined yet. Click <strong>+ Add Stage</strong> to create your first pipeline stage.</p>
+        </div>
+      `;
+      return;
+    }
+
+    container.innerHTML = stages.map((st, idx) => {
+      const isRoot = !st.start_condition || !st.start_condition.trim();
+      const cardClass = isRoot ? 'stage-card root-stage' : 'stage-card consumer-stage';
+      const badge = isRoot 
+        ? '<span class="badge badge-root">Root Producer</span>'
+        : '<span class="badge badge-consumer">Consumer Stage</span>';
+
+      return `
+        <div class="${cardClass}" data-stage-id="${this.escapeHtml(st.id)}">
+          <div class="stage-card-header">
+            <div class="stage-title-wrap">
+              <strong style="font-size: 1.1rem;">${this.escapeHtml(st.name)}</strong>
+              <span class="font-mono text-muted text-sm">id: ${this.escapeHtml(st.id)}</span>
+              ${badge}
+            </div>
+            <div class="stage-actions">
+              <button class="btn btn-secondary btn-sm" onclick="app.moveStage('${st.id}', -1)" ${idx === 0 ? 'disabled' : ''} title="Move Up">↑</button>
+              <button class="btn btn-secondary btn-sm" onclick="app.moveStage('${st.id}', 1)" ${idx === stages.length - 1 ? 'disabled' : ''} title="Move Down">↓</button>
+              <button class="btn btn-secondary btn-sm" onclick="app.openAddStageModal('${st.id}')">Edit</button>
+              <button class="btn btn-secondary btn-sm text-alert" onclick="app.deleteStage('${st.id}')">Delete</button>
+            </div>
+          </div>
+          ${st.description ? `<p class="text-sm text-muted mb-2">${this.escapeHtml(st.description)}</p>` : ''}
+          ${!isRoot ? `
+            <div class="stage-predicate-display">
+              <strong>start_condition:</strong> ${this.escapeHtml(st.start_condition)}
+            </div>
+          ` : `
+            <div class="text-sm text-success font-mono mt-2">
+              ✓ start_condition IS NULL — Autonomously initiates rows in APPS_PIPELINE
+            </div>
+          `}
+          <div class="stage-meta-row">
+            <span>Grace Period: <strong>${st.grace_period_minutes ?? 10} min</strong></span>
+            <span>Watchdog Timeout: <strong>${st.timeout_minutes ?? 30} min</strong></span>
+            <span>Sequence Order: <strong>#${st.order || (idx + 1)}</strong></span>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  openAddStageModal(editStageId = null) {
+    const titleEl = document.getElementById('modal-stage-title');
+    const idEl = document.getElementById('input-stage-id');
+    const nameEl = document.getElementById('input-stage-name');
+    const descEl = document.getElementById('input-stage-desc');
+    const rootChk = document.getElementById('chk-stage-root');
+    const condEl = document.getElementById('input-stage-condition');
+    const graceEl = document.getElementById('input-stage-grace');
+    const timeoutEl = document.getElementById('input-stage-timeout');
+    const predBlock = document.getElementById('stage-predicate-block');
+    const testResult = document.getElementById('predicate-test-result');
+
+    if (testResult) testResult.classList.add('hidden');
+
+    if (editStageId && this.settingsData?.stages) {
+      const st = this.settingsData.stages.find(s => s.id === editStageId);
+      if (st) {
+        if (titleEl) titleEl.innerText = `Edit Stage: ${st.name}`;
+        if (idEl) { idEl.value = st.id; idEl.disabled = true; }
+        if (nameEl) nameEl.value = st.name || '';
+        if (descEl) descEl.value = st.description || '';
+        const isRoot = !st.start_condition || !st.start_condition.trim();
+        if (rootChk) rootChk.checked = isRoot;
+        if (condEl) condEl.value = st.start_condition || '';
+        if (predBlock) predBlock.classList.toggle('hidden', isRoot);
+        if (graceEl) graceEl.value = st.grace_period_minutes ?? 10;
+        if (timeoutEl) timeoutEl.value = st.timeout_minutes ?? 30;
+      }
+    } else {
+      if (titleEl) titleEl.innerText = 'Configure DAG Stage';
+      if (idEl) { idEl.value = ''; idEl.disabled = false; }
+      if (nameEl) nameEl.value = '';
+      if (descEl) descEl.value = '';
+      if (rootChk) rootChk.checked = true;
+      if (condEl) condEl.value = '';
+      if (predBlock) predBlock.classList.add('hidden');
+      if (graceEl) graceEl.value = 10;
+      if (timeoutEl) timeoutEl.value = 30;
+    }
+
+    document.getElementById('modal-add-stage')?.classList.remove('hidden');
+  }
+
+  async validateConditionSyntax() {
+    const condEl = document.getElementById('input-stage-condition');
+    const resultEl = document.getElementById('predicate-test-result');
+    if (!condEl || !resultEl) return;
+
+    const expr = condEl.value.trim();
+    try {
+      const resp = await fetch('/api/v1/settings/test-predicate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expression: expr })
+      });
+      const data = await resp.json();
+      resultEl.classList.remove('hidden');
+      if (data.valid) {
+        resultEl.className = 'mt-2 text-sm text-success';
+        resultEl.innerText = `✓ ${data.message}`;
+      } else {
+        resultEl.className = 'mt-2 text-sm text-alert';
+        resultEl.innerText = `x ${data.message}`;
       }
     } catch (e) {
-      console.error('Error loading settings:', e);
+      resultEl.classList.remove('hidden');
+      resultEl.className = 'mt-2 text-sm text-alert';
+      resultEl.innerText = `x Network error: ${e.message}`;
+    }
+  }
+
+  saveStageFromModal() {
+    const idEl = document.getElementById('input-stage-id');
+    const nameEl = document.getElementById('input-stage-name');
+    const descEl = document.getElementById('input-stage-desc');
+    const rootChk = document.getElementById('chk-stage-root');
+    const condEl = document.getElementById('input-stage-condition');
+    const graceEl = document.getElementById('input-stage-grace');
+    const timeoutEl = document.getElementById('input-stage-timeout');
+
+    const id = idEl?.value.trim().toLowerCase();
+    const name = nameEl?.value.trim();
+    if (!id || !name) {
+      alert('Stage ID (slug) and Name are required.');
+      return;
+    }
+
+    if (!/^[a-z0-9_-]+$/.test(id)) {
+      alert('Stage ID must consist of lowercase letters, numbers, hyphens or underscores (e.g. ingest, recognition, library).');
+      return;
+    }
+
+    if (!this.settingsData) this.settingsData = { stages: [], apps: {}, notification_triggers: [] };
+    if (!this.settingsData.stages) this.settingsData.stages = [];
+
+    const isRoot = rootChk ? rootChk.checked : true;
+    const condition = isRoot ? null : (condEl?.value.trim() || null);
+
+    const existingIdx = this.settingsData.stages.findIndex(s => s.id === id);
+    const order = existingIdx >= 0 ? this.settingsData.stages[existingIdx].order : (this.settingsData.stages.length + 1);
+
+    const stageObj = {
+      id: id,
+      name: name,
+      description: descEl?.value.trim() || '',
+      order: order,
+      start_condition: condition,
+      grace_period_minutes: parseInt(graceEl?.value || '10', 10),
+      timeout_minutes: parseInt(timeoutEl?.value || '30', 10),
+      enabled: true
+    };
+
+    if (existingIdx >= 0) {
+      this.settingsData.stages[existingIdx] = stageObj;
+    } else {
+      this.settingsData.stages.push(stageObj);
+    }
+
+    this.renderSettingsStages();
+    this.renderSettingsApps();
+    this.closeModals();
+  }
+
+  deleteStage(stageId) {
+    if (!confirm(`Are you sure you want to delete stage '${stageId}'?`)) return;
+    if (!this.settingsData?.stages) return;
+
+    this.settingsData.stages = this.settingsData.stages.filter(s => s.id !== stageId);
+    
+    // Unassign apps
+    if (this.settingsData.apps) {
+      Object.values(this.settingsData.apps).forEach(app => {
+        if (app.stage_id === stageId) app.stage_id = '';
+      });
+    }
+
+    this.renderSettingsStages();
+    this.renderSettingsApps();
+  }
+
+  moveStage(stageId, direction) {
+    if (!this.settingsData?.stages) return;
+    const stages = this.settingsData.stages.slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+    const idx = stages.findIndex(s => s.id === stageId);
+    if (idx < 0) return;
+
+    const targetIdx = idx + direction;
+    if (targetIdx < 0 || targetIdx >= stages.length) return;
+
+    const tempOrder = stages[idx].order || (idx + 1);
+    stages[idx].order = stages[targetIdx].order || (targetIdx + 1);
+    stages[targetIdx].order = tempOrder;
+
+    this.settingsData.stages = stages;
+    this.renderSettingsStages();
+  }
+
+  renderSettingsMappings() {
+    const selectEl = document.getElementById('select-mapping-app');
+    const container = document.getElementById('settings-mappings-container');
+    if (!selectEl || !container || !this.settingsData || !this.settingsData.apps) return;
+
+    // Populate select if empty or needs update
+    const currentVal = selectEl.value;
+    const appKeys = Object.keys(this.settingsData.apps);
+
+    selectEl.innerHTML = appKeys.map(k => `
+      <option value="${k}" ${k === currentVal ? 'selected' : ''}>
+        ${this.escapeHtml(this.settingsData.apps[k].name)} (${k})
+      </option>
+    `).join('');
+
+    const activeApp = selectEl.value || appKeys[0];
+    if (!activeApp) {
+      container.innerHTML = '<div class="empty-state"><p>No apps configured.</p></div>';
+      return;
+    }
+
+    const appCfg = this.settingsData.apps[activeApp];
+    const mappings = appCfg.field_mappings || [];
+
+    if (mappings.length === 0) {
+      container.innerHTML = `
+        <div class="empty-state" id="mappings-empty-state">
+          <p>No field mappings configured for <strong>${this.escapeHtml(appCfg.name)}</strong>. Click <strong>+ Add Mapping</strong> or sample the API.</p>
+        </div>
+      `;
+      return;
+    }
+
+    container.innerHTML = `
+      <table class="mapping-table">
+        <thead>
+          <tr>
+            <th>Source Field</th>
+            <th>Target DB Column</th>
+            <th>Data Type</th>
+            <th>Transformer Predicate</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${mappings.map(m => `
+            <tr>
+              <td class="font-mono">${this.escapeHtml(m.source_field)}</td>
+              <td><span class="badge badge-info font-mono">${this.escapeHtml(m.target_column)}</span></td>
+              <td><span class="badge badge-secondary">${this.escapeHtml(m.data_type || 'TEXT')}</span></td>
+              <td class="font-mono text-sm text-accent">${m.transformer ? this.escapeHtml(m.transformer) : '<span class="text-muted">Direct</span>'}</td>
+              <td>
+                <button class="btn btn-secondary btn-sm text-alert" onclick="app.deleteMapping('${activeApp}', '${m.target_column}')">Delete</button>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+  }
+
+  openAddMappingModal() {
+    const selectEl = document.getElementById('select-mapping-app');
+    const appNameEl = document.getElementById('modal-map-app-name');
+    const sourceEl = document.getElementById('input-map-source');
+    const colEl = document.getElementById('input-map-col');
+    const transEl = document.getElementById('input-map-transformer');
+    const sampleEl = document.getElementById('input-map-sample');
+    const resultEl = document.getElementById('transformer-test-result');
+
+    const activeApp = selectEl?.value || 'sonarr';
+    const appName = this.settingsData?.apps?.[activeApp]?.name || activeApp;
+
+    if (appNameEl) appNameEl.value = `${appName} (${activeApp})`;
+    if (sourceEl) sourceEl.value = '';
+    if (colEl) colEl.value = '';
+    if (transEl) transEl.value = '';
+    if (sampleEl) sampleEl.value = '';
+    if (resultEl) resultEl.classList.add('hidden');
+
+    document.getElementById('modal-add-mapping')?.classList.remove('hidden');
+  }
+
+  async testTransformerExpr() {
+    const transEl = document.getElementById('input-map-transformer');
+    const sampleEl = document.getElementById('input-map-sample');
+    const resultEl = document.getElementById('transformer-test-result');
+    if (!transEl || !resultEl) return;
+
+    let sampleVal = sampleEl?.value.trim() || '';
+    try {
+      if (sampleVal.startsWith('[') || sampleVal.startsWith('{')) {
+        sampleVal = JSON.parse(sampleVal);
+      }
+    } catch (_) {
+      // keep as string
+    }
+
+    try {
+      const resp = await fetch('/api/v1/settings/test-transformer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          expression: transEl.value.trim(),
+          sample_value: sampleVal
+        })
+      });
+      const data = await resp.json();
+      resultEl.classList.remove('hidden');
+      if (data.valid) {
+        resultEl.className = 'mt-2 text-sm text-success';
+        resultEl.innerText = `✓ Output: ${JSON.stringify(data.result)} (${data.message})`;
+      } else {
+        resultEl.className = 'mt-2 text-sm text-alert';
+        resultEl.innerText = `x ${data.message}`;
+      }
+    } catch (e) {
+      resultEl.classList.remove('hidden');
+      resultEl.className = 'mt-2 text-sm text-alert';
+      resultEl.innerText = `x Network error: ${e.message}`;
+    }
+  }
+
+  saveMappingFromModal() {
+    const selectEl = document.getElementById('select-mapping-app');
+    const sourceEl = document.getElementById('input-map-source');
+    const colEl = document.getElementById('input-map-col');
+    const typeEl = document.getElementById('input-map-type');
+    const transEl = document.getElementById('input-map-transformer');
+
+    const activeApp = selectEl?.value;
+    const source = sourceEl?.value.trim();
+    let col = colEl?.value.trim().toUpperCase();
+    const dataType = typeEl?.value || 'TEXT';
+    const transformer = transEl?.value.trim() || null;
+
+    if (!activeApp || !source || !col) {
+      alert('Source field and Target column are required.');
+      return;
+    }
+
+    if (!/^[A-Z0-9_]+$/.test(col)) {
+      alert('Target column name must consist of uppercase letters, numbers, and underscores (e.g. IS_ANIME, SONARR_TITLE).');
+      return;
+    }
+
+    if (!this.settingsData.apps[activeApp].field_mappings) {
+      this.settingsData.apps[activeApp].field_mappings = [];
+    }
+
+    // Filter existing with same column name
+    this.settingsData.apps[activeApp].field_mappings = this.settingsData.apps[activeApp].field_mappings.filter(m => m.target_column !== col);
+    this.settingsData.apps[activeApp].field_mappings.push({
+      source_field: source,
+      target_column: col,
+      data_type: dataType,
+      transformer: transformer
+    });
+
+    this.renderSettingsMappings();
+    this.closeModals();
+  }
+
+  deleteMapping(appId, colName) {
+    if (!confirm(`Delete mapping for column '${colName}'?`)) return;
+    if (!this.settingsData?.apps?.[appId]?.field_mappings) return;
+
+    this.settingsData.apps[appId].field_mappings = this.settingsData.apps[appId].field_mappings.filter(m => m.target_column !== colName);
+    this.renderSettingsMappings();
+  }
+
+  renderSettingsNotifications() {
+    const container = document.getElementById('settings-notifications-container');
+    if (!container || !this.settingsData) return;
+
+    const triggers = this.settingsData.notification_triggers || [];
+    if (triggers.length === 0) {
+      container.innerHTML = '<div class="empty-state"><p>No notification triggers configured.</p></div>';
+      return;
+    }
+
+    container.innerHTML = triggers.map(trig => `
+      <div class="app-setting-item mb-3 p-3 bg-surface border rounded">
+        <div class="app-setting-header d-flex justify-content-between align-items-center mb-2">
+          <div class="d-flex align-items-center gap-2">
+            <strong>${this.escapeHtml(trig.id)}</strong>
+            <span class="badge badge-info">${this.escapeHtml(trig.event)}</span>
+            <span class="badge badge-secondary">${this.escapeHtml(trig.channel)}</span>
+          </div>
+          <button class="btn btn-secondary btn-sm text-alert" onclick="app.deleteTrigger('${trig.id}')">Delete</button>
+        </div>
+        <div class="form-grid-2">
+          <div class="form-group">
+            <label>Target URL</label>
+            <input type="text" class="form-input" id="setting-trig-${trig.id}-url" value="${this.escapeHtml(trig.target_url || '')}">
+          </div>
+          <div class="form-group">
+            <label>Topic / Endpoint</label>
+            <input type="text" class="form-input" id="setting-trig-${trig.id}-topic" value="${this.escapeHtml(trig.topic || '')}">
+          </div>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  saveTriggerFromModal() {
+    const idEl = document.getElementById('input-trigger-id');
+    const evEl = document.getElementById('input-trigger-event');
+    const chEl = document.getElementById('input-trigger-channel');
+    const urlEl = document.getElementById('input-trigger-url');
+    const topEl = document.getElementById('input-trigger-topic');
+
+    const id = idEl?.value.trim();
+    if (!id) {
+      alert('Trigger ID is required.');
+      return;
+    }
+
+    if (!this.settingsData.notification_triggers) this.settingsData.notification_triggers = [];
+    this.settingsData.notification_triggers = this.settingsData.notification_triggers.filter(t => t.id !== id);
+
+    this.settingsData.notification_triggers.push({
+      id: id,
+      event: evEl?.value || 'ON_INCIDENT_OPEN',
+      enabled: true,
+      channel: chEl?.value || 'ntfy',
+      target_url: urlEl?.value.trim() || 'http://host.docker.internal:8090',
+      topic: topEl?.value.trim() || 'cubi-alerts',
+      priority: 'default',
+      tags: 'server',
+      message_template: '{event}: {details}'
+    });
+
+    this.renderSettingsNotifications();
+    this.closeModals();
+  }
+
+  deleteTrigger(trigId) {
+    if (!confirm(`Delete trigger '${trigId}'?`)) return;
+    if (!this.settingsData?.notification_triggers) return;
+    this.settingsData.notification_triggers = this.settingsData.notification_triggers.filter(t => t.id !== trigId);
+    this.renderSettingsNotifications();
+  }
+
+  async restartScheduler() {
+    try {
+      const resp = await fetch('/api/v1/settings/scheduler/restart', { method: 'POST' });
+      const data = await resp.json();
+      alert(`✓ ${data.message || 'Scheduler restarted successfully'}`);
+    } catch (e) {
+      alert(`Error restarting scheduler: ${e.message}`);
     }
   }
 
   async saveSettings() {
     if (!this.settingsData) return;
 
-    // Collect values
+    // Collect App values
     Object.keys(this.settingsData.apps).forEach(appId => {
       const enabledEl = document.getElementById(`setting-${appId}-enabled`);
       const urlEl = document.getElementById(`setting-${appId}-url`);
       const keyEl = document.getElementById(`setting-${appId}-key`);
+      const pollEl = document.getElementById(`setting-${appId}-poll`);
+      const stageEl = document.getElementById(`setting-${appId}-stage`);
 
       if (enabledEl) this.settingsData.apps[appId].enabled = enabledEl.checked;
       if (urlEl) this.settingsData.apps[appId].base_url = urlEl.value.trim();
       if (keyEl) this.settingsData.apps[appId].api_key = keyEl.value.trim();
+      if (pollEl) this.settingsData.apps[appId].poll_interval_seconds = parseInt(pollEl.value || '300', 10);
+      if (stageEl) this.settingsData.apps[appId].stage_id = stageEl.value;
     });
+
+    // Collect retention days
+    const retEl = document.getElementById('input-retention-days');
+    if (retEl) {
+      this.settingsData.retention_days = parseInt(retEl.value || '30', 10);
+    }
 
     try {
       const resp = await fetch('/api/v1/settings', {
@@ -761,9 +1328,10 @@ class ServerManagerApp {
         body: JSON.stringify(this.settingsData),
       });
       if (resp.ok) {
-        alert('✓ Settings updated and scheduler loops reloaded.');
+        alert('✓ Settings saved successfully and schema migrated.');
       } else {
-        alert('Failed to update settings.');
+        const err = await resp.text();
+        alert(`Failed to save settings: ${err}`);
       }
     } catch (e) {
       alert(`Error saving settings: ${e.message}`);

@@ -7,6 +7,8 @@ from pydantic import BaseModel
 
 from src.core.config import config_manager, Settings, NotificationTrigger
 from src.core.scheduler import scheduler
+from src.core.predicates import PredicateEvaluator, TransformerEvaluator
+from src.core.database import db_manager
 
 
 router = APIRouter(prefix="/api/v1/settings", tags=["Settings"])
@@ -20,6 +22,15 @@ class TestNotificationRequest(BaseModel):
     message: str = "Test notification from ServerManager WebUI"
 
 
+class TestPredicateRequest(BaseModel):
+    expression: str | None = None
+
+
+class TestTransformerRequest(BaseModel):
+    expression: str | None = None
+    sample_value: Any = None
+
+
 @router.get("")
 async def get_settings() -> Settings:
     """Retrieve full application settings."""
@@ -28,10 +39,40 @@ async def get_settings() -> Settings:
 
 @router.put("")
 async def update_settings(settings: Settings) -> Settings:
-    """Update settings and reload background scheduler."""
+    """Update settings, auto-migrate database columns, and reload background scheduler."""
+    # Auto-ensure dynamic columns in APPS_PIPELINE for all field mappings
+    for app_name, app_conf in settings.apps.items():
+        for mapping in app_conf.field_mappings:
+            if mapping.target_column:
+                try:
+                    await db_manager.ensure_column("APPS_PIPELINE", mapping.target_column, mapping.data_type)
+                except Exception as e:
+                    print(f"[!] Warning ensuring column {mapping.target_column}: {e}")
+
     updated = await config_manager.update_settings(settings)
     await scheduler.restart()
     return updated
+
+
+@router.post("/test-predicate")
+async def test_predicate(req: TestPredicateRequest) -> Dict[str, Any]:
+    """Test and validate predicate syntax."""
+    valid, message = PredicateEvaluator.validate_syntax(req.expression)
+    return {"valid": valid, "message": message}
+
+
+@router.post("/test-transformer")
+async def test_transformer(req: TestTransformerRequest) -> Dict[str, Any]:
+    """Test and validate field transformer expression."""
+    valid, message = TransformerEvaluator.validate_syntax(req.expression)
+    result = None
+    if valid and req.expression:
+        try:
+            result = TransformerEvaluator.evaluate(req.expression, req.sample_value)
+        except Exception as e:
+            valid = False
+            message = str(e)
+    return {"valid": valid, "result": result, "message": message}
 
 
 @router.get("/scheduler/status")
