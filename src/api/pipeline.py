@@ -19,7 +19,8 @@ class AddColumnRequest(BaseModel):
 
 
 class SampleApiRequest(BaseModel):
-    app_id: str
+    service_id: str | None = None
+    app_id: str | None = None  # Backward compatibility
     endpoint: str = "/api/v3/history"  # or custom endpoint
 
 
@@ -59,14 +60,14 @@ async def get_pipeline_items(
 
     where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
-    count_rows = await db_manager.query(f"SELECT COUNT(*) as total FROM APPS_PIPELINE {where_sql}", tuple(params))
+    count_rows = await db_manager.query(f"SELECT COUNT(*) as total FROM SERVICES_PIPELINE {where_sql}", tuple(params))
     total = count_rows[0]["total"] if count_rows else 0
 
-    query_sql = f"SELECT * FROM APPS_PIPELINE {where_sql} ORDER BY LAST_UPDATED DESC LIMIT ? OFFSET ?"
+    query_sql = f"SELECT * FROM SERVICES_PIPELINE {where_sql} ORDER BY LAST_UPDATED DESC LIMIT ? OFFSET ?"
     params.extend([limit, offset])
     items = await db_manager.query(query_sql, tuple(params))
 
-    columns = await db_manager.get_table_columns("APPS_PIPELINE")
+    columns = await db_manager.get_table_columns("SERVICES_PIPELINE")
 
     return {
         "total": total,
@@ -79,13 +80,13 @@ async def get_pipeline_items(
 
 @router.get("/columns")
 async def get_pipeline_columns() -> List[Dict[str, Any]]:
-    """Get all current columns of the APPS_PIPELINE table."""
-    return await db_manager.get_table_columns("APPS_PIPELINE")
+    """Get all current columns of the SERVICES_PIPELINE table."""
+    return await db_manager.get_table_columns("SERVICES_PIPELINE")
 
 
 @router.post("/columns")
 async def add_pipeline_column(req: AddColumnRequest) -> Dict[str, Any]:
-    """Dynamically add a column to APPS_PIPELINE under strict naming validation."""
+    """Dynamically add a column to SERVICES_PIPELINE under strict naming validation."""
     clean_name = req.column_name.strip().upper()
     if not SQL_IDENTIFIER_REGEX.match(clean_name):
         raise HTTPException(
@@ -94,7 +95,7 @@ async def add_pipeline_column(req: AddColumnRequest) -> Dict[str, Any]:
         )
 
     try:
-        added = await db_manager.ensure_column("APPS_PIPELINE", clean_name, req.column_type)
+        added = await db_manager.ensure_column("SERVICES_PIPELINE", clean_name, req.column_type)
         return {
             "success": True,
             "column_name": clean_name,
@@ -108,20 +109,25 @@ async def add_pipeline_column(req: AddColumnRequest) -> Dict[str, Any]:
 
 @router.post("/sample")
 async def sample_app_api(req: SampleApiRequest) -> Dict[str, Any]:
-    """Sample an external application API to discover available payload fields."""
+    """Sample an external service API to discover available payload fields."""
+    s_id = req.service_id or req.app_id
+    if not s_id:
+        raise HTTPException(status_code=400, detail="service_id is required")
+
     settings = await config_manager.get_settings()
-    if req.app_id not in settings.apps:
-        raise HTTPException(status_code=404, detail=f"App '{req.app_id}' not configured")
+    services_dict = getattr(settings, "services", {}) or getattr(settings, "apps", {})
+    if s_id not in services_dict:
+        raise HTTPException(status_code=404, detail=f"Service '{s_id}' not configured")
 
-    app_cfg = settings.apps[req.app_id]
-    if not app_cfg.base_url:
-        raise HTTPException(status_code=400, detail=f"App '{req.app_id}' has no base_url configured")
+    service_cfg = services_dict[s_id]
+    if not service_cfg.base_url:
+        raise HTTPException(status_code=400, detail=f"Service '{s_id}' has no base_url configured")
 
-    url = f"{app_cfg.base_url.rstrip('/')}/{req.endpoint.lstrip('/')}"
+    url = f"{service_cfg.base_url.rstrip('/')}/{req.endpoint.lstrip('/')}"
     headers = {}
-    if app_cfg.api_key:
-        headers["X-Api-Key"] = app_cfg.api_key
-        headers["Authorization"] = f"Bearer {app_cfg.api_key}"
+    if service_cfg.api_key:
+        headers["X-Api-Key"] = service_cfg.api_key
+        headers["Authorization"] = f"Bearer {service_cfg.api_key}"
 
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
@@ -153,11 +159,11 @@ async def sample_app_api(req: SampleApiRequest) -> Dict[str, Any]:
 @router.get("/stats")
 async def get_pipeline_stats() -> Dict[str, Any]:
     """Get aggregated pipeline statistics."""
-    total_res = await db_manager.query("SELECT COUNT(*) as cnt FROM APPS_PIPELINE")
+    total_res = await db_manager.query("SELECT COUNT(*) as cnt FROM SERVICES_PIPELINE")
     total = total_res[0]["cnt"] if total_res else 0
 
-    by_stage = await db_manager.query("SELECT STAGE, COUNT(*) as cnt FROM APPS_PIPELINE GROUP BY STAGE")
-    by_status = await db_manager.query("SELECT STATUS, COUNT(*) as cnt FROM APPS_PIPELINE GROUP BY STATUS")
+    by_stage = await db_manager.query("SELECT STAGE, COUNT(*) as cnt FROM SERVICES_PIPELINE GROUP BY STAGE")
+    by_status = await db_manager.query("SELECT STATUS, COUNT(*) as cnt FROM SERVICES_PIPELINE GROUP BY STATUS")
 
     return {
         "total_items": total,

@@ -420,9 +420,9 @@
         <!-- Settings Sub-Navigation Header -->
         <div class="settings-subnav-bar">
           <div class="subnav-tabs">
-            <button class="subnav-btn active" data-subtab="apps" id="subtab-apps">
+            <button class="subnav-btn active" data-subtab="services" id="subtab-services">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>
-              <span>Apps</span>
+              <span>Services</span>
             </button>
             <button class="subnav-btn" data-subtab="stages" id="subtab-stages">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
@@ -444,16 +444,21 @@
           <button class="btn btn-primary btn-sm" id="btn-save-settings">Save All Settings</button>
         </div>
 
-        <!-- Sub-panel 1: Apps -->
-        <div class="subtab-panel active" id="subpanel-apps">
+        <!-- Sub-panel 1: Services -->
+        <div class="subtab-panel active" id="subpanel-services">
           <div class="card">
             <div class="card-header">
               <div>
-                <h3 class="card-title">Upstream Applications</h3>
-                <p class="card-desc">Manage API endpoints, credentials, polling intervals, and assigned DAG stages.</p>
+                <h3 class="card-title">Upstream Services</h3>
+                <p class="card-desc">Configure external API services, endpoints, and credentials dynamically with zero templates.</p>
+              </div>
+              <button class="btn btn-primary btn-sm" id="btn-add-service">+ Add Service</button>
+            </div>
+            <div class="card-body" id="settings-services-container">
+              <div class="empty-state" id="services-empty-state">
+                <p>No services registered yet. Click <strong>+ Add Service</strong> to register your first service.</p>
               </div>
             </div>
-            <div class="card-body" id="settings-apps-container"></div>
           </div>
         </div>
 
@@ -463,7 +468,7 @@
             <div class="card-header">
               <div>
                 <h3 class="card-title">DAG Execution Stages</h3>
-                <p class="card-desc">Define pipeline stages. Stages with <code>start_condition IS NULL</code> act as Root Producers capable of creating new items in APPS_PIPELINE.</p>
+                <p class="card-desc">Define pipeline stages. Stages with <code>start_condition IS NULL</code> act as Root Producers capable of creating new items in SERVICES_PIPELINE.</p>
               </div>
               <button class="btn btn-secondary btn-sm" id="btn-add-stage">+ Add Stage</button>
             </div>
@@ -490,12 +495,12 @@
             </div>
             <div class="card-body">
               <div class="form-group mb-4" style="max-width: 320px;">
-                <label>Select Application</label>
-                <select id="select-mapping-app" class="form-select"></select>
+                <label>Select Service</label>
+                <select id="select-mapping-service" class="form-select"></select>
               </div>
               <div id="settings-mappings-container">
                 <div class="empty-state" id="mappings-empty-state">
-                  <p>No field mappings configured for this application. Click <strong>+ Add Mapping</strong> or sample the API.</p>
+                  <p>No field mappings configured for this service. Click <strong>+ Add Mapping</strong> or sample the API.</p>
                 </div>
               </div>
             </div>
@@ -525,15 +530,32 @@
             <div class="card-header">
               <div>
                 <h3 class="card-title">Storage & Engine Maintenance</h3>
-                <p class="card-desc">Control retention windows and inspect background engine states.</p>
+                <p class="card-desc">Control data retention, global polling cadence, and inspect custom polling overrides.</p>
               </div>
             </div>
             <div class="card-body">
-              <div class="form-group mb-4" style="max-width: 320px;">
-                <label>Data Retention (Days)</label>
-                <input type="number" id="input-retention-days" class="form-input" min="1" max="365" value="30">
-                <small class="text-muted">Rows older than retention window will be pruned during maintenance routines.</small>
+              <div class="form-grid-2 mb-4">
+                <div class="form-group">
+                  <label>Data Retention (Days)</label>
+                  <input type="number" id="input-retention-days" class="form-input" min="1" max="365" value="30">
+                  <small class="text-muted">Rows older than retention window will be pruned during maintenance routines.</small>
+                </div>
+                <div class="form-group">
+                  <label>Global Polling Interval (Seconds)</label>
+                  <input type="number" id="input-global-poll" class="form-input" min="10" max="86400" value="300">
+                  <small class="text-muted">Default polling cadence for all services unless specifically overridden.</small>
+                </div>
               </div>
+
+              <div class="card mb-4 p-3 bg-surface-subtle">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <h4 class="card-subtitle mb-0" style="font-size: 0.95rem;">Custom Polling Overrides</h4>
+                  <span class="badge badge-secondary" id="badge-overrides-count">0 Overrides</span>
+                </div>
+                <p class="card-desc mb-2 text-sm text-muted">Services with explicit polling rates that override the global interval.</p>
+                <div id="engine-overrides-container"></div>
+              </div>
+
               <div class="engine-status-box mb-4">
                 <div class="info-row">
                   <span class="info-label">SQLite Journal Mode:</span>
@@ -585,21 +607,19 @@
   <div class="modal-backdrop hidden" id="modal-sample-api">
     <div class="modal modal-lg">
       <div class="modal-header">
-        <h3 class="modal-title">Sample App API Keys</h3>
+        <h3 class="modal-title">Sample Service API Schema</h3>
         <button class="btn-close" onclick="app.closeModals()">&times;</button>
       </div>
       <div class="modal-body">
         <div class="form-inline mb-3">
-          <select id="sample-app-select" class="form-select">
-            <option value="sonarr">Sonarr (/api/v3/history)</option>
-            <option value="radarr">Radarr (/api/v3/history)</option>
-            <option value="shoko">Shoko (/api/v3/Series)</option>
-            <option value="jellyfin">Jellyfin (/Items)</option>
+          <select id="sample-service-select" class="form-select">
+            <option value="">-- Select Service --</option>
           </select>
+          <input type="text" id="sample-endpoint-input" class="form-input font-mono" placeholder="/api/v3/history" style="flex: 1;" value="/api/v3/history">
           <button class="btn btn-secondary" id="btn-fetch-sample">Fetch Sample</button>
         </div>
         <div class="api-fields-viewer" id="api-sample-result">
-          <p class="text-muted">Click 'Fetch Sample' to inspect API JSON schema and keys.</p>
+          <p class="text-muted">Select a service and click 'Fetch Sample' to inspect JSON schema and keys.</p>
         </div>
       </div>
       <div class="modal-footer">
@@ -622,12 +642,67 @@
         </div>
         <div class="form-group">
           <label>SQL SELECT Query</label>
-          <textarea id="input-view-sql" class="form-textarea font-mono" rows="6" placeholder="SELECT ID, PIPELINE_KEY, SONARR_TITLE FROM APPS_PIPELINE WHERE JELLYFIN_STATUS = 'AVAILABLE'"></textarea>
+          <textarea id="input-view-sql" class="form-textarea font-mono" rows="6" placeholder="SELECT ID, PIPELINE_KEY, SONARR_TITLE FROM SERVICES_PIPELINE WHERE JELLYFIN_STATUS = 'AVAILABLE'"></textarea>
         </div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="app.closeModals()">Cancel</button>
         <button class="btn btn-primary" id="btn-submit-create-view">Save View</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Add/Edit Service -->
+  <div class="modal-backdrop hidden" id="modal-add-service">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <h3 class="modal-title" id="modal-service-title">Register Service</h3>
+        <button class="btn-close" onclick="app.closeModals()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-grid-2 mb-3">
+          <div class="form-group">
+            <label>Service ID (Slug)</label>
+            <input type="text" id="input-service-id" class="form-input font-mono" placeholder="sonarr, radarr, jellyfin, custom_app" autocomplete="off">
+            <small class="text-muted">Unique identifier used internally (lowercase, no spaces).</small>
+          </div>
+          <div class="form-group">
+            <label>Display Name</label>
+            <input type="text" id="input-service-name" class="form-input" placeholder="Sonarr, Radarr Anime, Custom Ingester">
+          </div>
+        </div>
+
+        <div class="form-grid-2 mb-3">
+          <div class="form-group">
+            <label>Base URL</label>
+            <input type="text" id="input-service-url" class="form-input font-mono" placeholder="http://host.docker.internal:8989">
+          </div>
+          <div class="form-group">
+            <label>API Key / Bearer Token</label>
+            <input type="password" id="input-service-key" class="form-input font-mono" placeholder="••••••••••••••••">
+          </div>
+        </div>
+
+        <div class="card p-3 mb-3 bg-surface-subtle">
+          <div class="form-checkbox mb-2">
+            <input type="checkbox" id="chk-service-inherit-poll" checked>
+            <label for="chk-service-inherit-poll"><strong>Inherit Global Polling Cadence</strong> (Default: 300s)</label>
+          </div>
+          <div id="service-custom-poll-block" class="hidden mt-2">
+            <label class="form-label text-sm">Custom Polling Interval (Seconds)</label>
+            <input type="number" id="input-service-poll" class="form-input" min="10" max="86400" placeholder="300">
+            <small class="text-muted">Setting a custom value overrides the global polling interval for this service.</small>
+          </div>
+        </div>
+
+        <div class="form-checkbox">
+          <input type="checkbox" id="chk-service-enabled" checked>
+          <label for="chk-service-enabled">Enable active polling loop for this service</label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="app.closeModals()">Cancel</button>
+        <button class="btn btn-primary" id="btn-submit-add-service">Save Service</button>
       </div>
     </div>
   </div>
@@ -657,13 +732,21 @@
           <input type="text" id="input-stage-desc" class="form-input" placeholder="Primary file arrival and tag discovery">
         </div>
 
+        <div class="form-group mb-3">
+          <label>Assigned Services</label>
+          <div id="stage-services-checkboxes" class="services-checkbox-grid">
+            <span class="text-muted text-sm">No services configured yet.</span>
+          </div>
+          <small class="text-muted">Select services operating within this pipeline stage (one service can be assigned to multiple stages).</small>
+        </div>
+
         <div class="card mb-3 p-3 bg-surface-subtle">
           <div class="form-checkbox mb-2">
             <input type="checkbox" id="chk-stage-root">
             <label for="chk-stage-root"><strong>Root Entry Stage (Productor Raiz)</strong> — <code>start_condition IS NULL</code></label>
           </div>
           <p class="modal-desc mb-2 text-sm text-muted">
-            Root stages have no prerequisites and can autonomously create new rows in <code>APPS_PIPELINE</code>. Uncheck to configure a consumer stage with a boolean predicate.
+            Root stages have no prerequisites and can autonomously create new rows in <code>SERVICES_PIPELINE</code>. Uncheck to configure a consumer stage with a boolean predicate.
           </p>
           <div id="stage-predicate-block">
             <label class="form-label text-sm">Start Condition Predicate</label>
@@ -704,8 +787,8 @@
       </div>
       <div class="modal-body">
         <div class="form-group mb-3">
-          <label>Target Application</label>
-          <input type="text" id="modal-map-app-name" class="form-input" readonly>
+          <label>Target Service</label>
+          <input type="text" id="modal-map-service-name" class="form-input" readonly>
         </div>
 
         <div class="form-grid-2 mb-3">

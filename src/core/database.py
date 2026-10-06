@@ -26,9 +26,18 @@ class DatabaseManager:
 
     async def initialize_schema(self) -> None:
         async with self.get_connection() as db:
-            # 1. Universal APPS_PIPELINE table
+            # Check for legacy APPS_PIPELINE table and rename to SERVICES_PIPELINE
+            cursor = await db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='APPS_PIPELINE';")
+            legacy_table = await cursor.fetchone()
+            if legacy_table:
+                cursor = await db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='SERVICES_PIPELINE';")
+                new_table = await cursor.fetchone()
+                if not new_table:
+                    await db.execute("ALTER TABLE APPS_PIPELINE RENAME TO SERVICES_PIPELINE;")
+
+            # 1. Universal SERVICES_PIPELINE table
             await db.execute("""
-                CREATE TABLE IF NOT EXISTS APPS_PIPELINE (
+                CREATE TABLE IF NOT EXISTS SERVICES_PIPELINE (
                     ID INTEGER PRIMARY KEY AUTOINCREMENT,
                     PIPELINE_KEY TEXT UNIQUE NOT NULL,
                     STAGE INTEGER DEFAULT 1,
@@ -94,7 +103,6 @@ class DatabaseManager:
                     VALUES (?, ?, ?, ?, ?);
                 """, (code, cat, sev, desc, rem))
 
-            # Initial columns for media pipeline
             await db.commit()
 
         # Seed initial columns for standard media flow
@@ -116,7 +124,7 @@ class DatabaseManager:
         ]
 
         for col_name, col_type in standard_cols:
-            await self.ensure_column("APPS_PIPELINE", col_name, col_type)
+            await self.ensure_column("SERVICES_PIPELINE", col_name, col_type)
 
         # Seed MEDIA_CATALOG factory preset view
         preset_query = """
@@ -129,13 +137,15 @@ class DatabaseManager:
                 JELLYFIN_STATUS,
                 JELLYFIN_PLAY_COUNT,
                 LAST_UPDATED
-            FROM APPS_PIPELINE
+            FROM SERVICES_PIPELINE
             WHERE JELLYFIN_STATUS = 'AVAILABLE';
         """
         async with self.get_connection() as db:
+            # Drop old view if it referenced legacy APPS_PIPELINE
+            await db.execute("DROP VIEW IF EXISTS MEDIA_CATALOG;")
             await db.execute(preset_query)
             await db.execute("""
-                INSERT OR IGNORE INTO CUSTOM_VIEWS (VIEW_NAME, SQL_QUERY, IS_PRESET)
+                INSERT OR REPLACE INTO CUSTOM_VIEWS (VIEW_NAME, SQL_QUERY, IS_PRESET)
                 VALUES ('MEDIA_CATALOG', ?, 1);
             """, (preset_query,))
             await db.commit()

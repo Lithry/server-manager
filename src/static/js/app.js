@@ -143,6 +143,20 @@ class ServerManagerApp {
       });
     });
 
+    // Service modal bindings
+    document.getElementById('btn-add-service')?.addEventListener('click', () => {
+      this.openAddServiceModal();
+    });
+    document.getElementById('chk-service-inherit-poll')?.addEventListener('change', (e) => {
+      const customBlock = document.getElementById('service-custom-poll-block');
+      if (customBlock) {
+        customBlock.classList.toggle('hidden', e.target.checked);
+      }
+    });
+    document.getElementById('btn-submit-add-service')?.addEventListener('click', () => {
+      this.saveServiceFromModal();
+    });
+
     // Stage modal bindings
     document.getElementById('btn-add-stage')?.addEventListener('click', () => {
       this.openAddStageModal();
@@ -162,14 +176,17 @@ class ServerManagerApp {
     });
 
     // Mapping modal bindings
-    document.getElementById('select-mapping-app')?.addEventListener('change', () => {
+    document.getElementById('select-mapping-service')?.addEventListener('change', () => {
       this.renderSettingsMappings();
     });
     document.getElementById('btn-add-mapping')?.addEventListener('click', () => {
       this.openAddMappingModal();
     });
     document.getElementById('btn-open-sample-modal')?.addEventListener('click', () => {
-      document.getElementById('modal-sample-api')?.classList.remove('hidden');
+      this.openSampleModal();
+    });
+    document.getElementById('btn-fetch-sample')?.addEventListener('click', () => {
+      this.fetchApiSample();
     });
     document.getElementById('btn-test-transformer')?.addEventListener('click', () => {
       this.testTransformerExpr();
@@ -229,7 +246,7 @@ class ServerManagerApp {
     // Update page title
     const titles = {
       overview: 'System Overview',
-      pipeline: 'Universal APPS_PIPELINE',
+      pipeline: 'Universal SERVICES_PIPELINE',
       views: 'View Builder & Projections',
       incidents: 'Incidents & Error Index',
       tools: 'Sandboxed Custom Tools',
@@ -743,7 +760,7 @@ class ServerManagerApp {
   }
 
   /* ------------------------------------------------------------------------
-     Settings Logic (DAG Stages, Apps, Mappings, Notifications & Engine)
+     Settings Logic (DAG Stages, Services, Mappings, Notifications & Engine)
      ------------------------------------------------------------------------ */
   switchSettingsSubTab(subtabId) {
     document.querySelectorAll('.subnav-btn').forEach(btn => {
@@ -752,9 +769,10 @@ class ServerManagerApp {
     document.querySelectorAll('.subtab-panel').forEach(panel => {
       panel.classList.toggle('active', panel.id === `subpanel-${subtabId}`);
     });
+    if (subtabId === 'services') this.renderSettingsServices();
     if (subtabId === 'stages') this.renderSettingsStages();
     if (subtabId === 'mappings') this.renderSettingsMappings();
-    if (subtabId === 'apps') this.renderSettingsApps();
+    if (subtabId === 'engine') this.renderEngineOverrides();
   }
 
   async loadSettings() {
@@ -762,73 +780,195 @@ class ServerManagerApp {
       const resp = await fetch('/api/v1/settings');
       this.settingsData = await resp.json();
 
-      this.renderSettingsApps();
+      // Normalize services structure
+      if (!this.settingsData.services) {
+        this.settingsData.services = this.settingsData.apps || {};
+      }
+      if (!this.settingsData.stages) {
+        this.settingsData.stages = [];
+      }
+      if (this.settingsData.global_poll_interval_seconds === undefined) {
+        this.settingsData.global_poll_interval_seconds = 300;
+      }
+
+      this.renderSettingsServices();
       this.renderSettingsStages();
       this.renderSettingsMappings();
       this.renderSettingsNotifications();
+      this.renderEngineOverrides();
 
       const retEl = document.getElementById('input-retention-days');
       if (retEl && this.settingsData.retention_days) {
         retEl.value = this.settingsData.retention_days;
+      }
+
+      const globalPollEl = document.getElementById('input-global-poll');
+      if (globalPollEl && this.settingsData.global_poll_interval_seconds) {
+        globalPollEl.value = this.settingsData.global_poll_interval_seconds;
       }
     } catch (e) {
       console.error('Error loading settings:', e);
     }
   }
 
-  renderSettingsApps() {
-    const appsContainer = document.getElementById('settings-apps-container');
-    if (!appsContainer || !this.settingsData || !this.settingsData.apps) return;
+  /* --- SERVICES MANAGEMENT --- */
+  renderSettingsServices() {
+    const container = document.getElementById('settings-services-container');
+    if (!container || !this.settingsData) return;
 
-    const stages = this.settingsData.stages || [];
+    const services = this.settingsData.services || {};
+    const serviceEntries = Object.entries(services);
 
-    appsContainer.innerHTML = Object.entries(this.settingsData.apps).map(([appId, cfg]) => {
-      const stageOptions = stages.map(st => `
-        <option value="${this.escapeHtml(st.id)}" ${cfg.stage_id === st.id ? 'selected' : ''}>
-          ${this.escapeHtml(st.name)} (${this.escapeHtml(st.id)})
-        </option>
-      `).join('');
+    if (serviceEntries.length === 0) {
+      container.innerHTML = `
+        <div class="empty-state" id="services-empty-state">
+          <p>No services registered yet. Click <strong>+ Add Service</strong> to register your first service.</p>
+        </div>
+      `;
+      return;
+    }
+
+    const globalInterval = this.settingsData.global_poll_interval_seconds || 300;
+
+    container.innerHTML = serviceEntries.map(([sId, cfg]) => {
+      const hasOverride = cfg.poll_interval_seconds !== null && cfg.poll_interval_seconds !== undefined && cfg.poll_interval_seconds > 0;
+      const pollText = hasOverride
+        ? `<span class="badge badge-warning">Custom Override: ${cfg.poll_interval_seconds}s</span>`
+        : `<span class="badge badge-secondary">Inherits Global (${globalInterval}s)</span>`;
 
       return `
-        <div class="app-setting-item mb-4 p-3 bg-surface border rounded">
-          <div class="app-setting-header d-flex justify-content-between align-items-center mb-3">
+        <div class="app-setting-item mb-3 p-3 bg-surface border rounded" data-service-id="${this.escapeHtml(sId)}">
+          <div class="app-setting-header d-flex justify-content-between align-items-center mb-2">
             <div class="d-flex align-items-center gap-2">
               <strong style="font-size: 1.05rem;">${this.escapeHtml(cfg.name)}</strong>
-              <span class="badge badge-info">${appId}</span>
+              <span class="badge badge-info font-mono">${this.escapeHtml(sId)}</span>
+              ${cfg.enabled ? '<span class="badge badge-success">Active</span>' : '<span class="badge badge-alert">Disabled</span>'}
+              ${pollText}
             </div>
-            <label class="d-flex align-items-center gap-2 cursor-pointer">
-              <input type="checkbox" id="setting-${appId}-enabled" ${cfg.enabled ? 'checked' : ''}>
-              <span>Active</span>
-            </label>
-          </div>
-          <div class="form-grid-2 mb-3">
-            <div class="form-group">
-              <label>Base URL</label>
-              <input type="text" class="form-input" id="setting-${appId}-url" value="${this.escapeHtml(cfg.base_url || '')}">
-            </div>
-            <div class="form-group">
-              <label>API Key</label>
-              <input type="password" class="form-input" id="setting-${appId}-key" value="${this.escapeHtml(cfg.api_key || '')}">
+            <div class="d-flex align-items-center gap-2">
+              <button class="btn btn-secondary btn-sm" onclick="app.openAddServiceModal('${this.escapeHtml(sId)}')">Edit</button>
+              <button class="btn btn-secondary btn-sm text-alert" onclick="app.deleteService('${this.escapeHtml(sId)}')">Delete</button>
             </div>
           </div>
-          <div class="form-grid-2">
-            <div class="form-group">
-              <label>Polling Interval (Seconds)</label>
-              <input type="number" class="form-input" id="setting-${appId}-poll" min="10" max="86400" value="${cfg.poll_interval_seconds || 300}">
-            </div>
-            <div class="form-group">
-              <label>Assigned DAG Stage</label>
-              <select class="form-select" id="setting-${appId}-stage">
-                <option value="">-- Unassigned --</option>
-                ${stageOptions}
-              </select>
-            </div>
+          <div class="text-sm text-muted">
+            <span>Base URL: <code class="font-mono">${this.escapeHtml(cfg.base_url || 'None')}</code></span>
+            ${cfg.api_key ? '<span class="ml-3">| API Key configured</span>' : ''}
+            <span class="ml-3">| Field Mappings: <strong>${(cfg.field_mappings || []).length}</strong></span>
           </div>
         </div>
       `;
     }).join('');
   }
 
+  openAddServiceModal(editServiceId = null) {
+    const titleEl = document.getElementById('modal-service-title');
+    const idEl = document.getElementById('input-service-id');
+    const nameEl = document.getElementById('input-service-name');
+    const urlEl = document.getElementById('input-service-url');
+    const keyEl = document.getElementById('input-service-key');
+    const inheritChk = document.getElementById('chk-service-inherit-poll');
+    const pollEl = document.getElementById('input-service-poll');
+    const enabledChk = document.getElementById('chk-service-enabled');
+    const customBlock = document.getElementById('service-custom-poll-block');
+
+    if (editServiceId && this.settingsData?.services?.[editServiceId]) {
+      const s = this.settingsData.services[editServiceId];
+      if (titleEl) titleEl.innerText = `Edit Service: ${s.name}`;
+      if (idEl) { idEl.value = editServiceId; idEl.disabled = true; }
+      if (nameEl) nameEl.value = s.name || '';
+      if (urlEl) urlEl.value = s.base_url || '';
+      if (keyEl) keyEl.value = s.api_key || '';
+      if (enabledChk) enabledChk.checked = s.enabled !== false;
+
+      const hasOverride = s.poll_interval_seconds !== null && s.poll_interval_seconds !== undefined && s.poll_interval_seconds > 0;
+      if (inheritChk) inheritChk.checked = !hasOverride;
+      if (pollEl) pollEl.value = hasOverride ? s.poll_interval_seconds : (this.settingsData.global_poll_interval_seconds || 300);
+      if (customBlock) customBlock.classList.toggle('hidden', !hasOverride);
+    } else {
+      if (titleEl) titleEl.innerText = 'Register Service';
+      if (idEl) { idEl.value = ''; idEl.disabled = false; }
+      if (nameEl) nameEl.value = '';
+      if (urlEl) urlEl.value = '';
+      if (keyEl) keyEl.value = '';
+      if (enabledChk) enabledChk.checked = true;
+      if (inheritChk) inheritChk.checked = true;
+      if (pollEl) pollEl.value = this.settingsData?.global_poll_interval_seconds || 300;
+      if (customBlock) customBlock.classList.add('hidden');
+    }
+
+    document.getElementById('modal-add-service')?.classList.remove('hidden');
+  }
+
+  saveServiceFromModal() {
+    const idEl = document.getElementById('input-service-id');
+    const nameEl = document.getElementById('input-service-name');
+    const urlEl = document.getElementById('input-service-url');
+    const keyEl = document.getElementById('input-service-key');
+    const inheritChk = document.getElementById('chk-service-inherit-poll');
+    const pollEl = document.getElementById('input-service-poll');
+    const enabledChk = document.getElementById('chk-service-enabled');
+
+    const id = idEl?.value.trim().toLowerCase();
+    const name = nameEl?.value.trim();
+    if (!id || !name) {
+      alert('Service ID (slug) and Display Name are required.');
+      return;
+    }
+
+    if (!/^[a-z0-9_-]+$/.test(id)) {
+      alert('Service ID must contain only lowercase letters, numbers, hyphens, or underscores (e.g. sonarr, radarr, custom_service).');
+      return;
+    }
+
+    if (!this.settingsData) this.settingsData = { stages: [], services: {}, notification_triggers: [] };
+    if (!this.settingsData.services) this.settingsData.services = {};
+
+    const inherit = inheritChk ? inheritChk.checked : true;
+    let pollInterval = null;
+    if (!inherit) {
+      const val = parseInt(pollEl?.value || '300', 10);
+      pollInterval = val > 0 ? val : null;
+    }
+
+    const existing = this.settingsData.services[id] || {};
+    this.settingsData.services[id] = {
+      name: name,
+      enabled: enabledChk ? enabledChk.checked : true,
+      base_url: urlEl?.value.trim() || '',
+      api_key: keyEl?.value.trim() || '',
+      poll_interval_seconds: pollInterval,
+      field_mappings: existing.field_mappings || [],
+    };
+
+    this.renderSettingsServices();
+    this.renderSettingsStages();
+    this.renderSettingsMappings();
+    this.renderEngineOverrides();
+    this.closeModals();
+  }
+
+  deleteService(serviceId) {
+    if (!confirm(`Are you sure you want to delete service '${serviceId}'?`)) return;
+    if (!this.settingsData?.services) return;
+
+    delete this.settingsData.services[serviceId];
+
+    // Remove from assigned stage services
+    if (this.settingsData.stages) {
+      this.settingsData.stages.forEach(st => {
+        if (st.service_ids) {
+          st.service_ids = st.service_ids.filter(id => id !== serviceId);
+        }
+      });
+    }
+
+    this.renderSettingsServices();
+    this.renderSettingsStages();
+    this.renderSettingsMappings();
+    this.renderEngineOverrides();
+  }
+
+  /* --- DAG STAGES MANAGEMENT (M:N SERVICES) --- */
   renderSettingsStages() {
     const container = document.getElementById('settings-stages-container');
     if (!container || !this.settingsData) return;
@@ -851,6 +991,10 @@ class ServerManagerApp {
         ? '<span class="badge badge-root">Root Producer</span>'
         : '<span class="badge badge-consumer">Consumer Stage</span>';
 
+      const assignedBadges = (st.service_ids && st.service_ids.length > 0)
+        ? st.service_ids.map(sid => `<span class="badge badge-service">${this.escapeHtml(sid)}</span>`).join(' ')
+        : '<span class="text-muted text-sm">No services assigned</span>';
+
       return `
         <div class="${cardClass}" data-stage-id="${this.escapeHtml(st.id)}">
           <div class="stage-card-header">
@@ -867,13 +1011,17 @@ class ServerManagerApp {
             </div>
           </div>
           ${st.description ? `<p class="text-sm text-muted mb-2">${this.escapeHtml(st.description)}</p>` : ''}
+          <div class="mb-2">
+            <span class="text-sm text-muted mr-2">Assigned Services:</span>
+            ${assignedBadges}
+          </div>
           ${!isRoot ? `
             <div class="stage-predicate-display">
               <strong>start_condition:</strong> ${this.escapeHtml(st.start_condition)}
             </div>
           ` : `
             <div class="text-sm text-success font-mono mt-2">
-              ✓ start_condition IS NULL — Autonomously initiates rows in APPS_PIPELINE
+              ✓ start_condition IS NULL — Autonomously initiates rows in SERVICES_PIPELINE
             </div>
           `}
           <div class="stage-meta-row">
@@ -897,9 +1045,11 @@ class ServerManagerApp {
     const timeoutEl = document.getElementById('input-stage-timeout');
     const predBlock = document.getElementById('stage-predicate-block');
     const testResult = document.getElementById('predicate-test-result');
+    const servicesGrid = document.getElementById('stage-services-checkboxes');
 
     if (testResult) testResult.classList.add('hidden');
 
+    let assigned = [];
     if (editStageId && this.settingsData?.stages) {
       const st = this.settingsData.stages.find(s => s.id === editStageId);
       if (st) {
@@ -913,6 +1063,7 @@ class ServerManagerApp {
         if (predBlock) predBlock.classList.toggle('hidden', isRoot);
         if (graceEl) graceEl.value = st.grace_period_minutes ?? 10;
         if (timeoutEl) timeoutEl.value = st.timeout_minutes ?? 30;
+        assigned = st.service_ids || [];
       }
     } else {
       if (titleEl) titleEl.innerText = 'Configure DAG Stage';
@@ -924,6 +1075,24 @@ class ServerManagerApp {
       if (predBlock) predBlock.classList.add('hidden');
       if (graceEl) graceEl.value = 10;
       if (timeoutEl) timeoutEl.value = 30;
+    }
+
+    // Populate service checkboxes
+    if (servicesGrid) {
+      const availableServices = Object.entries(this.settingsData?.services || {});
+      if (availableServices.length === 0) {
+        servicesGrid.innerHTML = '<span class="text-muted text-sm">No services configured yet. Register a service first.</span>';
+      } else {
+        servicesGrid.innerHTML = availableServices.map(([sid, scfg]) => {
+          const isChecked = assigned.includes(sid);
+          return `
+            <label class="service-checkbox-item">
+              <input type="checkbox" name="stage-assigned-service" value="${this.escapeHtml(sid)}" ${isChecked ? 'checked' : ''}>
+              <span>${this.escapeHtml(scfg.name)} (<code>${this.escapeHtml(sid)}</code>)</span>
+            </label>
+          `;
+        }).join('');
+      }
     }
 
     document.getElementById('modal-add-stage')?.classList.remove('hidden');
@@ -978,11 +1147,17 @@ class ServerManagerApp {
       return;
     }
 
-    if (!this.settingsData) this.settingsData = { stages: [], apps: {}, notification_triggers: [] };
+    if (!this.settingsData) this.settingsData = { stages: [], services: {}, notification_triggers: [] };
     if (!this.settingsData.stages) this.settingsData.stages = [];
 
     const isRoot = rootChk ? rootChk.checked : true;
     const condition = isRoot ? null : (condEl?.value.trim() || null);
+
+    // Collect checked assigned services
+    const checkedServices = [];
+    document.querySelectorAll('input[name="stage-assigned-service"]:checked').forEach(cb => {
+      checkedServices.push(cb.value);
+    });
 
     const existingIdx = this.settingsData.stages.findIndex(s => s.id === id);
     const order = existingIdx >= 0 ? this.settingsData.stages[existingIdx].order : (this.settingsData.stages.length + 1);
@@ -995,6 +1170,7 @@ class ServerManagerApp {
       start_condition: condition,
       grace_period_minutes: parseInt(graceEl?.value || '10', 10),
       timeout_minutes: parseInt(timeoutEl?.value || '30', 10),
+      service_ids: checkedServices,
       enabled: true
     };
 
@@ -1005,7 +1181,6 @@ class ServerManagerApp {
     }
 
     this.renderSettingsStages();
-    this.renderSettingsApps();
     this.closeModals();
   }
 
@@ -1014,16 +1189,7 @@ class ServerManagerApp {
     if (!this.settingsData?.stages) return;
 
     this.settingsData.stages = this.settingsData.stages.filter(s => s.id !== stageId);
-    
-    // Unassign apps
-    if (this.settingsData.apps) {
-      Object.values(this.settingsData.apps).forEach(app => {
-        if (app.stage_id === stageId) app.stage_id = '';
-      });
-    }
-
     this.renderSettingsStages();
-    this.renderSettingsApps();
   }
 
   moveStage(stageId, direction) {
@@ -1043,34 +1209,38 @@ class ServerManagerApp {
     this.renderSettingsStages();
   }
 
+  /* --- FIELD MAPPINGS & TRANSFORMERS --- */
   renderSettingsMappings() {
-    const selectEl = document.getElementById('select-mapping-app');
+    const selectEl = document.getElementById('select-mapping-service');
     const container = document.getElementById('settings-mappings-container');
-    if (!selectEl || !container || !this.settingsData || !this.settingsData.apps) return;
+    if (!selectEl || !container || !this.settingsData) return;
 
-    // Populate select if empty or needs update
-    const currentVal = selectEl.value;
-    const appKeys = Object.keys(this.settingsData.apps);
+    const services = this.settingsData.services || {};
+    const serviceKeys = Object.keys(services);
 
-    selectEl.innerHTML = appKeys.map(k => `
-      <option value="${k}" ${k === currentVal ? 'selected' : ''}>
-        ${this.escapeHtml(this.settingsData.apps[k].name)} (${k})
-      </option>
-    `).join('');
-
-    const activeApp = selectEl.value || appKeys[0];
-    if (!activeApp) {
-      container.innerHTML = '<div class="empty-state"><p>No apps configured.</p></div>';
+    if (serviceKeys.length === 0) {
+      selectEl.innerHTML = '<option value="">-- No services available --</option>';
+      container.innerHTML = '<div class="empty-state"><p>No services registered. Register a service first to configure field mappings.</p></div>';
       return;
     }
 
-    const appCfg = this.settingsData.apps[activeApp];
-    const mappings = appCfg.field_mappings || [];
+    const currentVal = selectEl.value;
+    selectEl.innerHTML = serviceKeys.map(k => `
+      <option value="${k}" ${k === currentVal ? 'selected' : ''}>
+        ${this.escapeHtml(services[k].name)} (${k})
+      </option>
+    `).join('');
+
+    const activeService = selectEl.value || serviceKeys[0];
+    const serviceCfg = services[activeService];
+    if (!serviceCfg) return;
+
+    const mappings = serviceCfg.field_mappings || [];
 
     if (mappings.length === 0) {
       container.innerHTML = `
         <div class="empty-state" id="mappings-empty-state">
-          <p>No field mappings configured for <strong>${this.escapeHtml(appCfg.name)}</strong>. Click <strong>+ Add Mapping</strong> or sample the API.</p>
+          <p>No field mappings configured for <strong>${this.escapeHtml(serviceCfg.name)}</strong>. Click <strong>+ Add Mapping</strong> or sample the API.</p>
         </div>
       `;
       return;
@@ -1095,7 +1265,7 @@ class ServerManagerApp {
               <td><span class="badge badge-secondary">${this.escapeHtml(m.data_type || 'TEXT')}</span></td>
               <td class="font-mono text-sm text-accent">${m.transformer ? this.escapeHtml(m.transformer) : '<span class="text-muted">Direct</span>'}</td>
               <td>
-                <button class="btn btn-secondary btn-sm text-alert" onclick="app.deleteMapping('${activeApp}', '${m.target_column}')">Delete</button>
+                <button class="btn btn-secondary btn-sm text-alert" onclick="app.deleteMapping('${activeService}', '${m.target_column}')">Delete</button>
               </td>
             </tr>
           `).join('')}
@@ -1105,18 +1275,22 @@ class ServerManagerApp {
   }
 
   openAddMappingModal() {
-    const selectEl = document.getElementById('select-mapping-app');
-    const appNameEl = document.getElementById('modal-map-app-name');
+    const selectEl = document.getElementById('select-mapping-service');
+    const serviceNameEl = document.getElementById('modal-map-service-name');
     const sourceEl = document.getElementById('input-map-source');
     const colEl = document.getElementById('input-map-col');
     const transEl = document.getElementById('input-map-transformer');
     const sampleEl = document.getElementById('input-map-sample');
     const resultEl = document.getElementById('transformer-test-result');
 
-    const activeApp = selectEl?.value || 'sonarr';
-    const appName = this.settingsData?.apps?.[activeApp]?.name || activeApp;
+    const activeService = selectEl?.value;
+    if (!activeService) {
+      alert('Please register at least one service before adding mappings.');
+      return;
+    }
 
-    if (appNameEl) appNameEl.value = `${appName} (${activeApp})`;
+    const serviceName = this.settingsData?.services?.[activeService]?.name || activeService;
+    if (serviceNameEl) serviceNameEl.value = `${serviceName} (${activeService})`;
     if (sourceEl) sourceEl.value = '';
     if (colEl) colEl.value = '';
     if (transEl) transEl.value = '';
@@ -1138,7 +1312,7 @@ class ServerManagerApp {
         sampleVal = JSON.parse(sampleVal);
       }
     } catch (_) {
-      // keep as string
+      // keep string
     }
 
     try {
@@ -1167,19 +1341,19 @@ class ServerManagerApp {
   }
 
   saveMappingFromModal() {
-    const selectEl = document.getElementById('select-mapping-app');
+    const selectEl = document.getElementById('select-mapping-service');
     const sourceEl = document.getElementById('input-map-source');
     const colEl = document.getElementById('input-map-col');
     const typeEl = document.getElementById('input-map-type');
     const transEl = document.getElementById('input-map-transformer');
 
-    const activeApp = selectEl?.value;
+    const activeService = selectEl?.value;
     const source = sourceEl?.value.trim();
     let col = colEl?.value.trim().toUpperCase();
     const dataType = typeEl?.value || 'TEXT';
     const transformer = transEl?.value.trim() || null;
 
-    if (!activeApp || !source || !col) {
+    if (!activeService || !source || !col) {
       alert('Source field and Target column are required.');
       return;
     }
@@ -1189,13 +1363,13 @@ class ServerManagerApp {
       return;
     }
 
-    if (!this.settingsData.apps[activeApp].field_mappings) {
-      this.settingsData.apps[activeApp].field_mappings = [];
+    if (!this.settingsData.services[activeService].field_mappings) {
+      this.settingsData.services[activeService].field_mappings = [];
     }
 
     // Filter existing with same column name
-    this.settingsData.apps[activeApp].field_mappings = this.settingsData.apps[activeApp].field_mappings.filter(m => m.target_column !== col);
-    this.settingsData.apps[activeApp].field_mappings.push({
+    this.settingsData.services[activeService].field_mappings = this.settingsData.services[activeService].field_mappings.filter(m => m.target_column !== col);
+    this.settingsData.services[activeService].field_mappings.push({
       source_field: source,
       target_column: col,
       data_type: dataType,
@@ -1206,14 +1380,162 @@ class ServerManagerApp {
     this.closeModals();
   }
 
-  deleteMapping(appId, colName) {
+  deleteMapping(serviceId, colName) {
     if (!confirm(`Delete mapping for column '${colName}'?`)) return;
-    if (!this.settingsData?.apps?.[appId]?.field_mappings) return;
+    if (!this.settingsData?.services?.[serviceId]?.field_mappings) return;
 
-    this.settingsData.apps[appId].field_mappings = this.settingsData.apps[appId].field_mappings.filter(m => m.target_column !== colName);
+    this.settingsData.services[serviceId].field_mappings = this.settingsData.services[serviceId].field_mappings.filter(m => m.target_column !== colName);
     this.renderSettingsMappings();
   }
 
+  /* --- API SAMPLING --- */
+  openSampleModal() {
+    const selectEl = document.getElementById('sample-service-select');
+    const services = this.settingsData?.services || {};
+    const serviceEntries = Object.entries(services);
+
+    if (selectEl) {
+      if (serviceEntries.length === 0) {
+        selectEl.innerHTML = '<option value="">-- No services configured --</option>';
+      } else {
+        selectEl.innerHTML = serviceEntries.map(([sid, cfg]) => `
+          <option value="${this.escapeHtml(sid)}">${this.escapeHtml(cfg.name)} (${this.escapeHtml(sid)})</option>
+        `).join('');
+      }
+    }
+
+    document.getElementById('modal-sample-api')?.classList.remove('hidden');
+  }
+
+  async fetchApiSample() {
+    const serviceSelect = document.getElementById('sample-service-select');
+    const endpointInput = document.getElementById('sample-endpoint-input');
+    const resultBox = document.getElementById('api-sample-result');
+    if (!resultBox) return;
+
+    const serviceId = serviceSelect?.value;
+    const endpoint = endpointInput?.value.trim() || '/api/v3/history';
+
+    if (!serviceId) {
+      alert('Please select a service to sample.');
+      return;
+    }
+
+    resultBox.innerHTML = '<p class="text-muted">Fetching sample payload from service endpoint...</p>';
+
+    try {
+      const resp = await fetch('/api/v1/pipeline/sample', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ service_id: serviceId, endpoint: endpoint })
+      });
+      const data = await resp.json();
+
+      if (!resp.ok || !data.success) {
+        resultBox.innerHTML = `
+          <div class="alert-box alert-danger">
+            <strong>Sample Error:</strong> ${this.escapeHtml(data.error || 'Failed to fetch payload')}
+          </div>
+        `;
+        return;
+      }
+
+      const fields = data.fields || [];
+      if (fields.length === 0) {
+        resultBox.innerHTML = '<p class="text-warning">Endpoint responded successfully, but returned an empty or unparseable object.</p>';
+        return;
+      }
+
+      resultBox.innerHTML = `
+        <div class="mb-2 text-sm">
+          <strong>Discovered ${data.total_fields} attributes.</strong> Click any path to use as mapping source:
+        </div>
+        <div class="fields-list" style="max-height: 280px; overflow-y: auto;">
+          ${fields.map(f => `
+            <div class="field-item p-2 mb-1 bg-surface rounded border d-flex justify-content-between align-items-center">
+              <div>
+                <code class="font-mono text-accent cursor-pointer" onclick="app.useSampleField('${this.escapeHtml(f.path)}')">${this.escapeHtml(f.path)}</code>
+                <span class="badge badge-secondary ml-2">${this.escapeHtml(f.type)}</span>
+              </div>
+              <span class="text-muted text-sm font-mono truncate" style="max-width: 250px;">${this.escapeHtml(f.sample)}</span>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    } catch (e) {
+      resultBox.innerHTML = `<div class="alert-box alert-danger">Network error: ${this.escapeHtml(e.message)}</div>`;
+    }
+  }
+
+  useSampleField(path) {
+    this.closeModals();
+    this.openAddMappingModal();
+    const sourceEl = document.getElementById('input-map-source');
+    if (sourceEl) sourceEl.value = path;
+  }
+
+  /* --- ENGINE OVERRIDES & RETENTION --- */
+  renderEngineOverrides() {
+    const container = document.getElementById('engine-overrides-container');
+    const badgeEl = document.getElementById('badge-overrides-count');
+    if (!container || !this.settingsData) return;
+
+    const globalInterval = this.settingsData.global_poll_interval_seconds || 300;
+    const services = this.settingsData.services || {};
+    const overrides = Object.entries(services).filter(([_, cfg]) => 
+      cfg.poll_interval_seconds !== null && cfg.poll_interval_seconds !== undefined && cfg.poll_interval_seconds > 0
+    );
+
+    if (badgeEl) {
+      badgeEl.innerText = `${overrides.length} ${overrides.length === 1 ? 'Override' : 'Overrides'}`;
+      badgeEl.className = overrides.length > 0 ? 'badge badge-warning' : 'badge badge-secondary';
+    }
+
+    if (overrides.length === 0) {
+      container.innerHTML = `
+        <div class="empty-state p-3">
+          <p class="mb-0 text-sm">All registered services currently inherit the global polling cadence (<strong>${globalInterval}s</strong>).</p>
+        </div>
+      `;
+      return;
+    }
+
+    container.innerHTML = `
+      <table class="overrides-table">
+        <thead>
+          <tr>
+            <th>Service Name</th>
+            <th>Service ID</th>
+            <th>Custom Interval</th>
+            <th>Global Inherited</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${overrides.map(([sid, cfg]) => `
+            <tr>
+              <td><strong>${this.escapeHtml(cfg.name)}</strong></td>
+              <td><span class="font-mono text-muted">${this.escapeHtml(sid)}</span></td>
+              <td><span class="badge badge-warning">${cfg.poll_interval_seconds}s</span></td>
+              <td><span class="text-muted font-mono">${globalInterval}s</span></td>
+              <td>
+                <button class="btn btn-secondary btn-sm" onclick="app.resetServiceOverride('${this.escapeHtml(sid)}')">Reset to Global</button>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+  }
+
+  resetServiceOverride(serviceId) {
+    if (!this.settingsData?.services?.[serviceId]) return;
+    this.settingsData.services[serviceId].poll_interval_seconds = null;
+    this.renderEngineOverrides();
+    this.renderSettingsServices();
+  }
+
+  /* --- NOTIFICATION TRIGGERS --- */
   renderSettingsNotifications() {
     const container = document.getElementById('settings-notifications-container');
     if (!container || !this.settingsData) return;
@@ -1297,28 +1619,19 @@ class ServerManagerApp {
     }
   }
 
+  /* --- SAVE ALL SETTINGS --- */
   async saveSettings() {
     if (!this.settingsData) return;
 
-    // Collect App values
-    Object.keys(this.settingsData.apps).forEach(appId => {
-      const enabledEl = document.getElementById(`setting-${appId}-enabled`);
-      const urlEl = document.getElementById(`setting-${appId}-url`);
-      const keyEl = document.getElementById(`setting-${appId}-key`);
-      const pollEl = document.getElementById(`setting-${appId}-poll`);
-      const stageEl = document.getElementById(`setting-${appId}-stage`);
-
-      if (enabledEl) this.settingsData.apps[appId].enabled = enabledEl.checked;
-      if (urlEl) this.settingsData.apps[appId].base_url = urlEl.value.trim();
-      if (keyEl) this.settingsData.apps[appId].api_key = keyEl.value.trim();
-      if (pollEl) this.settingsData.apps[appId].poll_interval_seconds = parseInt(pollEl.value || '300', 10);
-      if (stageEl) this.settingsData.apps[appId].stage_id = stageEl.value;
-    });
-
-    // Collect retention days
+    // Collect global retention & polling
     const retEl = document.getElementById('input-retention-days');
     if (retEl) {
       this.settingsData.retention_days = parseInt(retEl.value || '30', 10);
+    }
+
+    const globalPollEl = document.getElementById('input-global-poll');
+    if (globalPollEl) {
+      this.settingsData.global_poll_interval_seconds = parseInt(globalPollEl.value || '300', 10);
     }
 
     try {
@@ -1328,7 +1641,12 @@ class ServerManagerApp {
         body: JSON.stringify(this.settingsData),
       });
       if (resp.ok) {
-        alert('✓ Settings saved successfully and schema migrated.');
+        this.settingsData = await resp.json();
+        alert('✓ Settings saved successfully, SERVICES_PIPELINE schema migrated, and scheduler refreshed.');
+        this.renderSettingsServices();
+        this.renderSettingsStages();
+        this.renderSettingsMappings();
+        this.renderEngineOverrides();
       } else {
         const err = await resp.text();
         alert(`Failed to save settings: ${err}`);

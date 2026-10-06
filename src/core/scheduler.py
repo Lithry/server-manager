@@ -23,14 +23,15 @@ class TaskScheduler:
         print("[i] TaskScheduler started.")
         settings = await config_manager.get_settings()
         
-        # Start individual app polling loops
-        for app_id, app_cfg in settings.apps.items():
-            if app_cfg.enabled:
-                self._tasks[app_id] = asyncio.create_task(self._app_loop(app_id))
+        # Start individual service polling loops
+        services_dict = getattr(settings, "services", {}) or getattr(settings, "apps", {})
+        for s_id, s_cfg in services_dict.items():
+            if s_cfg.enabled:
+                self._tasks[s_id] = asyncio.create_task(self._service_loop(s_id))
 
     async def stop(self) -> None:
         self._running = False
-        for app_id, task in self._tasks.items():
+        for s_id, task in self._tasks.items():
             task.cancel()
         self._tasks.clear()
         print("[i] TaskScheduler stopped.")
@@ -39,39 +40,46 @@ class TaskScheduler:
         await self.stop()
         await self.start()
 
-    async def trigger_now(self, app_id: str) -> Dict[str, Any]:
-        """Manually trigger an atomic ingestion execution for an app."""
+    async def trigger_now(self, service_id: str) -> Dict[str, Any]:
+        """Manually trigger an atomic ingestion execution for a service."""
         settings = await config_manager.get_settings()
-        if app_id not in settings.apps:
-            return {"status": "error", "message": f"App '{app_id}' not found"}
+        services_dict = getattr(settings, "services", {}) or getattr(settings, "apps", {})
+        if service_id not in services_dict:
+            return {"status": "error", "message": f"Service '{service_id}' not found"}
 
-        app_cfg = settings.apps[app_id]
+        service_cfg = services_dict[service_id]
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        self._last_runs[app_id] = now_str
+        self._last_runs[service_id] = now_str
 
         # Simulation/Dispatch of atomic task execution
-        self._status[app_id] = {
+        self._status[service_id] = {
             "last_run": now_str,
             "status": "success",
-            "message": f"Execution triggered for stage {app_cfg.stage} ({app_cfg.name})",
+            "message": f"Execution triggered for service ({service_cfg.name})",
         }
-        return self._status[app_id]
+        return self._status[service_id]
 
-    async def _app_loop(self, app_id: str) -> None:
+    async def _service_loop(self, service_id: str) -> None:
         while self._running:
             try:
                 settings = await config_manager.get_settings()
-                app_cfg = settings.apps.get(app_id)
-                if not app_cfg or not app_cfg.enabled:
+                services_dict = getattr(settings, "services", {}) or getattr(settings, "apps", {})
+                service_cfg = services_dict.get(service_id)
+                if not service_cfg or not service_cfg.enabled:
                     break
 
-                interval = max(app_cfg.poll_interval_seconds, 10)
-                await self.trigger_now(app_id)
+                # Resolve polling interval: custom override if specified, otherwise global interval
+                configured_interval = service_cfg.poll_interval_seconds
+                if configured_interval is None or configured_interval <= 0:
+                    configured_interval = getattr(settings, "global_poll_interval_seconds", 300)
+
+                interval = max(int(configured_interval), 10)
+                await self.trigger_now(service_id)
                 await asyncio.sleep(interval)
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                print(f"[x] Error in scheduler loop for {app_id}: {e}")
+                print(f"[x] Error in scheduler loop for service {service_id}: {e}")
                 await asyncio.sleep(30)
 
     def get_scheduler_status(self) -> Dict[str, Any]:

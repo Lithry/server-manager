@@ -15,6 +15,7 @@ class StageConfig(BaseModel):
     start_condition: str | None = None  # None or empty = Root producer stage
     grace_period_minutes: int = 10
     timeout_minutes: int = 30
+    service_ids: list[str] = Field(default_factory=list)  # Assigned service IDs (M:N)
     enabled: bool = True
 
 
@@ -25,14 +26,17 @@ class FieldMapping(BaseModel):
     transformer: str | None = None  # Optional expression e.g. "if 'anime' in value then 1 else 0"
 
 
-class AppConfig(BaseModel):
+class ServiceConfig(BaseModel):
     name: str
-    enabled: bool = False
+    enabled: bool = True
     base_url: str = ""
     api_key: str = ""
-    poll_interval_seconds: int = 300
-    stage_id: str = ""  # References StageConfig.id
+    poll_interval_seconds: int | None = None  # None = inherit Settings.global_poll_interval_seconds
     field_mappings: list[FieldMapping] = Field(default_factory=list)
+
+
+# Backward compatibility alias
+AppConfig = ServiceConfig
 
 
 class NotificationTrigger(BaseModel):
@@ -52,52 +56,19 @@ class Settings(BaseModel):
     repo_path: str = Field(default_factory=lambda: os.getenv("REPO_PATH", "/repo"))
     custom_tools_path: str = Field(default_factory=lambda: os.getenv("CUSTOM_TOOLS_PATH", "/config/custom_tools"))
     retention_days: int = 30
+    global_poll_interval_seconds: int = 300
     stages: list[StageConfig] = Field(default_factory=list)
-    apps: Dict[str, AppConfig] = Field(default_factory=dict)
+    services: Dict[str, ServiceConfig] = Field(default_factory=dict)
     notification_triggers: list[NotificationTrigger] = Field(default_factory=list)
 
 
-def get_default_settings() -> Settings:
+def initiate_settings() -> Settings:
+    """Initialize clean default settings with zero pre-populated services or stages."""
     return Settings(
-        stages=[],  # Clean default: fully configured via WebUI
-        apps={
-            "sonarr": AppConfig(
-                name="Sonarr",
-                enabled=False,
-                base_url="http://host.docker.internal:8989",
-                api_key="",
-                poll_interval_seconds=300,
-                stage_id="",
-                field_mappings=[],
-            ),
-            "radarr": AppConfig(
-                name="Radarr",
-                enabled=False,
-                base_url="http://host.docker.internal:7878",
-                api_key="",
-                poll_interval_seconds=300,
-                stage_id="",
-                field_mappings=[],
-            ),
-            "shoko": AppConfig(
-                name="Shoko Server",
-                enabled=False,
-                base_url="http://host.docker.internal:8111",
-                api_key="",
-                poll_interval_seconds=300,
-                stage_id="",
-                field_mappings=[],
-            ),
-            "jellyfin": AppConfig(
-                name="Jellyfin",
-                enabled=False,
-                base_url="http://host.docker.internal:8096",
-                api_key="",
-                poll_interval_seconds=600,
-                stage_id="",
-                field_mappings=[],
-            ),
-        },
+        retention_days=30,
+        global_poll_interval_seconds=300,
+        stages=[],
+        services={},
         notification_triggers=[
             NotificationTrigger(
                 id="default_incident",
@@ -112,6 +83,10 @@ def get_default_settings() -> Settings:
             )
         ],
     )
+
+
+# Backward compatibility alias
+get_default_settings = initiate_settings
 
 
 class ConfigManager:
@@ -137,12 +112,20 @@ class ConfigManager:
             try:
                 with open(self.settings_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
+                # Seamless migration: rename legacy 'apps' key to 'services'
+                if "apps" in data and "services" not in data:
+                    data["services"] = data.pop("apps")
+                # Remove deprecated stage_id from legacy app configs if present
+                if isinstance(data.get("services"), dict):
+                    for s_id, s_cfg in data["services"].items():
+                        if isinstance(s_cfg, dict) and "stage_id" in s_cfg:
+                            del s_cfg["stage_id"]
                 self._settings = Settings.model_validate(data)
                 return
             except Exception as e:
-                print(f"[!] Error loading settings from {self.settings_path}: {e}. Initializing defaults.")
+                print(f"[!] Error loading settings from {self.settings_path}: {e}. Initializing clean defaults.")
         
-        self._settings = get_default_settings()
+        self._settings = initiate_settings()
         await self._save()
 
     async def _save(self) -> None:

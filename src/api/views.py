@@ -69,7 +69,7 @@ async def get_view_data(
 
 @router.post("")
 async def create_custom_view(req: CreateViewRequest) -> Dict[str, Any]:
-    """Create and register a custom SQL view based on APPS_PIPELINE or joined tables."""
+    """Create and register a custom SQL view based on SERVICES_PIPELINE or joined tables."""
     clean_name = req.view_name.strip().upper()
     if not SQL_IDENTIFIER_REGEX.match(clean_name):
         raise HTTPException(

@@ -39,7 +39,7 @@ async def server_query(
             SELECT 
                 COUNT(*) as total_items,
                 COUNT(CASE WHEN JELLYFIN_STATUS = 'AVAILABLE' THEN 1 END) as available_media
-            FROM APPS_PIPELINE;
+            FROM SERVICES_PIPELINE;
         """)
         git_status = await gitops_manager.get_status()
         sched_status = scheduler.get_scheduler_status()
@@ -96,7 +96,7 @@ async def server_query(
             params.append(filter.upper())
 
         items = await db_manager.query(
-            f"SELECT * FROM APPS_PIPELINE {where_sql} ORDER BY LAST_UPDATED DESC LIMIT ?;",
+            f"SELECT * FROM SERVICES_PIPELINE {where_sql} ORDER BY LAST_UPDATED DESC LIMIT ?;",
             tuple(params + [limit]),
         )
         return {

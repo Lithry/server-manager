@@ -6,19 +6,19 @@
 
 ## 🌟 Core Features
 
-1. **Universal Ingestion Pipeline (`APPS_PIPELINE`) & Dynamic Schema Engine**:
-   - Centralizes media tracking and application telemetry across Sonarr, Radarr, Shoko Server, Jellyfin, and AniBridge.
-   - **Dynamic Schema Mapper**: Live-sample application APIs, select fields, and automatically apply sanitized columns (`^[A-Z0-9_]+$`).
+1. **Universal Ingestion Pipeline (`SERVICES_PIPELINE`) & Dynamic Schema Engine**:
+   - Centralizes media tracking and application telemetry across external services (Sonarr, Radarr, Shoko Server, Jellyfin, AniBridge, etc.).
+   - **Dynamic Schema Mapper**: Live-sample service APIs, select fields, and automatically apply sanitized columns (`^[A-Z0-9_]+$`).
    - **Field Transformers**: Map incoming attributes using conditional expressions (e.g. `if "anime" in tags then 1 else 0 -> IS_ANIME`).
    - **Clean Database Principle**: Non-monitored or filtered files are dispatched to an in-memory volatile ring-buffer event log for operator review, preventing unneeded rows in SQLite.
 
 2. **DAG Stage Engine, Predicate Execution & Correlation Model**:
    - **Semantic Slugs**: Stages are defined by semantic keys (`id: "ingest"`, `id: "recognition"`, `id: "library"`) with visual drag-and-drop sequencing.
-   - **Root Producer Stages (`start_condition IS NULL`)**: Only stages without prerequisites can create new rows in `APPS_PIPELINE`. Multiple apps in root (Sonarr, Radarr) produce independent rows.
+   - **Root Producer Stages (`start_condition IS NULL`)**: Only stages without prerequisites can create new rows in `SERVICES_PIPELINE`. Multiple root services produce independent rows.
    - **Consumer Stages (`start_condition IS NOT NULL`)**: Require correlation with existing rows and evaluate boolean predicates to `true` (e.g. `stage.ingest.completed AND IS_ANIME == 1`).
    - **Two-Phase Handshake Correlation**:
      - *Handshake Phase*: Correlates items via physical `FILE_PATH` (or `VFS_PATH` resolved via `os.readlink()` over `/DATA:ro` with zero disk spin).
-     - *Lifecycle Phase*: Applications track and update items strictly by native IDs (`SONARR_EPISODE_ID`, `SHOKO_FILE_ID`, `JELLYFIN_ITEM_ID`).
+     - *Lifecycle Phase*: Services track and update items strictly by native IDs (`SONARR_EPISODE_ID`, `SHOKO_FILE_ID`, `JELLYFIN_ITEM_ID`).
    - **Stability & Watchdogs**:
      - Ingestion grace period (`grace_period_minutes`, default 10m) ensures files stabilize on disk before Stage 1 completes.
      - Stage watchdog timeout (`timeout_minutes`, default 30m) automatically emits `WARN_PIPELINE_STALLED`.
@@ -27,7 +27,7 @@
      - Detects misclassified items (`WARN_ANIME_TAG_MISCLASSIFIED` if Jellyfin finds VFS with `IS_ANIME = 0`).
 
 3. **Visual SQL View Builder (`MEDIA_CATALOG` Preset)**:
-   - Create custom tables and views over `APPS_PIPELINE` using visual SQL builders.
+   - Create custom tables and views over `SERVICES_PIPELINE` using visual SQL builders.
    - Factory preset for consolidated playable media libraries (`WHERE JELLYFIN_STATUS = 'AVAILABLE'`).
 
 4. **Extensible Error Index & System Incidents**:
@@ -51,13 +51,13 @@
 ## 🧭 WebUI Navigation Structure
 
 - **Overview**: System telemetry, storage state, and health summaries.
-- **Universal Pipeline**: Live interactive table of `APPS_PIPELINE` across all stages.
+- **Universal Pipeline**: Live interactive table of `SERVICES_PIPELINE` across all stages.
 - **View Builder**: Custom SQL view manager and `MEDIA_CATALOG` visual explorer.
 - **Incidents & Errors**: Unified anomaly logs (`SYSTEM_INCIDENTS`) and catalog (`ERROR_INDEX`).
 - **Custom Tools**: Host telemetry script runner with live log console.
 - **GitOps State**: Deployment tracking and commit synchronization with `cubi-server`.
 - **Settings**: Modular configuration hub featuring 5 specialized sub-tabs:
-  - *Apps*: API endpoints, credentials, and polling intervals.
+  - *Services*: Dynamic API endpoints, credentials, and polling intervals (zero pre-baked templates).
   - *Stages & Predicates*: DAG stage graph, root producers, predicates, grace periods, and watchdogs.
   - *Field Mappings & Transformers*: Field extractor, column sanitizer, and conditional transformers.
   - *Notification Triggers*: Event bus to NTFY and Webhooks.

@@ -40,12 +40,13 @@ async def get_settings() -> Settings:
 @router.put("")
 async def update_settings(settings: Settings) -> Settings:
     """Update settings, auto-migrate database columns, and reload background scheduler."""
-    # Auto-ensure dynamic columns in APPS_PIPELINE for all field mappings
-    for app_name, app_conf in settings.apps.items():
-        for mapping in app_conf.field_mappings:
+    # Auto-ensure dynamic columns in SERVICES_PIPELINE for all field mappings
+    services_dict = getattr(settings, "services", {}) or getattr(settings, "apps", {})
+    for service_name, service_conf in services_dict.items():
+        for mapping in service_conf.field_mappings:
             if mapping.target_column:
                 try:
-                    await db_manager.ensure_column("APPS_PIPELINE", mapping.target_column, mapping.data_type)
+                    await db_manager.ensure_column("SERVICES_PIPELINE", mapping.target_column, mapping.data_type)
                 except Exception as e:
                     print(f"[!] Warning ensuring column {mapping.target_column}: {e}")
 
