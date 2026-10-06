@@ -131,7 +131,7 @@ async def create_incident(req: CreateIncidentRequest) -> Dict[str, Any]:
         )
 
     # Insert incident
-    async with await db_manager.get_connection() as db:
+    async with db_manager.get_connection() as db:
         cursor = await db.execute(
             """
             INSERT INTO SYSTEM_INCIDENTS (INCIDENT_CODE, SEVERITY, COMPONENT, DETAILS, RESOLVED)

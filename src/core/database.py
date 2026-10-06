@@ -3,7 +3,8 @@
 import os
 import re
 import aiosqlite
-from typing import Any, Dict, List, Optional
+from contextlib import asynccontextmanager
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 
 SQL_IDENTIFIER_REGEX = re.compile(r"^[A-Z0-9_]+$")
@@ -13,17 +14,18 @@ class DatabaseManager:
     def __init__(self, db_path: str | None = None):
         self.db_path = db_path or os.getenv("DB_PATH", "/data/server_manager.db")
 
-    async def get_connection(self) -> aiosqlite.Connection:
+    @asynccontextmanager
+    async def get_connection(self) -> AsyncGenerator[aiosqlite.Connection, None]:
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
-        db = await aiosqlite.connect(self.db_path)
-        db.row_factory = aiosqlite.Row
-        await db.execute("PRAGMA journal_mode = WAL;")
-        await db.execute("PRAGMA synchronous = NORMAL;")
-        await db.execute("PRAGMA busy_timeout = 5000;")
-        return db
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            await db.execute("PRAGMA journal_mode = WAL;")
+            await db.execute("PRAGMA synchronous = NORMAL;")
+            await db.execute("PRAGMA busy_timeout = 5000;")
+            yield db
 
     async def initialize_schema(self) -> None:
-        async with await self.get_connection() as db:
+        async with self.get_connection() as db:
             # 1. Universal APPS_PIPELINE table
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS APPS_PIPELINE (
@@ -130,7 +132,7 @@ class DatabaseManager:
             FROM APPS_PIPELINE
             WHERE JELLYFIN_STATUS = 'AVAILABLE';
         """
-        async with await self.get_connection() as db:
+        async with self.get_connection() as db:
             await db.execute(preset_query)
             await db.execute("""
                 INSERT OR IGNORE INTO CUSTOM_VIEWS (VIEW_NAME, SQL_QUERY, IS_PRESET)
@@ -149,7 +151,7 @@ class DatabaseManager:
         if not SQL_IDENTIFIER_REGEX.match(clean_table):
             raise ValueError(f"Table name '{clean_table}' violates SQL naming convention")
 
-        async with await self.get_connection() as db:
+        async with self.get_connection() as db:
             cursor = await db.execute(f"PRAGMA table_info({clean_table});")
             existing_columns = [row["name"].upper() for row in await cursor.fetchall()]
 
@@ -161,19 +163,19 @@ class DatabaseManager:
 
     async def get_table_columns(self, table_name: str) -> List[Dict[str, Any]]:
         clean_table = table_name.strip().upper()
-        async with await self.get_connection() as db:
+        async with self.get_connection() as db:
             cursor = await db.execute(f"PRAGMA table_info({clean_table});")
             rows = await cursor.fetchall()
             return [{"cid": r["cid"], "name": r["name"], "type": r["type"], "notnull": r["notnull"]} for r in rows]
 
     async def query(self, sql: str, params: tuple = ()) -> List[Dict[str, Any]]:
-        async with await self.get_connection() as db:
+        async with self.get_connection() as db:
             cursor = await db.execute(sql, params)
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
 
     async def execute(self, sql: str, params: tuple = ()) -> int:
-        async with await self.get_connection() as db:
+        async with self.get_connection() as db:
             cursor = await db.execute(sql, params)
             await db.commit()
             return cursor.rowcount

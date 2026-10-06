@@ -34,6 +34,6 @@ ENV PUID=1000 \
 EXPOSE 8099
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:8099/api/v1/health || exit 1
+    CMD curl -f http://localhost:8099/health || exit 1
 
 CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8099"]

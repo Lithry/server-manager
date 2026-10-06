@@ -98,7 +98,7 @@ async def create_custom_view(req: CreateViewRequest) -> Dict[str, Any]:
 
     # Attempt view creation in SQLite
     try:
-        async with await db_manager.get_connection() as db:
+        async with db_manager.get_connection() as db:
             await db.execute(f"DROP VIEW IF EXISTS {clean_name};")
             await db.execute(full_create_query)
             await db.execute(
@@ -131,7 +131,7 @@ async def delete_custom_view(view_name: str) -> Dict[str, Any]:
     if rows[0]["IS_PRESET"] == 1:
         raise HTTPException(status_code=403, detail=f"View '{clean_name}' is a factory preset and cannot be deleted")
 
-    async with await db_manager.get_connection() as db:
+    async with db_manager.get_connection() as db:
         await db.execute(f"DROP VIEW IF EXISTS {clean_name};")
         await db.execute("DELETE FROM CUSTOM_VIEWS WHERE VIEW_NAME = ?;", (clean_name,))
         await db.commit()
