@@ -112,14 +112,6 @@ class ConfigManager:
             try:
                 with open(self.settings_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                # Seamless migration: rename legacy 'apps' key to 'services'
-                if "apps" in data and "services" not in data:
-                    data["services"] = data.pop("apps")
-                # Remove deprecated stage_id from legacy app configs if present
-                if isinstance(data.get("services"), dict):
-                    for s_id, s_cfg in data["services"].items():
-                        if isinstance(s_cfg, dict) and "stage_id" in s_cfg:
-                            del s_cfg["stage_id"]
                 self._settings = Settings.model_validate(data)
                 return
             except Exception as e:
