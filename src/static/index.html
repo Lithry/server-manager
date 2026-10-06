@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cubi ServerManager</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body class="dark-theme">
+  <div class="app-layout">
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="brand">
+          <div class="brand-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+              <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+              <line x1="12" y1="22.08" x2="12" y2="12"></line>
+            </svg>
+          </div>
+          <div>
+            <h1 class="brand-title">ServerManager</h1>
+            <span class="brand-subtitle">Cubi-Server Engine</span>
+          </div>
+        </div>
+      </div>
+
+      <nav class="nav-menu">
+        <button class="nav-item active" data-tab="overview" id="nav-overview">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+          <span>Overview</span>
+        </button>
+        <button class="nav-item" data-tab="pipeline" id="nav-pipeline">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+          <span>Universal Pipeline</span>
+        </button>
+        <button class="nav-item" data-tab="views" id="nav-views">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+          <span>View Builder</span>
+        </button>
+        <button class="nav-item" data-tab="incidents" id="nav-incidents">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+          <span>Incidents & Errors</span>
+          <span class="badge badge-alert hidden" id="nav-incidents-badge">0</span>
+        </button>
+        <button class="nav-item" data-tab="tools" id="nav-tools">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
+          <span>Custom Tools</span>
+        </button>
+        <button class="nav-item" data-tab="gitops" id="nav-gitops">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><path d="M13 6h3a2 2 0 0 1 2 2v7"></path><line x1="6" y1="9" x2="6" y2="21"></line></svg>
+          <span>GitOps State</span>
+        </button>
+        <button class="nav-item" data-tab="settings" id="nav-settings">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+          <span>Settings</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="system-status">
+          <span class="status-indicator online"></span>
+          <span class="status-text" id="status-daemon-text">Manager Online</span>
+        </div>
+        <div class="repo-badge" id="sidebar-repo-badge">
+          <span class="badge-branch" id="badge-branch">main</span>
+          <span class="badge-commit" id="badge-commit">--</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="content-wrapper">
+      <!-- Top Header Bar -->
+      <header class="topbar">
+        <div class="topbar-left">
+          <h2 class="view-title" id="page-title">System Overview</h2>
+        </div>
+        <div class="topbar-right">
+          <button class="btn btn-secondary btn-sm" id="btn-refresh" title="Refresh Current View">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+            Refresh
+          </button>
+          <div class="live-pill">
+            <span class="live-dot"></span>
+            <span>Port 8099</span>
+          </div>
+        </div>
+      </header>
+
+      <!-- TAB 1: OVERVIEW -->
+      <section class="tab-panel active" id="tab-overview">
+        <div class="metric-grid">
+          <div class="metric-card">
+            <div class="metric-header">
+              <span class="metric-label">Pipeline Items</span>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-accent"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"></line><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+            </div>
+            <div class="metric-value" id="ov-pipeline-count">0</div>
+            <div class="metric-caption">Items tracked in universal pipeline</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-header">
+              <span class="metric-label">Active Incidents</span>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-alert"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+            </div>
+            <div class="metric-value text-alert" id="ov-incident-count">0</div>
+            <div class="metric-caption" id="ov-incident-caption">0 critical anomalies</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-header">
+              <span class="metric-label">Media Catalog</span>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-success"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+            </div>
+            <div class="metric-value text-success" id="ov-catalog-count">0</div>
+            <div class="metric-caption">Items verified in Jellyfin library</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-header">
+              <span class="metric-label">GitOps Status</span>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-accent"><circle cx="18" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><path d="M13 6h3a2 2 0 0 1 2 2v7"></path><line x1="6" y1="9" x2="6" y2="21"></line></svg>
+            </div>
+            <div class="metric-value" id="ov-git-branch">main</div>
+            <div class="metric-caption" id="ov-git-status">Synchronized with host</div>
+          </div>
+        </div>
+
+        <div class="grid-2-col">
+          <!-- Active Anomalies -->
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Recent System Incidents</h3>
+              <button class="btn btn-text btn-sm" onclick="app.switchTab('incidents')">View All</button>
+            </div>
+            <div class="card-body">
+              <div id="ov-incidents-list" class="list-container">
+                <div class="empty-state">No active incidents. Telemetry nominal.</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Quick Pipeline Summary -->
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Apps Pipeline Stages</h3>
+              <button class="btn btn-text btn-sm" onclick="app.switchTab('pipeline')">Open Pipeline</button>
+            </div>
+            <div class="card-body">
+              <div class="stage-pipeline-list" id="ov-pipeline-stages">
+                <div class="stage-item">
+                  <span class="stage-badge">Stage 1</span>
+                  <span class="stage-name">Sonarr / Radarr Ingestion</span>
+                  <span class="stage-status status-active">Active</span>
+                </div>
+                <div class="stage-item">
+                  <span class="stage-badge">Stage 2</span>
+                  <span class="stage-name">Shoko VFS Linking</span>
+                  <span class="stage-status status-active">Active</span>
+                </div>
+                <div class="stage-item">
+                  <span class="stage-badge">Stage 3</span>
+                  <span class="stage-name">Jellyfin Media Library</span>
+                  <span class="stage-status status-active">Active</span>
+                </div>
+                <div class="stage-item">
+                  <span class="stage-badge">Stage 4</span>
+                  <span class="stage-name">AniBridge Sync</span>
+                  <span class="stage-status status-active">Active</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 2: UNIVERSAL PIPELINE -->
+      <section class="tab-panel" id="tab-pipeline">
+        <div class="toolbar">
+          <div class="toolbar-left">
+            <button class="btn btn-primary" id="btn-add-column">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+              Add Column
+            </button>
+            <button class="btn btn-secondary" id="btn-sample-api">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+              Sample App API
+            </button>
+          </div>
+          <div class="toolbar-right">
+            <select id="pipeline-filter-stage" class="form-select">
+              <option value="">All Stages</option>
+              <option value="1">Stage 1: Sonarr/Radarr</option>
+              <option value="2">Stage 2: Shoko</option>
+              <option value="3">Stage 3: Jellyfin</option>
+              <option value="4">Stage 4: AniBridge</option>
+            </select>
+            <select id="pipeline-filter-status" class="form-select">
+              <option value="">All Statuses</option>
+              <option value="PENDING">PENDING</option>
+              <option value="IMPORTED">IMPORTED</option>
+              <option value="RECOGNIZED">RECOGNIZED</option>
+              <option value="AVAILABLE">AVAILABLE</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="card table-card">
+          <div class="table-container">
+            <table class="data-table" id="pipeline-table">
+              <thead>
+                <tr id="pipeline-table-headers">
+                  <th>ID</th>
+                  <th>Key</th>
+                  <th>Stage</th>
+                  <th>Status</th>
+                  <th>Title</th>
+                  <th>Updated</th>
+                </tr>
+              </thead>
+              <tbody id="pipeline-table-body">
+                <tr><td colspan="6" class="text-center">Loading pipeline data...</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="table-footer">
+            <span id="pipeline-pagination-info">Showing 0 items</span>
+            <div class="pagination-controls">
+              <button class="btn btn-sm btn-secondary" id="btn-pipeline-prev" disabled>Previous</button>
+              <button class="btn btn-sm btn-secondary" id="btn-pipeline-next" disabled>Next</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 3: VIEW BUILDER -->
+      <section class="tab-panel" id="tab-views">
+        <div class="toolbar">
+          <div class="toolbar-left">
+            <div class="tabs-subnav" id="views-tabs-container">
+              <!-- Dynamically populated view tabs -->
+            </div>
+          </div>
+          <div class="toolbar-right">
+            <button class="btn btn-primary" id="btn-create-view">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+              New Custom View
+            </button>
+          </div>
+        </div>
+
+        <div class="card table-card">
+          <div class="card-header border-bottom">
+            <div>
+              <h3 class="card-title" id="active-view-title">MEDIA_CATALOG (Preset)</h3>
+              <p class="card-subtitle" id="active-view-subtitle">Jellyfin unified available media projection</p>
+            </div>
+            <div id="view-actions">
+              <!-- View deletion if custom -->
+            </div>
+          </div>
+          <div class="table-container">
+            <table class="data-table" id="view-data-table">
+              <thead><tr id="view-data-headers"><th>Loading...</th></tr></thead>
+              <tbody id="view-data-body"><tr><td class="text-center">Loading view projection...</td></tr></tbody>
+            </table>
+          </div>
+          <div class="table-footer">
+            <span id="view-pagination-info">Showing 0 rows</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 4: INCIDENTS & ERRORS -->
+      <section class="tab-panel" id="tab-incidents">
+        <div class="toolbar">
+          <div class="toolbar-left">
+            <div class="segmented-control">
+              <button class="seg-btn active" id="seg-incidents-active">Active Incidents</button>
+              <button class="seg-btn" id="seg-incidents-resolved">Resolved</button>
+              <button class="seg-btn" id="seg-error-catalog">Error Index Catalog</button>
+            </div>
+          </div>
+          <div class="toolbar-right">
+            <button class="btn btn-secondary" id="btn-report-incident">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+              Report Incident
+            </button>
+          </div>
+        </div>
+
+        <div id="incidents-container">
+          <div class="card table-card">
+            <div class="table-container">
+              <table class="data-table" id="incidents-table">
+                <thead>
+                  <tr>
+                    <th>Severity</th>
+                    <th>Code</th>
+                    <th>Component</th>
+                    <th>Details</th>
+                    <th>Remedy Suggestion</th>
+                    <th>Reported</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="incidents-table-body">
+                  <tr><td colspan="7" class="text-center">Loading incidents...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div id="error-catalog-container" class="hidden">
+          <div class="card table-card">
+            <div class="table-container">
+              <table class="data-table" id="catalog-table">
+                <thead>
+                  <tr>
+                    <th>Code</th>
+                    <th>Category</th>
+                    <th>Severity</th>
+                    <th>Description</th>
+                    <th>Remedy Script/Action</th>
+                  </tr>
+                </thead>
+                <tbody id="catalog-table-body">
+                  <tr><td colspan="5" class="text-center">Loading error index...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 5: CUSTOM TOOLS -->
+      <section class="tab-panel" id="tab-tools">
+        <div class="tools-layout">
+          <div class="tools-sidebar">
+            <div class="tools-sidebar-header">
+              <h3>Available Tools</h3>
+              <span class="path-caption">/config/custom_tools/</span>
+            </div>
+            <div class="tools-list" id="custom-tools-list">
+              <div class="empty-state">No custom tools found. Mount scripts in /config/custom_tools.</div>
+            </div>
+          </div>
+          <div class="tools-console-container">
+            <div class="console-header">
+              <div>
+                <span class="console-title" id="active-tool-name">Select a tool to execute</span>
+                <span class="console-subtitle" id="active-tool-desc"></span>
+              </div>
+              <button class="btn btn-primary btn-sm" id="btn-run-active-tool" disabled>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                Execute Tool
+              </button>
+            </div>
+            <div class="console-body" id="tool-console-output">
+              <pre class="console-pre">Ready for execution...</pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 6: GITOPS STATE -->
+      <section class="tab-panel" id="tab-gitops">
+        <div class="card gitops-card">
+          <div class="card-header">
+            <h3 class="card-title">Host Repository Mount (/repo:ro)</h3>
+            <span class="badge" id="gitops-mount-status">Mounted</span>
+          </div>
+          <div class="card-body">
+            <div class="gitops-info-grid">
+              <div class="info-row">
+                <span class="info-label">Current Branch:</span>
+                <span class="info-value text-accent" id="gitops-branch">main</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">Active Commit:</span>
+                <span class="info-value font-mono" id="gitops-commit">--</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">Working Tree Status:</span>
+                <span class="info-value" id="gitops-clean">Clean</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">Last Commit Subject:</span>
+                <span class="info-value" id="gitops-last-commit">--</span>
+              </div>
+            </div>
+            <div class="alert-box alert-info mt-4">
+              <strong>GitOps Protocol:</strong> ServerManager container observes host repo in read-only mode (<code>:ro</code>). Deployment is managed via <code>cubi-deploy</code> or Git on host.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 7: SETTINGS -->
+      <section class="tab-panel" id="tab-settings">
+        <div class="settings-grid">
+          <!-- Apps Configuration -->
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Upstream Applications</h3>
+              <button class="btn btn-primary btn-sm" id="btn-save-settings">Save All Settings</button>
+            </div>
+            <div class="card-body" id="settings-apps-container">
+              <!-- Dynamically populated app configs -->
+            </div>
+          </div>
+
+          <!-- Notification Triggers -->
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Notification Triggers</h3>
+              <button class="btn btn-secondary btn-sm" id="btn-test-alert">Test Alert</button>
+            </div>
+            <div class="card-body" id="settings-notifications-container">
+              <!-- Dynamically populated notification triggers -->
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- MODAL: Add Column -->
+  <div class="modal-backdrop hidden" id="modal-add-column">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 class="modal-title">Add Dynamic Column</h3>
+        <button class="btn-close" onclick="app.closeModals()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc">Column names are strictly uppercase with underscores (e.g. <code>MY_NEW_STATUS</code>).</p>
+        <div class="form-group">
+          <label>Column Name</label>
+          <input type="text" id="input-col-name" class="form-input" placeholder="JELLYFIN_RATING" autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label>Data Type</label>
+          <select id="input-col-type" class="form-select">
+            <option value="TEXT">TEXT</option>
+            <option value="INTEGER">INTEGER</option>
+            <option value="REAL">REAL</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="app.closeModals()">Cancel</button>
+        <button class="btn btn-primary" id="btn-submit-add-column">Add Column</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Sample API -->
+  <div class="modal-backdrop hidden" id="modal-sample-api">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <h3 class="modal-title">Sample App API Keys</h3>
+        <button class="btn-close" onclick="app.closeModals()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-inline mb-3">
+          <select id="sample-app-select" class="form-select">
+            <option value="sonarr">Sonarr (/api/v3/history)</option>
+            <option value="radarr">Radarr (/api/v3/history)</option>
+            <option value="shoko">Shoko (/api/v3/Series)</option>
+            <option value="jellyfin">Jellyfin (/Items)</option>
+          </select>
+          <button class="btn btn-secondary" id="btn-fetch-sample">Fetch Sample</button>
+        </div>
+        <div class="api-fields-viewer" id="api-sample-result">
+          <p class="text-muted">Click 'Fetch Sample' to inspect API JSON schema and keys.</p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="app.closeModals()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Create View -->
+  <div class="modal-backdrop hidden" id="modal-create-view">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <h3 class="modal-title">Create Custom View</h3>
+        <button class="btn-close" onclick="app.closeModals()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>View Name</label>
+          <input type="text" id="input-view-name" class="form-input" placeholder="UNWATCHED_ANIMES">
+        </div>
+        <div class="form-group">
+          <label>SQL SELECT Query</label>
+          <textarea id="input-view-sql" class="form-textarea font-mono" rows="6" placeholder="SELECT ID, PIPELINE_KEY, SONARR_TITLE FROM APPS_PIPELINE WHERE JELLYFIN_STATUS = 'AVAILABLE'"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="app.closeModals()">Cancel</button>
+        <button class="btn btn-primary" id="btn-submit-create-view">Save View</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
