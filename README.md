@@ -1,4 +1,4 @@
-# server-manager — Universal Pipeline, Monitoring & Telemetry Appliance
+# server-manager — Universal Pipeline, Monitoring & Telemetry Appliance (`v0.1.3`)
 
 `server-manager` is an autonomous, containerized administration and telemetry platform designed for homelab and media server environments (`cubi-server`). It operates on port **8099** with a native FastAPI backend, SQLite in WAL mode, and a responsive vanilla WebUI.
 
@@ -6,30 +6,62 @@
 
 ## 🌟 Core Features
 
-1. **Universal Ingestion Pipeline (`APPS_PIPELINE`)**:
+1. **Universal Ingestion Pipeline (`APPS_PIPELINE`) & Dynamic Schema Engine**:
    - Centralizes media tracking and application telemetry across Sonarr, Radarr, Shoko Server, Jellyfin, and AniBridge.
-   - Dynamic schema mapper: live-sample application APIs, select fields, and automatically apply sanitized columns (`^[A-Z0-9_]+$`).
-   - App execution stages and dependency chains (e.g. Stage 1: Ingest -> Stage 2: Recognize -> Stage 3: Available).
+   - **Dynamic Schema Mapper**: Live-sample application APIs, select fields, and automatically apply sanitized columns (`^[A-Z0-9_]+$`).
+   - **Field Transformers**: Map incoming attributes using conditional expressions (e.g. `if "anime" in tags then 1 else 0 -> IS_ANIME`).
+   - **Clean Database Principle**: Non-monitored or filtered files are dispatched to an in-memory volatile ring-buffer event log for operator review, preventing unneeded rows in SQLite.
 
-2. **Visual SQL View Builder (`MEDIA_CATALOG` Preset)**:
+2. **DAG Stage Engine, Predicate Execution & Correlation Model**:
+   - **Semantic Slugs**: Stages are defined by semantic keys (`id: "ingest"`, `id: "recognition"`, `id: "library"`) with visual drag-and-drop sequencing.
+   - **Root Producer Stages (`start_condition IS NULL`)**: Only stages without prerequisites can create new rows in `APPS_PIPELINE`. Multiple apps in root (Sonarr, Radarr) produce independent rows.
+   - **Consumer Stages (`start_condition IS NOT NULL`)**: Require correlation with existing rows and evaluate boolean predicates to `true` (e.g. `stage.ingest.completed AND IS_ANIME == 1`).
+   - **Two-Phase Handshake Correlation**:
+     - *Handshake Phase*: Correlates items via physical `FILE_PATH` (or `VFS_PATH` resolved via `os.readlink()` over `/DATA:ro` with zero disk spin).
+     - *Lifecycle Phase*: Applications track and update items strictly by native IDs (`SONARR_EPISODE_ID`, `SHOKO_FILE_ID`, `JELLYFIN_ITEM_ID`).
+   - **Stability & Watchdogs**:
+     - Ingestion grace period (`grace_period_minutes`, default 10m) ensures files stabilize on disk before Stage 1 completes.
+     - Stage watchdog timeout (`timeout_minutes`, default 30m) automatically emits `WARN_PIPELINE_STALLED`.
+   - **Native API Tag Classification**:
+     - Resolves anime status directly from `/api/v3/tag` in Sonarr/Radarr. Zero regex or deduction from `FILE_PATH`.
+     - Detects misclassified items (`WARN_ANIME_TAG_MISCLASSIFIED` if Jellyfin finds VFS with `IS_ANIME = 0`).
+
+3. **Visual SQL View Builder (`MEDIA_CATALOG` Preset)**:
    - Create custom tables and views over `APPS_PIPELINE` using visual SQL builders.
    - Factory preset for consolidated playable media libraries (`WHERE JELLYFIN_STATUS = 'AVAILABLE'`).
 
-3. **Extensible Error Index & System Incidents**:
+4. **Extensible Error Index & System Incidents**:
    - Normalized incident tracker (`SYSTEM_INCIDENTS`) linked to an extensible error definition catalog (`ERROR_INDEX`).
    - Includes custom `REMEDY` runbook column for operator guidance.
 
-4. **WebUI Event-Driven Notification Engine**:
-   - Visual rule builder for alerts (`ON_INCIDENT_OPEN`, `ON_DEPLOY_SUCCESS`, etc.).
+5. **WebUI Event-Driven Notification Engine**:
+   - Visual rule builder for alerts (`ON_INCIDENT_OPEN`, `ON_DEPLOY_SUCCESS`, `ON_MEDIA_ADDED`, etc.).
    - Dispatches payloads to NTFY topics or custom Webhooks.
 
-5. **Custom Tools Bridge (`/config/custom_tools/`)**:
+6. **Custom Tools Bridge (`/config/custom_tools/`)**:
    - Sandboxed execution of host monitoring scripts (Storage Anti-Wake, VFS checks, Docker socket health).
    - Live streaming execution console directly in the WebUI.
 
-6. **Three-Tier Decoupled LLM Architecture (Rule 9)**:
+7. **Three-Tier Decoupled LLM Architecture (Rule 9)**:
    - Lean read-only meta-tools API (`GET /api/v1/meta/query`) for edge LLMs (LibreChat / `llama3.2:3b`).
    - Purely passive and informational; zero destructive host actions.
+
+---
+
+## 🧭 WebUI Navigation Structure
+
+- **Overview**: System telemetry, storage state, and health summaries.
+- **Universal Pipeline**: Live interactive table of `APPS_PIPELINE` across all stages.
+- **View Builder**: Custom SQL view manager and `MEDIA_CATALOG` visual explorer.
+- **Incidents & Errors**: Unified anomaly logs (`SYSTEM_INCIDENTS`) and catalog (`ERROR_INDEX`).
+- **Custom Tools**: Host telemetry script runner with live log console.
+- **GitOps State**: Deployment tracking and commit synchronization with `cubi-server`.
+- **Settings**: Modular configuration hub featuring 5 specialized sub-tabs:
+  - *Apps*: API endpoints, credentials, and polling intervals.
+  - *Stages & Predicates*: DAG stage graph, root producers, predicates, grace periods, and watchdogs.
+  - *Field Mappings & Transformers*: Field extractor, column sanitizer, and conditional transformers.
+  - *Notification Triggers*: Event bus to NTFY and Webhooks.
+  - *Engine & Retention*: Database maintenance, WAL checkpoints, and retention pruning.
 
 ---
 
