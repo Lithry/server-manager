@@ -688,6 +688,35 @@
           </div>
         </div>
 
+        <!-- Ingestion Pipeline Key & Filters -->
+        <div class="card p-3 mb-3 bg-surface-subtle">
+          <h4 class="card-subtitle mb-2" style="font-size: 0.95rem;">Ingestion & Pipeline Identity</h4>
+          
+          <div class="form-grid-2 mb-3">
+            <div class="form-group">
+              <label>Pipeline Key Template</label>
+              <input type="text" id="input-service-key-template" class="form-input font-mono" placeholder="{service}:{id}" value="{service}:{id}">
+              <small class="text-muted">Unique tracking identifier. Presets: <code>{service}:{id}</code> or <code>{data.path}</code></small>
+            </div>
+            <div class="form-group">
+              <label>Secondary Enrichment URL (Optional)</label>
+              <input type="text" id="input-service-enrichment" class="form-input font-mono" placeholder="/api/v3/episode/{episodeId}">
+              <small class="text-muted">In-memory query to merge details (e.g. <code>/api/v3/episode/{episodeId}</code>).</small>
+            </div>
+          </div>
+
+          <div class="form-group mb-0">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <label class="mb-0"><strong>Allowed Ingestion Event Types</strong></label>
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-discover-service-events">Discover Events from API</button>
+            </div>
+            <p class="text-xs text-muted mb-2">Only checked event types will create new entries in SERVICES_PIPELINE. Deletions and pending downloads are excluded by default.</p>
+            <div id="service-events-checkboxes" class="services-checkbox-grid">
+              <span class="text-muted text-sm">Save or click 'Discover Events from API' to fetch supported eventTypes.</span>
+            </div>
+          </div>
+        </div>
+
         <div class="form-checkbox">
           <input type="checkbox" id="chk-service-enabled" checked>
           <label for="chk-service-enabled">Enable active polling loop for this service</label>

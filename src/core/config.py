@@ -32,6 +32,9 @@ class ServiceConfig(BaseModel):
     base_url: str = ""
     api_key: str = ""
     poll_interval_seconds: int | None = None  # None = inherit Settings.global_poll_interval_seconds
+    pipeline_key_template: str = "{service}:{id}"
+    allowed_event_types: list[str] = Field(default_factory=list)
+    enrichment_endpoint: str = ""
     field_mappings: list[FieldMapping] = Field(default_factory=list)
 
 

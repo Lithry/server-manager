@@ -185,6 +185,9 @@ class ServerManagerApp {
         customBlock.classList.toggle('hidden', e.target.checked);
       }
     });
+    document.getElementById('btn-discover-service-events')?.addEventListener('click', () => {
+      this.discoverServiceEvents();
+    });
     document.getElementById('btn-submit-add-service')?.addEventListener('click', () => {
       this.saveServiceFromModal();
     });
@@ -964,6 +967,9 @@ class ServerManagerApp {
     const enabledChk = document.getElementById('chk-service-enabled');
     const customBlock = document.getElementById('service-custom-poll-block');
 
+    const keyTemplateEl = document.getElementById('input-service-key-template');
+    const enrichEl = document.getElementById('input-service-enrichment');
+
     if (editServiceId && this.settingsData?.services?.[editServiceId]) {
       const s = this.settingsData.services[editServiceId];
       if (titleEl) titleEl.innerText = `Edit Service: ${s.name}`;
@@ -972,11 +978,15 @@ class ServerManagerApp {
       if (urlEl) urlEl.value = s.base_url || '';
       if (keyEl) keyEl.value = s.api_key || '';
       if (enabledChk) enabledChk.checked = s.enabled !== false;
+      if (keyTemplateEl) keyTemplateEl.value = s.pipeline_key_template || '{service}:{id}';
+      if (enrichEl) enrichEl.value = s.enrichment_endpoint || '';
 
       const hasOverride = s.poll_interval_seconds !== null && s.poll_interval_seconds !== undefined && s.poll_interval_seconds > 0;
       if (inheritChk) inheritChk.checked = !hasOverride;
       if (pollEl) pollEl.value = hasOverride ? s.poll_interval_seconds : (this.settingsData.global_poll_interval_seconds || 300);
       if (customBlock) customBlock.classList.toggle('hidden', !hasOverride);
+
+      this.renderServiceEventCheckboxes(s.allowed_event_types || []);
     } else {
       this.manualSlugEdited = false;
       if (titleEl) titleEl.innerText = 'Register Service';
@@ -988,9 +998,75 @@ class ServerManagerApp {
       if (inheritChk) inheritChk.checked = true;
       if (pollEl) pollEl.value = this.settingsData?.global_poll_interval_seconds || 300;
       if (customBlock) customBlock.classList.add('hidden');
+      if (keyTemplateEl) keyTemplateEl.value = '{service}:{id}';
+      if (enrichEl) enrichEl.value = '';
+
+      this.renderServiceEventCheckboxes([]);
     }
 
     document.getElementById('modal-add-service')?.classList.remove('hidden');
+  }
+
+  renderServiceEventCheckboxes(allowedEvents = [], availableEvents = null) {
+    const container = document.getElementById('service-events-checkboxes');
+    if (!container) return;
+
+    const defaults = [
+      { event_type: 'downloadFolderImported', description: 'File imported to media library', default_active: true },
+      { event_type: 'episodeFileRenamed', description: 'Episode file renamed to standard format', default_active: true },
+      { event_type: 'movieFileRenamed', description: 'Movie file renamed to standard format', default_active: true },
+      { event_type: 'episodeFileDeleted', description: 'File deleted from disk (ignored by default)', default_active: false },
+      { event_type: 'movieFileDeleted', description: 'File deleted from disk (ignored by default)', default_active: false },
+      { event_type: 'grabbed', description: 'Release sent to download client (ignored by default)', default_active: false },
+    ];
+
+    const list = availableEvents || defaults;
+    container.innerHTML = list.map(ev => {
+      const isChecked = allowedEvents && allowedEvents.length > 0
+        ? allowedEvents.includes(ev.event_type)
+        : ev.default_active;
+      return `
+        <label class="form-checkbox-label d-flex align-items-center gap-2 mb-2 p-2 bg-surface rounded border cursor-pointer">
+          <input type="checkbox" name="service-event-type" value="${this.escapeHtml(ev.event_type)}" ${isChecked ? 'checked' : ''}>
+          <div>
+            <strong class="font-mono text-sm">${this.escapeHtml(ev.event_type)}</strong>
+            <div class="text-xs text-muted">${this.escapeHtml(ev.description || '')}</div>
+          </div>
+        </label>
+      `;
+    }).join('');
+  }
+
+  async discoverServiceEvents() {
+    const idEl = document.getElementById('input-service-id');
+    const serviceId = idEl?.value.trim().toLowerCase();
+    const container = document.getElementById('service-events-checkboxes');
+    if (!serviceId) {
+      alert('Please enter a Service ID (slug) first.');
+      return;
+    }
+
+    if (container) {
+      container.innerHTML = '<span class="text-muted text-sm">Querying service API for history events...</span>';
+    }
+
+    try {
+      const resp = await fetch(`/api/v1/pipeline/services/${serviceId}/events`);
+      const data = await resp.json();
+      if (!resp.ok || !data.success || !data.event_types || data.event_types.length === 0) {
+        if (container) {
+          container.innerHTML = `<span class="text-alert text-sm">Could not discover events: ${data.error || 'Empty response'}. Showing standard presets.</span>`;
+          setTimeout(() => this.renderServiceEventCheckboxes(), 1500);
+        }
+        return;
+      }
+
+      this.renderServiceEventCheckboxes([], data.event_types);
+    } catch (e) {
+      if (container) {
+        container.innerHTML = `<span class="text-alert text-sm">Network error discovering events: ${e.message}</span>`;
+      }
+    }
   }
 
   saveServiceFromModal() {
@@ -1001,6 +1077,8 @@ class ServerManagerApp {
     const inheritChk = document.getElementById('chk-service-inherit-poll');
     const pollEl = document.getElementById('input-service-poll');
     const enabledChk = document.getElementById('chk-service-enabled');
+    const keyTemplateEl = document.getElementById('input-service-key-template');
+    const enrichEl = document.getElementById('input-service-enrichment');
 
     const id = idEl?.value.trim().toLowerCase();
     const name = nameEl?.value.trim();
@@ -1024,6 +1102,11 @@ class ServerManagerApp {
       pollInterval = val > 0 ? val : null;
     }
 
+    const checkedEvents = [];
+    document.querySelectorAll('input[name="service-event-type"]:checked').forEach(cb => {
+      checkedEvents.push(cb.value);
+    });
+
     const existing = this.settingsData.services[id] || {};
     this.settingsData.services[id] = {
       name: name,
@@ -1031,6 +1114,9 @@ class ServerManagerApp {
       base_url: urlEl?.value.trim() || '',
       api_key: keyEl?.value.trim() || '',
       poll_interval_seconds: pollInterval,
+      pipeline_key_template: keyTemplateEl?.value.trim() || '{service}:{id}',
+      allowed_event_types: checkedEvents,
+      enrichment_endpoint: enrichEl?.value.trim() || '',
       field_mappings: existing.field_mappings || [],
     };
 
@@ -1620,6 +1706,7 @@ class ServerManagerApp {
     const filterInput = document.getElementById('sample-filter-input');
     const filterContainer = document.getElementById('sample-filter-container');
     const resultBox = document.getElementById('api-sample-result');
+    const endpointInput = document.getElementById('sample-endpoint-input');
 
     if (badgeEl && serviceCfg) {
       badgeEl.innerText = `${serviceCfg.name} (${activeService})`;
@@ -1633,8 +1720,58 @@ class ServerManagerApp {
     if (resultBox) resultBox.innerHTML = '<p class="text-muted">Click \'Fetch Sample\' to inspect JSON schema and keys.</p>';
 
     this.sampleFieldsCache = [];
-    if (activeService) {
-      this.updateSampleEndpointSuggestion(activeService);
+
+    // Contextual endpoints catalog filtered strictly by service
+    const SERVICE_ENDPOINTS = {
+      sonarr: [
+        { endpoint: '/api/v3/history', label: 'History Events' },
+        { endpoint: '/api/v3/queue', label: 'Active Queue' },
+        { endpoint: '/api/v3/series', label: 'Series List' },
+        { endpoint: '/api/v3/episode/{episodeId}', label: 'Episode Detail' },
+        { endpoint: '/api/v3/tag', label: 'Tags' },
+        { endpoint: '/api/v3/system/status', label: 'System Status' },
+      ],
+      radarr: [
+        { endpoint: '/api/v3/history', label: 'History Events' },
+        { endpoint: '/api/v3/queue', label: 'Active Queue' },
+        { endpoint: '/api/v3/movie', label: 'Movies List' },
+        { endpoint: '/api/v3/movie/{movieId}', label: 'Movie Detail' },
+        { endpoint: '/api/v3/tag', label: 'Tags' },
+        { endpoint: '/api/v3/system/status', label: 'System Status' },
+      ],
+      jellyfin: [
+        { endpoint: '/Items?Recursive=true', label: 'All Library Items' },
+        { endpoint: '/Libraries', label: 'Libraries' },
+        { endpoint: '/System/Info', label: 'System Info' },
+      ],
+      shoko: [
+        { endpoint: '/api/v3/File/Recent', label: 'Recent Files' },
+        { endpoint: '/api/v3/Series', label: 'Series Catalog' },
+      ],
+      qbittorrent: [
+        { endpoint: '/api/v2/torrents/info', label: 'Active Torrents' },
+        { endpoint: '/api/v2/transfer/info', label: 'Transfer Speeds' },
+      ],
+    };
+
+    const sType = (activeService || '').toLowerCase();
+    let matchedType = 'sonarr';
+    if (sType.includes('radarr')) matchedType = 'radarr';
+    else if (sType.includes('jellyfin')) matchedType = 'jellyfin';
+    else if (sType.includes('shoko')) matchedType = 'shoko';
+    else if (sType.includes('qbit')) matchedType = 'qbittorrent';
+    else if (sType.includes('sonarr')) matchedType = 'sonarr';
+
+    const epList = SERVICE_ENDPOINTS[matchedType] || SERVICE_ENDPOINTS.sonarr;
+    const dl = document.getElementById('common-endpoints-list');
+    if (dl) {
+      dl.innerHTML = epList.map(item => `
+        <option value="${item.endpoint}">${item.endpoint} (${item.label})</option>
+      `).join('');
+    }
+
+    if (endpointInput) {
+      endpointInput.value = epList[0].endpoint;
     }
 
     document.getElementById('modal-sample-api')?.classList.remove('hidden');

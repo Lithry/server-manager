@@ -135,7 +135,7 @@ async def add_pipeline_column(req: AddColumnRequest) -> Dict[str, Any]:
 
 @router.post("/sample")
 async def sample_app_api(req: SampleApiRequest) -> Dict[str, Any]:
-    """Sample an external service API to discover available payload fields."""
+    """Sample an external service API to discover available payload fields with parameter resolution."""
     s_id = req.service_id or req.app_id
     if not s_id:
         raise HTTPException(status_code=400, detail="service_id is required")
@@ -149,7 +149,37 @@ async def sample_app_api(req: SampleApiRequest) -> Dict[str, Any]:
     if not service_cfg.base_url:
         raise HTTPException(status_code=400, detail=f"Service '{s_id}' has no base_url configured")
 
-    url, headers = prepare_service_request(service_cfg.base_url, req.endpoint, service_cfg.api_key or "")
+    endpoint = req.endpoint.strip()
+    resolved_endpoint = endpoint
+
+    # Auto-resolve parameterized templates like /api/v3/episode/{id} or /api/v3/movie/{id}
+    if "{" in endpoint and "}" in endpoint:
+        try:
+            hist_url, hist_headers = prepare_service_request(service_cfg.base_url, "/api/v3/history?pageSize=1", service_cfg.api_key or "")
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                hist_resp = await client.get(hist_url, headers=hist_headers)
+                if hist_resp.status_code == 200:
+                    hist_data = hist_resp.json()
+                    recs = hist_data.get("records", []) if isinstance(hist_data, dict) else []
+                    if recs:
+                        r0 = recs[0]
+                        ep_id = r0.get("episodeId") or r0.get("id") or 1
+                        movie_id = r0.get("movieId") or r0.get("id") or 1
+                        series_id = r0.get("seriesId") or r0.get("id") or 1
+                        resolved_endpoint = (
+                            resolved_endpoint
+                            .replace("{records.episodeId}", str(ep_id))
+                            .replace("{episodeId}", str(ep_id))
+                            .replace("{records.movieId}", str(movie_id))
+                            .replace("{movieId}", str(movie_id))
+                            .replace("{records.seriesId}", str(series_id))
+                            .replace("{seriesId}", str(series_id))
+                        )
+                        resolved_endpoint = re.sub(r"\{id\}", str(ep_id if "episode" in endpoint else movie_id), resolved_endpoint)
+        except Exception:
+            pass
+
+    url, headers = prepare_service_request(service_cfg.base_url, resolved_endpoint, service_cfg.api_key or "")
 
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
@@ -158,6 +188,7 @@ async def sample_app_api(req: SampleApiRequest) -> Dict[str, Any]:
                 return {
                     "success": False,
                     "status_code": resp.status_code,
+                    "resolved_endpoint": resolved_endpoint,
                     "error": f"API returned status {resp.status_code}: {resp.text[:200]}",
                     "fields": [],
                 }
@@ -166,6 +197,7 @@ async def sample_app_api(req: SampleApiRequest) -> Dict[str, Any]:
             return {
                 "success": True,
                 "status_code": 200,
+                "resolved_endpoint": resolved_endpoint,
                 "fields": fields,
                 "total_fields": len(fields),
                 "sample_payload": payload if isinstance(payload, dict) else (payload[:2] if isinstance(payload, list) else payload),
@@ -173,8 +205,71 @@ async def sample_app_api(req: SampleApiRequest) -> Dict[str, Any]:
     except Exception as e:
         return {
             "success": False,
+            "resolved_endpoint": resolved_endpoint,
             "error": str(e),
             "fields": [],
+        }
+
+
+@router.get("/services/{service_id}/events")
+async def discover_service_events(service_id: str) -> Dict[str, Any]:
+    """Discover distinct event types from upstream service history."""
+    settings = await config_manager.get_settings()
+    services_dict = getattr(settings, "services", {}) or getattr(settings, "apps", {})
+    if service_id not in services_dict:
+        raise HTTPException(status_code=404, detail=f"Service '{service_id}' not configured")
+
+    service_cfg = services_dict[service_id]
+    if not service_cfg.base_url:
+        raise HTTPException(status_code=400, detail=f"Service '{service_id}' has no base_url configured")
+
+    url, headers = prepare_service_request(service_cfg.base_url, "/api/v3/history?pageSize=200", service_cfg.api_key or "")
+
+    EVENT_DESCRIPTIONS = {
+        "downloadFolderImported": ("File imported to media library", True),
+        "episodeFileRenamed": ("Episode file renamed to standard format", True),
+        "movieFileRenamed": ("Movie file renamed to standard format", True),
+        "episodeFileDeleted": ("File deleted from disk", False),
+        "movieFileDeleted": ("File deleted from disk", False),
+        "grabbed": ("Release sent to download client", False),
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(url, headers=headers)
+            if resp.status_code != 200:
+                return {
+                    "success": False,
+                    "error": f"API returned {resp.status_code}: {resp.text[:200]}",
+                    "event_types": [],
+                }
+            payload = resp.json()
+            records = payload.get("records", []) if isinstance(payload, dict) else []
+            discovered = set()
+            for r in records:
+                ev = r.get("eventType")
+                if ev:
+                    discovered.add(ev)
+
+            event_items = []
+            for ev in sorted(discovered):
+                desc, default_active = EVENT_DESCRIPTIONS.get(ev, ("Custom service event", False))
+                event_items.append({
+                    "event_type": ev,
+                    "description": desc,
+                    "default_active": default_active,
+                })
+
+            return {
+                "success": True,
+                "service_id": service_id,
+                "event_types": event_items,
+            }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "event_types": [],
         }
 
 
