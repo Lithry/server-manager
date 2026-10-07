@@ -16,7 +16,7 @@ class StageConfig(BaseModel):
     grace_period_minutes: int = 10
     timeout_minutes: int = 30
     service_ids: list[str] = Field(default_factory=list)  # Assigned service IDs (M:N)
-    enabled: bool = True
+    enabled: bool = False
 
 
 class FieldMapping(BaseModel):
@@ -63,6 +63,7 @@ class Settings(BaseModel):
     stages: list[StageConfig] = Field(default_factory=list)
     services: Dict[str, ServiceConfig] = Field(default_factory=dict)
     notification_triggers: list[NotificationTrigger] = Field(default_factory=list)
+    pipeline_column_order: list[str] = Field(default_factory=list)
 
 
 def initiate_settings() -> Settings:

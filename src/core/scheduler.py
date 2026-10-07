@@ -1,9 +1,48 @@
-"""Task execution scheduler with stage priority and dependency management."""
+"""Task execution scheduler with stage priority, dependency management, and active ingestion."""
 
+import re
 import asyncio
 import datetime
+import httpx
 from typing import Any, Dict, List, Optional
+
 from src.core.config import config_manager
+from src.core.database import db_manager, SYSTEM_RESERVED_COLUMNS
+from src.core.predicates import TransformerEvaluator
+from src.api.pipeline import prepare_service_request
+
+
+def extract_dotted_value(data: dict, path: str) -> Any:
+    """Extract nested value using dot notation, supporting flexible hierarchy."""
+    if not path or not isinstance(data, dict):
+        return None
+
+    parts = path.strip().split(".")
+    curr = data
+    for part in parts:
+        if isinstance(curr, dict) and part in curr:
+            curr = curr[part]
+        elif isinstance(curr, list) and part.isdigit() and int(part) < len(curr):
+            curr = curr[int(part)]
+        else:
+            return None
+    return curr
+
+
+def resolve_template_key(template: str, service_id: str, rec: dict) -> str:
+    """Interpolate template string such as '{service}:{id}' or '{service}:{data.path}'."""
+    if not template:
+        template = "{service}:{id}"
+
+    res = template.replace("{service}", service_id)
+    placeholders = re.findall(r"\{([^}]+)\}", res)
+    for ph in placeholders:
+        val = extract_dotted_value(rec, ph)
+        if val is None:
+            val = rec.get(ph)
+        if val is not None:
+            res = res.replace(f"{{{ph}}}", str(val))
+    return res
 
 
 class TaskScheduler:
@@ -22,8 +61,7 @@ class TaskScheduler:
         self._running = True
         print("[i] TaskScheduler started.")
         settings = await config_manager.get_settings()
-        
-        # Start individual service polling loops
+
         services_dict = getattr(settings, "services", {}) or getattr(settings, "apps", {})
         for s_id, s_cfg in services_dict.items():
             if s_cfg.enabled:
@@ -41,7 +79,7 @@ class TaskScheduler:
         await self.start()
 
     async def trigger_now(self, service_id: str) -> Dict[str, Any]:
-        """Manually trigger an atomic ingestion execution for a service."""
+        """Trigger ingestion execution for a service if it belongs to an enabled root stage."""
         settings = await config_manager.get_settings()
         services_dict = getattr(settings, "services", {}) or getattr(settings, "apps", {})
         if service_id not in services_dict:
@@ -51,13 +89,138 @@ class TaskScheduler:
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self._last_runs[service_id] = now_str
 
-        # Simulation/Dispatch of atomic task execution
-        self._status[service_id] = {
-            "last_run": now_str,
-            "status": "success",
-            "message": f"Execution triggered for service ({service_cfg.name})",
-        }
-        return self._status[service_id]
+        if not service_cfg.enabled or not service_cfg.base_url:
+            self._status[service_id] = {
+                "last_run": now_str,
+                "status": "skipped",
+                "message": f"Service '{service_cfg.name}' is disabled or has no base_url configured.",
+            }
+            return self._status[service_id]
+
+        # Check if the service is assigned to any ACTIVE (enabled) root stage
+        active_root_stages = [
+            st for st in settings.stages
+            if st.enabled and (not st.start_condition or st.start_condition.strip() == "") and service_id in st.service_ids
+        ]
+
+        if not active_root_stages:
+            self._status[service_id] = {
+                "last_run": now_str,
+                "status": "idle",
+                "message": f"Service '{service_cfg.name}' is idle (not assigned to an active root stage).",
+            }
+            return self._status[service_id]
+
+        active_stage = active_root_stages[0]
+
+        try:
+            # 1. Fetch recent history from service
+            history_url, headers = prepare_service_request(
+                service_cfg.base_url,
+                "/api/v3/history?pageSize=50&sortKey=date&sortDirection=descending",
+                service_cfg.api_key or "",
+            )
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(history_url, headers=headers)
+                if resp.status_code != 200:
+                    raise Exception(f"HTTP {resp.status_code}: {resp.text[:150]}")
+                data = resp.json()
+
+            records = data.get("records", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+            allowed_events = set(service_cfg.allowed_event_types) if service_cfg.allowed_event_types else None
+            new_ingested = 0
+
+            # Read existing table columns to avoid referencing non-existent columns
+            table_cols = {c["name"].upper() for c in await db_manager.get_table_columns("SERVICES_PIPELINE")}
+
+            for rec in records:
+                if not isinstance(rec, dict):
+                    continue
+
+                event_type = rec.get("eventType")
+                if allowed_events and event_type not in allowed_events:
+                    continue
+
+                pipeline_key = resolve_template_key(service_cfg.pipeline_key_template, service_id, rec)
+                if not pipeline_key:
+                    continue
+
+                # Avoid duplicate entries
+                existing = await db_manager.query("SELECT 1 FROM SERVICES_PIPELINE WHERE PIPELINE_KEY = ?", (pipeline_key,))
+                if existing:
+                    continue
+
+                # Secondary enrichment query if configured
+                enrichment_dict: Dict[str, Any] = {}
+                if service_cfg.enrichment_endpoint:
+                    try:
+                        resolved_ep = service_cfg.enrichment_endpoint
+                        for ph in re.findall(r"\{([^}]+)\}", service_cfg.enrichment_endpoint):
+                            val = extract_dotted_value(rec, ph) or rec.get(ph)
+                            if val is not None:
+                                resolved_ep = resolved_ep.replace(f"{{{ph}}}", str(val))
+
+                        if "{" not in resolved_ep:
+                            enrich_url, enrich_headers = prepare_service_request(
+                                service_cfg.base_url, resolved_ep, service_cfg.api_key or ""
+                            )
+                            async with httpx.AsyncClient(timeout=10.0) as client:
+                                e_resp = await client.get(enrich_url, headers=enrich_headers)
+                                if e_resp.status_code == 200:
+                                    e_json = e_resp.json()
+                                    if isinstance(e_json, dict):
+                                        enrichment_dict = e_json
+                    except Exception as e_err:
+                        print(f"[!] Warning enrichment error for {pipeline_key}: {e_err}")
+
+                context_dict = {"records": rec, **rec, **enrichment_dict}
+
+                # Evaluate field mappings
+                mapped_fields: Dict[str, Any] = {}
+                for mapping in service_cfg.field_mappings:
+                    if not mapping.target_column:
+                        continue
+                    col_name = mapping.target_column.strip().upper()
+                    if col_name in SYSTEM_RESERVED_COLUMNS:
+                        continue
+
+                    val = extract_dotted_value(context_dict, mapping.source_field)
+                    if val is None:
+                        val = context_dict.get(mapping.source_field)
+
+                    if mapping.transformer:
+                        try:
+                            val = TransformerEvaluator.evaluate(mapping.transformer, val)
+                        except Exception:
+                            pass
+
+                    if col_name in table_cols:
+                        mapped_fields[col_name] = val
+
+                col_names = ["PIPELINE_KEY", "STAGE", "STATUS"] + list(mapped_fields.keys())
+                placeholders = ["?"] * len(col_names)
+                values = [pipeline_key, active_stage.order, "PENDING"] + list(mapped_fields.values())
+
+                insert_sql = f'INSERT INTO SERVICES_PIPELINE ({", ".join(col_names)}) VALUES ({", ".join(placeholders)});'
+                await db_manager.execute(insert_sql, tuple(values))
+                new_ingested += 1
+
+            self._status[service_id] = {
+                "last_run": now_str,
+                "status": "success",
+                "message": f"Ingestion executed ({service_cfg.name}): {new_ingested} new items added to Stage {active_stage.order}.",
+                "new_items": new_ingested,
+            }
+            return self._status[service_id]
+
+        except Exception as e:
+            print(f"[x] Error executing ingestion for {service_id}: {e}")
+            self._status[service_id] = {
+                "last_run": now_str,
+                "status": "error",
+                "message": f"Execution failed: {str(e)}",
+            }
+            return self._status[service_id]
 
     async def _service_loop(self, service_id: str) -> None:
         while self._running:
@@ -68,7 +231,6 @@ class TaskScheduler:
                 if not service_cfg or not service_cfg.enabled:
                     break
 
-                # Resolve polling interval: custom override if specified, otherwise global interval
                 configured_interval = service_cfg.poll_interval_seconds
                 if configured_interval is None or configured_interval <= 0:
                     configured_interval = getattr(settings, "global_poll_interval_seconds", 300)

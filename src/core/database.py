@@ -8,6 +8,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 
 
 SQL_IDENTIFIER_REGEX = re.compile(r"^[A-Z0-9_]+$")
+SYSTEM_RESERVED_COLUMNS = {"ID", "PIPELINE_KEY", "STAGE", "STATUS", "LAST_UPDATED"}
 
 
 class DatabaseManager:
@@ -101,6 +102,9 @@ class DatabaseManager:
         clean_col = column_name.strip().upper()
         clean_table = table_name.strip().upper()
 
+        if clean_col in SYSTEM_RESERVED_COLUMNS:
+            raise ValueError(f"Column name '{clean_col}' is a system reserved column and cannot be added.")
+
         if not SQL_IDENTIFIER_REGEX.match(clean_col):
             raise ValueError(f"Column name '{clean_col}' violates strict SQL naming convention (must match ^[A-Z0-9_]+$)")
 
@@ -113,6 +117,49 @@ class DatabaseManager:
 
             if clean_col not in existing_columns:
                 await db.execute(f'ALTER TABLE {clean_table} ADD COLUMN "{clean_col}" {column_type};')
+                await db.commit()
+                return True
+            return False
+
+    async def drop_column(self, table_name: str, column_name: str) -> bool:
+        """Dynamically drop a user-defined column from table."""
+        clean_col = column_name.strip().upper()
+        clean_table = table_name.strip().upper()
+
+        if clean_col in SYSTEM_RESERVED_COLUMNS:
+            raise ValueError(f"Cannot drop system reserved column '{clean_col}'")
+
+        if not SQL_IDENTIFIER_REGEX.match(clean_col) or not SQL_IDENTIFIER_REGEX.match(clean_table):
+            raise ValueError("Invalid table or column identifier")
+
+        async with self.get_connection() as db:
+            cursor = await db.execute(f"PRAGMA table_info({clean_table});")
+            existing_columns = [row["name"].upper() for row in await cursor.fetchall()]
+
+            if clean_col in existing_columns:
+                await db.execute(f'ALTER TABLE {clean_table} DROP COLUMN "{clean_col}";')
+                await db.commit()
+                return True
+            return False
+
+    async def rename_column(self, table_name: str, old_column: str, new_column: str) -> bool:
+        """Dynamically rename a user-defined column in table."""
+        clean_old = old_column.strip().upper()
+        clean_new = new_column.strip().upper()
+        clean_table = table_name.strip().upper()
+
+        if clean_old in SYSTEM_RESERVED_COLUMNS or clean_new in SYSTEM_RESERVED_COLUMNS:
+            raise ValueError("Cannot rename to or from a system reserved column")
+
+        if not SQL_IDENTIFIER_REGEX.match(clean_old) or not SQL_IDENTIFIER_REGEX.match(clean_new) or not SQL_IDENTIFIER_REGEX.match(clean_table):
+            raise ValueError("Invalid table or column identifier")
+
+        async with self.get_connection() as db:
+            cursor = await db.execute(f"PRAGMA table_info({clean_table});")
+            existing = [row["name"].upper() for row in await cursor.fetchall()]
+
+            if clean_old in existing and clean_new not in existing:
+                await db.execute(f'ALTER TABLE {clean_table} RENAME COLUMN "{clean_old}" TO "{clean_new}";')
                 await db.commit()
                 return True
             return False

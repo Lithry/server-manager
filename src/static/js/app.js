@@ -103,6 +103,17 @@ class ServerManagerApp {
       document.getElementById('modal-add-column')?.classList.remove('hidden');
     });
 
+    document.getElementById('btn-manage-columns')?.addEventListener('click', () => {
+      this.openManageColumnsModal();
+    });
+
+    document.getElementById('btn-prune-columns')?.addEventListener('click', () => {
+      this.pruneDeprecatedColumns();
+    });
+
+    this.setupColumnSanitizer(document.getElementById('input-col-name'), document.getElementById('btn-submit-add-column'));
+    this.setupColumnSanitizer(document.getElementById('input-map-col'), document.getElementById('btn-submit-add-mapping'));
+
     document.getElementById('btn-submit-add-column')?.addEventListener('click', () => {
       this.submitAddColumn();
     });
@@ -469,6 +480,24 @@ class ServerManagerApp {
     }
   }
 
+  setupColumnSanitizer(inputEl, submitBtn) {
+    if (!inputEl) return;
+    const reserved = ['ID', 'PIPELINE_KEY', 'STAGE', 'STATUS', 'LAST_UPDATED'];
+    inputEl.addEventListener('input', () => {
+      let val = inputEl.value;
+      val = val.toUpperCase().replace(/\s+/g, '_').replace(/[^A-Z0-9_]/g, '');
+      inputEl.value = val;
+
+      if (reserved.includes(val)) {
+        inputEl.style.borderColor = '#ef4444';
+        if (submitBtn) submitBtn.disabled = true;
+      } else {
+        inputEl.style.borderColor = '';
+        if (submitBtn) submitBtn.disabled = false;
+      }
+    });
+  }
+
   async submitAddColumn() {
     const colNameInput = document.getElementById('input-col-name');
     const colTypeInput = document.getElementById('input-col-type');
@@ -477,6 +506,12 @@ class ServerManagerApp {
 
     if (!colName) {
       alert('Please enter a column name.');
+      return;
+    }
+
+    const reserved = ['ID', 'PIPELINE_KEY', 'STAGE', 'STATUS', 'LAST_UPDATED'];
+    if (reserved.includes(colName)) {
+      alert(`Column name '${colName}' is a reserved system column and cannot be added.`);
       return;
     }
 
@@ -493,6 +528,142 @@ class ServerManagerApp {
       }
       this.closeModals();
       colNameInput.value = '';
+      this.loadPipeline();
+    } catch (e) {
+      alert(`Network error: ${e.message}`);
+    }
+  }
+
+  async openManageColumnsModal() {
+    const modal = document.getElementById('modal-manage-columns');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    await this.renderManageColumnsList();
+  }
+
+  async renderManageColumnsList() {
+    const tbody = document.getElementById('manage-columns-body');
+    if (!tbody) return;
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Loading columns...</td></tr>';
+
+    try {
+      const resp = await fetch('/api/v1/pipeline/columns');
+      const columns = await resp.json();
+      this.currentManageColumns = columns;
+
+      const userCols = columns.filter(c => !c.is_system);
+
+      tbody.innerHTML = columns.map(col => {
+        if (col.is_system) {
+          return `
+            <tr>
+              <td class="text-center font-mono text-muted">-</td>
+              <td><strong>${this.escapeHtml(col.name)}</strong></td>
+              <td><span class="font-mono text-sm">${this.escapeHtml(col.type)}</span></td>
+              <td><span class="badge badge-system">Protected System Column</span></td>
+              <td style="text-align: right;"><span class="text-muted text-xs">Locked</span></td>
+            </tr>
+          `;
+        }
+
+        const userIdx = userCols.findIndex(u => u.name === col.name);
+        const isFirst = userIdx === 0;
+        const isLast = userIdx === userCols.length - 1;
+
+        let statusBadge = '';
+        if (col.is_deprecated) {
+          statusBadge = `<span class="badge badge-deprecated">Deprecated (Unused)</span>`;
+        } else {
+          statusBadge = `<span class="badge badge-success">Active: ${this.escapeHtml((col.used_by || []).join(', '))}</span>`;
+        }
+
+        return `
+          <tr>
+            <td>
+              <div style="display: flex; gap: 4px;">
+                <button class="col-reorder-btn" onclick="app.moveColumnOrder('${col.name}', -1)" ${isFirst ? 'disabled' : ''} title="Move Left">&larr;</button>
+                <button class="col-reorder-btn" onclick="app.moveColumnOrder('${col.name}', 1)" ${isLast ? 'disabled' : ''} title="Move Right">&rarr;</button>
+              </div>
+            </td>
+            <td><strong class="font-mono">${this.escapeHtml(col.name)}</strong></td>
+            <td><span class="font-mono text-sm">${this.escapeHtml(col.type)}</span></td>
+            <td>${statusBadge}</td>
+            <td style="text-align: right;">
+              <button class="btn btn-secondary btn-sm text-alert" onclick="app.deleteColumn('${col.name}')">Delete</button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    } catch (e) {
+      tbody.innerHTML = `<tr><td colspan="5" class="text-center text-alert">Error loading columns: ${e.message}</td></tr>`;
+    }
+  }
+
+  async moveColumnOrder(colName, direction) {
+    if (!this.currentManageColumns) return;
+    const userCols = this.currentManageColumns.filter(c => !c.is_system).map(c => c.name);
+    const idx = userCols.indexOf(colName);
+    if (idx === -1) return;
+
+    const targetIdx = idx + direction;
+    if (targetIdx < 0 || targetIdx >= userCols.length) return;
+
+    const temp = userCols[idx];
+    userCols[idx] = userCols[targetIdx];
+    userCols[targetIdx] = temp;
+
+    try {
+      const resp = await fetch('/api/v1/pipeline/columns/order', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ column_order: userCols })
+      });
+      if (resp.ok) {
+        await this.renderManageColumnsList();
+        this.loadPipeline();
+      }
+    } catch (e) {
+      console.error('Error reordering columns:', e);
+    }
+  }
+
+  async deleteColumn(colName) {
+    if (!confirm(`Are you sure you want to permanently delete column '${colName}'?\nAll data in this column will be dropped from the database.`)) {
+      return;
+    }
+
+    try {
+      const resp = await fetch(`/api/v1/pipeline/columns/${encodeURIComponent(colName)}`, {
+        method: 'DELETE'
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        alert(`Error: ${data.detail || data.message || 'Failed to delete column'}`);
+        return;
+      }
+      await this.renderManageColumnsList();
+      this.loadPipeline();
+    } catch (e) {
+      alert(`Network error: ${e.message}`);
+    }
+  }
+
+  async pruneDeprecatedColumns() {
+    if (!confirm('Are you sure you want to prune all deprecated columns?\nAll columns not currently associated with any service mapping will be permanently dropped.')) {
+      return;
+    }
+
+    try {
+      const resp = await fetch('/api/v1/pipeline/columns/prune', {
+        method: 'POST'
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        alert(`Error: ${data.detail || 'Failed to prune columns'}`);
+        return;
+      }
+      alert(`✓ Pruned ${data.count} deprecated column(s): ${(data.pruned_columns || []).join(', ') || 'None found'}`);
+      await this.renderManageColumnsList();
       this.loadPipeline();
     } catch (e) {
       alert(`Network error: ${e.message}`);
@@ -1170,20 +1341,25 @@ class ServerManagerApp {
       const badge = isRoot 
         ? '<span class="badge badge-root">Root Producer</span>'
         : '<span class="badge badge-consumer">Consumer Stage</span>';
+      const statusBadge = st.enabled 
+        ? '<span class="badge badge-success">Active</span>' 
+        : '<span class="badge badge-secondary">Disabled</span>';
 
       const assignedBadges = (st.service_ids && st.service_ids.length > 0)
         ? st.service_ids.map(sid => `<span class="badge badge-service">${this.escapeHtml(sid)}</span>`).join(' ')
         : '<span class="text-muted text-sm">No services assigned</span>';
 
       return `
-        <div class="${cardClass}" data-stage-id="${this.escapeHtml(st.id)}">
+        <div class="${cardClass}" data-stage-id="${this.escapeHtml(st.id)}" style="${!st.enabled ? 'opacity: 0.75;' : ''}">
           <div class="stage-card-header">
             <div class="stage-title-wrap">
               <strong style="font-size: 1.1rem;">${this.escapeHtml(st.name)}</strong>
               <span class="font-mono text-muted text-sm">id: ${this.escapeHtml(st.id)}</span>
               ${badge}
+              ${statusBadge}
             </div>
             <div class="stage-actions">
+              <button class="btn btn-secondary btn-sm ${st.enabled ? 'text-alert' : 'text-success'}" onclick="app.toggleStage('${st.id}')">${st.enabled ? 'Disable' : 'Enable'}</button>
               <button class="btn btn-secondary btn-sm" onclick="app.moveStage('${st.id}', -1)" ${idx === 0 ? 'disabled' : ''} title="Move Up">↑</button>
               <button class="btn btn-secondary btn-sm" onclick="app.moveStage('${st.id}', 1)" ${idx === stages.length - 1 ? 'disabled' : ''} title="Move Down">↓</button>
               <button class="btn btn-secondary btn-sm" onclick="app.openAddStageModal('${st.id}')">Edit</button>
@@ -1214,6 +1390,14 @@ class ServerManagerApp {
     }).join('');
   }
 
+  toggleStage(stageId) {
+    if (!this.settingsData?.stages) return;
+    const st = this.settingsData.stages.find(s => s.id === stageId);
+    if (!st) return;
+    st.enabled = !st.enabled;
+    this.renderSettingsStages();
+  }
+
   openAddStageModal(editStageId = null) {
     const titleEl = document.getElementById('modal-stage-title');
     const idEl = document.getElementById('input-stage-id');
@@ -1226,6 +1410,7 @@ class ServerManagerApp {
     const predBlock = document.getElementById('stage-predicate-block');
     const testResult = document.getElementById('predicate-test-result');
     const servicesGrid = document.getElementById('stage-services-checkboxes');
+    const enabledChk = document.getElementById('chk-stage-enabled');
 
     if (testResult) testResult.classList.add('hidden');
 
@@ -1243,6 +1428,7 @@ class ServerManagerApp {
         if (predBlock) predBlock.classList.toggle('hidden', isRoot);
         if (graceEl) graceEl.value = st.grace_period_minutes ?? 10;
         if (timeoutEl) timeoutEl.value = st.timeout_minutes ?? 30;
+        if (enabledChk) enabledChk.checked = st.enabled !== undefined ? st.enabled : false;
         assigned = st.service_ids || [];
       }
     } else {
@@ -1255,6 +1441,7 @@ class ServerManagerApp {
       if (predBlock) predBlock.classList.add('hidden');
       if (graceEl) graceEl.value = 10;
       if (timeoutEl) timeoutEl.value = 30;
+      if (enabledChk) enabledChk.checked = false; // Default disabled for new stages
     }
 
     // Populate service checkboxes
@@ -1314,6 +1501,7 @@ class ServerManagerApp {
     const condEl = document.getElementById('input-stage-condition');
     const graceEl = document.getElementById('input-stage-grace');
     const timeoutEl = document.getElementById('input-stage-timeout');
+    const enabledChk = document.getElementById('chk-stage-enabled');
 
     const id = idEl?.value.trim().toLowerCase();
     const name = nameEl?.value.trim();
@@ -1332,6 +1520,7 @@ class ServerManagerApp {
 
     const isRoot = rootChk ? rootChk.checked : true;
     const condition = isRoot ? null : (condEl?.value.trim() || null);
+    const enabled = enabledChk ? enabledChk.checked : false;
 
     // Collect checked assigned services
     const checkedServices = [];
@@ -1351,7 +1540,7 @@ class ServerManagerApp {
       grace_period_minutes: parseInt(graceEl?.value || '10', 10),
       timeout_minutes: parseInt(timeoutEl?.value || '30', 10),
       service_ids: checkedServices,
-      enabled: true
+      enabled: enabled
     };
 
     if (existingIdx >= 0) {
@@ -1626,6 +1815,12 @@ class ServerManagerApp {
 
     if (!/^[A-Z0-9_]+$/.test(col)) {
       alert('Target column name must consist of uppercase letters, numbers, and underscores (e.g. IS_ANIME, SONARR_TITLE).');
+      return;
+    }
+
+    const reserved = ['ID', 'PIPELINE_KEY', 'STAGE', 'STATUS', 'LAST_UPDATED'];
+    if (reserved.includes(col)) {
+      alert(`Target column '${col}' is a reserved system column and cannot be used.`);
       return;
     }
 

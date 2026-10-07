@@ -181,6 +181,10 @@
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
               Add Column
             </button>
+            <button class="btn btn-secondary" id="btn-manage-columns">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>
+              Manage Columns
+            </button>
             <button class="btn btn-secondary" id="btn-sample-api">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
               Sample Service API
@@ -580,6 +584,43 @@
     </div>
   </div>
 
+  <!-- MODAL: Manage Columns -->
+  <div class="modal-backdrop hidden" id="modal-manage-columns">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <h3 class="modal-title">Manage Pipeline Columns</h3>
+        <button class="btn-close" onclick="app.closeModals()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <p class="modal-desc mb-0">Reorder custom columns with <code>&larr;</code> / <code>&rarr;</code>, or delete deprecated columns. System columns are protected.</p>
+          <button class="btn btn-warning btn-sm" id="btn-prune-columns" title="Prune all columns not currently referenced by any service">
+            Prune Deprecated Columns
+          </button>
+        </div>
+        <div class="table-container">
+          <table class="data-table" id="table-manage-columns">
+            <thead>
+              <tr>
+                <th style="width: 110px;">Order</th>
+                <th>Column Name</th>
+                <th>Type</th>
+                <th>Status / Usage</th>
+                <th style="text-align: right;">Action</th>
+              </tr>
+            </thead>
+            <tbody id="manage-columns-body">
+              <tr><td colspan="5" class="text-center">Loading columns...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="app.closeModals()">Close</button>
+      </div>
+    </div>
+  </div>
+
   <!-- MODAL: Sample API -->
   <div class="modal-backdrop hidden" id="modal-sample-api">
     <div class="modal modal-lg">
@@ -791,6 +832,9 @@
             <input type="number" id="input-stage-timeout" class="form-input" min="0" max="1440" value="30">
             <small class="text-muted">Emits WARN_PIPELINE_STALLED if exceeded (0 to disable).</small>
           </div>
+        <div class="form-checkbox mt-3">
+          <input type="checkbox" id="chk-stage-enabled">
+          <label for="chk-stage-enabled"><strong>Enable this stage</strong> (Active in execution pipeline)</label>
         </div>
       </div>
       <div class="modal-footer">

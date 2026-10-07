@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from src.core.config import config_manager, Settings, NotificationTrigger
 from src.core.scheduler import scheduler
 from src.core.predicates import PredicateEvaluator, TransformerEvaluator
-from src.core.database import db_manager
+from src.core.database import db_manager, SYSTEM_RESERVED_COLUMNS
 
 
 router = APIRouter(prefix="/api/v1/settings", tags=["Settings"])
@@ -40,8 +40,54 @@ async def get_settings() -> Settings:
 @router.put("")
 async def update_settings(settings: Settings) -> Settings:
     """Update settings, auto-migrate database columns, and reload background scheduler."""
-    # Auto-ensure dynamic columns in SERVICES_PIPELINE for all field mappings
     services_dict = getattr(settings, "services", {}) or getattr(settings, "apps", {})
+
+    # 1. Validate that no mapping uses a reserved system column
+    all_new_targets = set()
+    for s_name, s_conf in services_dict.items():
+        for mapping in s_conf.field_mappings:
+            if mapping.target_column:
+                col_upper = mapping.target_column.strip().upper()
+                if col_upper in SYSTEM_RESERVED_COLUMNS:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Column name '{col_upper}' in service '{s_name}' is a system reserved column."
+                    )
+                all_new_targets.add(col_upper)
+
+    # 2. Detect renames and auto-migrate data
+    old_settings = await config_manager.get_settings()
+    old_services = getattr(old_settings, "services", {}) or getattr(old_settings, "apps", {})
+
+    existing_table_cols = {c["name"].upper() for c in await db_manager.get_table_columns("SERVICES_PIPELINE")}
+
+    for s_id, s_conf in services_dict.items():
+        old_conf = old_services.get(s_id)
+        if not old_conf:
+            continue
+        for idx, new_map in enumerate(s_conf.field_mappings):
+            if idx < len(old_conf.field_mappings):
+                old_map = old_conf.field_mappings[idx]
+                old_target = (old_map.target_column or "").strip().upper()
+                new_target = (new_map.target_column or "").strip().upper()
+
+                if old_target and new_target and old_target != new_target:
+                    if old_target not in all_new_targets and old_target in existing_table_cols:
+                        try:
+                            if new_target not in existing_table_cols:
+                                await db_manager.rename_column("SERVICES_PIPELINE", old_target, new_target)
+                                existing_table_cols.remove(old_target)
+                                existing_table_cols.add(new_target)
+                            else:
+                                await db_manager.execute(
+                                    f'UPDATE SERVICES_PIPELINE SET "{new_target}" = COALESCE("{new_target}", "{old_target}") WHERE "{old_target}" IS NOT NULL;'
+                                )
+                                await db_manager.drop_column("SERVICES_PIPELINE", old_target)
+                                existing_table_cols.remove(old_target)
+                        except Exception as e:
+                            print(f"[!] Warning auto-migrating column {old_target} -> {new_target}: {e}")
+
+    # 3. Auto-ensure dynamic columns in SERVICES_PIPELINE for all field mappings
     for service_name, service_conf in services_dict.items():
         for mapping in service_conf.field_mappings:
             if mapping.target_column:

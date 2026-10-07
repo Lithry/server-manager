@@ -7,11 +7,28 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from src.core.database import db_manager, SQL_IDENTIFIER_REGEX
+from src.core.database import db_manager, SQL_IDENTIFIER_REGEX, SYSTEM_RESERVED_COLUMNS
 from src.core.config import config_manager
 
 
 router = APIRouter(prefix="/api/v1/pipeline", tags=["Pipeline"])
+
+
+def sort_pipeline_columns(all_columns: List[str], preferred_order: List[str]) -> List[str]:
+    """Sort columns placing fixed system columns first, followed by user columns according to preferred order."""
+    system_cols = [c for c in ["ID", "PIPELINE_KEY", "STAGE", "STATUS", "LAST_UPDATED"] if c in all_columns]
+    user_cols = [c for c in all_columns if c not in SYSTEM_RESERVED_COLUMNS]
+
+    sorted_user = []
+    for col in preferred_order:
+        c_up = col.strip().upper()
+        if c_up in user_cols and c_up not in sorted_user:
+            sorted_user.append(c_up)
+    for col in user_cols:
+        if col not in sorted_user:
+            sorted_user.append(col)
+
+    return system_cols + sorted_user
 
 
 def prepare_service_request(base_url: str, endpoint: str, api_key: str = "") -> tuple[str, dict]:
@@ -44,6 +61,10 @@ class AddColumnRequest(BaseModel):
     column_type: str = "TEXT"
 
 
+class ReorderColumnsRequest(BaseModel):
+    column_order: List[str]
+
+
 class SampleApiRequest(BaseModel):
     service_id: str | None = None
     app_id: str | None = None  # Backward compatibility
@@ -73,7 +94,7 @@ async def get_pipeline_items(
     status: Optional[str] = None,
     stage: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """Retrieve universal pipeline entries with all dynamic columns."""
+    """Retrieve universal pipeline entries with all dynamic columns ordered by preference."""
     where_clauses = []
     params: List[Any] = []
 
@@ -94,26 +115,71 @@ async def get_pipeline_items(
     items = await db_manager.query(query_sql, tuple(params))
 
     columns = await db_manager.get_table_columns("SERVICES_PIPELINE")
+    all_col_names = [col["name"] for col in columns]
+
+    settings = await config_manager.get_settings()
+    pref_order = getattr(settings, "pipeline_column_order", []) or []
+    ordered_cols = sort_pipeline_columns(all_col_names, pref_order)
 
     return {
         "total": total,
         "limit": limit,
         "offset": offset,
-        "columns": [col["name"] for col in columns],
+        "columns": ordered_cols,
         "items": items,
     }
 
 
 @router.get("/columns")
 async def get_pipeline_columns() -> List[Dict[str, Any]]:
-    """Get all current columns of the SERVICES_PIPELINE table."""
-    return await db_manager.get_table_columns("SERVICES_PIPELINE")
+    """Get all current columns of the SERVICES_PIPELINE table with usage and depreciation metadata."""
+    settings = await config_manager.get_settings()
+    pref_order = getattr(settings, "pipeline_column_order", []) or []
+    services_dict = getattr(settings, "services", {}) or getattr(settings, "apps", {})
+
+    usage_map: Dict[str, List[str]] = {}
+    for s_id, s_cfg in services_dict.items():
+        for m in s_cfg.field_mappings:
+            if m.target_column:
+                col_upper = m.target_column.strip().upper()
+                if col_upper not in usage_map:
+                    usage_map[col_upper] = []
+                svc_label = s_cfg.name or s_id
+                if svc_label not in usage_map[col_upper]:
+                    usage_map[col_upper].append(svc_label)
+
+    raw_columns = await db_manager.get_table_columns("SERVICES_PIPELINE")
+    all_col_names = [c["name"] for c in raw_columns]
+    col_by_name = {c["name"]: c for c in raw_columns}
+
+    ordered_names = sort_pipeline_columns(all_col_names, pref_order)
+
+    result = []
+    for name in ordered_names:
+        c_info = col_by_name.get(name, {"type": "TEXT"})
+        is_sys = name in SYSTEM_RESERVED_COLUMNS
+        used_by = usage_map.get(name, [])
+        result.append({
+            "name": name,
+            "type": c_info.get("type", "TEXT"),
+            "is_system": is_sys,
+            "is_deprecated": not is_sys and len(used_by) == 0,
+            "used_by": used_by,
+        })
+    return result
 
 
 @router.post("/columns")
 async def add_pipeline_column(req: AddColumnRequest) -> Dict[str, Any]:
     """Dynamically add a column to SERVICES_PIPELINE under strict naming validation."""
     clean_name = req.column_name.strip().upper()
+
+    if clean_name in SYSTEM_RESERVED_COLUMNS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Column name '{clean_name}' is a system reserved column name.",
+        )
+
     if not SQL_IDENTIFIER_REGEX.match(clean_name):
         raise HTTPException(
             status_code=400,
@@ -131,6 +197,68 @@ async def add_pipeline_column(req: AddColumnRequest) -> Dict[str, Any]:
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/columns/{column_name}")
+async def delete_pipeline_column(column_name: str) -> Dict[str, Any]:
+    """Delete a user-defined column from SERVICES_PIPELINE."""
+    clean_name = column_name.strip().upper()
+    if clean_name in SYSTEM_RESERVED_COLUMNS:
+        raise HTTPException(status_code=400, detail=f"Cannot delete system column '{clean_name}'.")
+
+    try:
+        dropped = await db_manager.drop_column("SERVICES_PIPELINE", clean_name)
+        if dropped:
+            settings = await config_manager.get_settings()
+            if clean_name in settings.pipeline_column_order:
+                settings.pipeline_column_order.remove(clean_name)
+                await config_manager.update_settings(settings)
+            return {"success": True, "message": f"Column '{clean_name}' dropped successfully."}
+        raise HTTPException(status_code=404, detail=f"Column '{clean_name}' not found.")
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/columns/prune")
+async def prune_deprecated_columns() -> Dict[str, Any]:
+    """Prune all dynamic columns in SERVICES_PIPELINE that are not used by any service."""
+    settings = await config_manager.get_settings()
+    services_dict = getattr(settings, "services", {}) or getattr(settings, "apps", {})
+
+    active_target_cols = set()
+    for s_cfg in services_dict.values():
+        for m in s_cfg.field_mappings:
+            if m.target_column:
+                active_target_cols.add(m.target_column.strip().upper())
+
+    columns = await db_manager.get_table_columns("SERVICES_PIPELINE")
+    pruned = []
+    for col in columns:
+        c_name = col["name"].upper()
+        if c_name not in SYSTEM_RESERVED_COLUMNS and c_name not in active_target_cols:
+            try:
+                await db_manager.drop_column("SERVICES_PIPELINE", c_name)
+                pruned.append(c_name)
+            except Exception as e:
+                print(f"[!] Error pruning column {c_name}: {e}")
+
+    if pruned:
+        settings.pipeline_column_order = [c for c in settings.pipeline_column_order if c not in pruned]
+        await config_manager.update_settings(settings)
+
+    return {"success": True, "pruned_columns": pruned, "count": len(pruned)}
+
+
+@router.put("/columns/order")
+async def reorder_pipeline_columns(req: ReorderColumnsRequest) -> Dict[str, Any]:
+    """Persist preferred column order for user-defined columns."""
+    settings = await config_manager.get_settings()
+    clean_order = [c.strip().upper() for c in req.column_order if c.strip().upper() not in SYSTEM_RESERVED_COLUMNS]
+    settings.pipeline_column_order = clean_order
+    await config_manager.update_settings(settings)
+    return {"success": True, "pipeline_column_order": clean_order}
 
 
 @router.post("/sample")
