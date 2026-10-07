@@ -51,9 +51,43 @@ class TaskScheduler:
         self._tasks: Dict[str, asyncio.Task] = {}
         self._last_runs: Dict[str, str] = {}
         self._status: Dict[str, Dict[str, Any]] = {}
+        self._tag_cache: Dict[str, Dict[int, str]] = {}
+        self._tag_cache_ts: Dict[str, float] = {}
 
     def is_running(self) -> bool:
         return self._running
+
+    async def _get_service_tags(self, service_id: str, service_cfg: Any) -> Dict[int, str]:
+        """Fetch and cache tag id-to-label dictionary with 10-minute TTL."""
+        try:
+            loop = asyncio.get_running_loop()
+            now = loop.time()
+        except RuntimeError:
+            now = 0.0
+
+        cached = self._tag_cache.get(service_id)
+        last_ts = self._tag_cache_ts.get(service_id, 0.0)
+
+        if cached is not None and (now - last_ts) < 600.0:
+            return cached
+
+        tags_map: Dict[int, str] = {}
+        try:
+            url, headers = prepare_service_request(service_cfg.base_url, "/api/v3/tag", service_cfg.api_key or "")
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(url, headers=headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if isinstance(data, list):
+                        for item in data:
+                            if isinstance(item, dict) and "id" in item and "label" in item:
+                                tags_map[int(item["id"])] = str(item["label"]).strip()
+        except Exception:
+            pass
+
+        self._tag_cache[service_id] = tags_map
+        self._tag_cache_ts[service_id] = now
+        return tags_map
 
     async def start(self) -> None:
         if self._running:
@@ -130,6 +164,7 @@ class TaskScheduler:
 
             # Read existing table columns to avoid referencing non-existent columns
             table_cols = {c["name"].upper() for c in await db_manager.get_table_columns("SERVICES_PIPELINE")}
+            service_tags = await self._get_service_tags(service_id, service_cfg)
 
             for active_stage in active_root_stages:
                 stage_activated_dt = None
@@ -192,6 +227,16 @@ class TaskScheduler:
                                                 enrichment_data[namespace.strip()] = e_json
                             except Exception as e_err:
                                 print(f"[!] Warning enrichment error ({namespace}) for {pipeline_key}: {e_err}")
+
+                    # Resolve numeric tag IDs to readable tag labels if tag map is available
+                    if service_tags:
+                        for ns, payload in enrichment_data.items():
+                            if isinstance(payload, dict) and "tags" in payload:
+                                raw_tags = payload.get("tags")
+                                if isinstance(raw_tags, list) and any(isinstance(t, int) for t in raw_tags):
+                                    payload["tag_ids"] = raw_tags
+                                    payload["tags"] = [service_tags.get(t, str(t)) for t in raw_tags]
+                                    payload["tag_labels"] = payload["tags"]
 
                     context_dict = {"records": rec, **rec, **enrichment_data}
 
