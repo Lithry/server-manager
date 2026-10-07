@@ -128,11 +128,11 @@
           </div>
           <div class="metric-card">
             <div class="metric-header">
-              <span class="metric-label">Media Catalog</span>
+              <span class="metric-label">Active Services</span>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-success"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
             </div>
-            <div class="metric-value text-success" id="ov-catalog-count">0</div>
-            <div class="metric-caption">Items verified in Jellyfin library</div>
+            <div class="metric-value text-success" id="ov-services-count">0</div>
+            <div class="metric-caption">Configured upstream services</div>
           </div>
           <div class="metric-card">
             <div class="metric-header">
@@ -161,31 +161,12 @@
           <!-- Quick Pipeline Summary -->
           <div class="card">
             <div class="card-header">
-              <h3 class="card-title">Apps Pipeline Stages</h3>
+              <h3 class="card-title">Services Pipeline Stages</h3>
               <button class="btn btn-text btn-sm" onclick="app.switchTab('pipeline')">Open Pipeline</button>
             </div>
             <div class="card-body">
               <div class="stage-pipeline-list" id="ov-pipeline-stages">
-                <div class="stage-item">
-                  <span class="stage-badge">Stage 1</span>
-                  <span class="stage-name">Sonarr / Radarr Ingestion</span>
-                  <span class="stage-status status-active">Active</span>
-                </div>
-                <div class="stage-item">
-                  <span class="stage-badge">Stage 2</span>
-                  <span class="stage-name">Shoko VFS Linking</span>
-                  <span class="stage-status status-active">Active</span>
-                </div>
-                <div class="stage-item">
-                  <span class="stage-badge">Stage 3</span>
-                  <span class="stage-name">Jellyfin Media Library</span>
-                  <span class="stage-status status-active">Active</span>
-                </div>
-                <div class="stage-item">
-                  <span class="stage-badge">Stage 4</span>
-                  <span class="stage-name">AniBridge Sync</span>
-                  <span class="stage-status status-active">Active</span>
-                </div>
+                <div class="empty-state" style="padding: 16px;">Loading pipeline stages...</div>
               </div>
             </div>
           </div>
@@ -202,16 +183,12 @@
             </button>
             <button class="btn btn-secondary" id="btn-sample-api">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-              Sample App API
+              Sample Service API
             </button>
           </div>
           <div class="toolbar-right">
             <select id="pipeline-filter-stage" class="form-select">
               <option value="">All Stages</option>
-              <option value="1">Stage 1: Sonarr/Radarr</option>
-              <option value="2">Stage 2: Shoko</option>
-              <option value="3">Stage 3: Jellyfin</option>
-              <option value="4">Stage 4: AniBridge</option>
             </select>
             <select id="pipeline-filter-status" class="form-select">
               <option value="">All Statuses</option>

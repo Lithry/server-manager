@@ -35,21 +35,44 @@ async def server_query(
                 COUNT(CASE WHEN RESOLVED = 0 AND SEVERITY = 'WARNING' THEN 1 END) AS warning_incidents
             FROM SYSTEM_INCIDENTS;
         """)
-        pipeline_summary = await db_manager.query("""
-            SELECT 
-                COUNT(*) as total_items,
-                COUNT(CASE WHEN JELLYFIN_STATUS = 'AVAILABLE' THEN 1 END) as available_media
-            FROM SERVICES_PIPELINE;
-        """)
+        # Dynamic pipeline count
+        cols = await db_manager.get_table_columns("SERVICES_PIPELINE")
+        pipeline_total = 0
+        available_count = 0
+        try:
+            total_rows = await db_manager.query("SELECT COUNT(*) as total FROM SERVICES_PIPELINE;")
+            pipeline_total = total_rows[0]["total"] if total_rows else 0
+            if "JELLYFIN_STATUS" in cols:
+                avail_rows = await db_manager.query("SELECT COUNT(*) as avail FROM SERVICES_PIPELINE WHERE JELLYFIN_STATUS = 'AVAILABLE';")
+                available_count = avail_rows[0]["avail"] if avail_rows else 0
+            elif "STATUS" in cols:
+                avail_rows = await db_manager.query("SELECT COUNT(*) as avail FROM SERVICES_PIPELINE WHERE STATUS = 'AVAILABLE';")
+                available_count = avail_rows[0]["avail"] if avail_rows else 0
+        except Exception:
+            pass
+
+        settings = await config_manager.get_settings()
         git_status = await gitops_manager.get_status()
         sched_status = scheduler.get_scheduler_status()
+
+        stages_data = [
+            {
+                "id": s.id,
+                "name": s.name,
+                "service_ids": s.service_ids,
+                "enabled": s.enabled,
+            }
+            for s in settings.stages
+        ]
 
         return {
             "status": "healthy" if (incidents_summary and incidents_summary[0]["critical_incidents"] == 0) else "degraded",
             "active_incidents": incidents_summary[0]["active_incidents"] if incidents_summary else 0,
             "critical_incidents": incidents_summary[0]["critical_incidents"] if incidents_summary else 0,
-            "pipeline_total_items": pipeline_summary[0]["total_items"] if pipeline_summary else 0,
-            "pipeline_available_media": pipeline_summary[0]["available_media"] if pipeline_summary else 0,
+            "pipeline_total_items": pipeline_total,
+            "pipeline_available_media": available_count,
+            "registered_services": len(settings.services),
+            "stages": stages_data,
             "gitops": {
                 "branch": git_status.get("branch"),
                 "commit": git_status.get("short_commit"),

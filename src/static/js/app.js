@@ -304,7 +304,8 @@ class ServerManagerApp {
       document.getElementById('ov-pipeline-count').innerText = data.pipeline_total_items || '0';
       document.getElementById('ov-incident-count').innerText = data.active_incidents || '0';
       document.getElementById('ov-incident-caption').innerText = `${data.critical_incidents || 0} critical anomalies`;
-      document.getElementById('ov-catalog-count').innerText = data.pipeline_available_media || '0';
+      const servCountEl = document.getElementById('ov-services-count') || document.getElementById('ov-catalog-count');
+      if (servCountEl) servCountEl.innerText = data.registered_services !== undefined ? data.registered_services : (data.pipeline_available_media || '0');
 
       const badge = document.getElementById('nav-incidents-badge');
       if (badge) {
@@ -332,8 +333,41 @@ class ServerManagerApp {
           </div>
         `).join('');
       }
+
+      // Dynamically load stages preview in overview
+      const stagesContainer = document.getElementById('ov-pipeline-stages');
+      if (stagesContainer) {
+        const stages = data.stages || [];
+        if (stages.length === 0) {
+          stagesContainer.innerHTML = '<div class="empty-state" style="padding: 16px;">No pipeline stages configured. Go to <strong>Settings &gt; Stages &amp; Predicates</strong> to define stages.</div>';
+        } else {
+          stagesContainer.innerHTML = stages.map(st => {
+            const servList = (st.service_ids && st.service_ids.length > 0) ? st.service_ids.join(', ') : 'No services';
+            return `
+              <div class="stage-item">
+                <span class="stage-badge font-mono">${this.escapeHtml(st.id)}</span>
+                <span class="stage-name">${this.escapeHtml(st.name)} <span class="text-muted" style="font-size: 0.75rem;">(${this.escapeHtml(servList)})</span></span>
+                <span class="stage-status ${st.enabled ? 'status-active' : 'text-muted'}">${st.enabled ? 'Active' : 'Disabled'}</span>
+              </div>
+            `;
+          }).join('');
+        }
+      }
     } catch (e) {
       console.error('Error loading overview:', e);
+    }
+  }
+
+  updatePipelineStageOptions(stages) {
+    const stageSelect = document.getElementById('pipeline-filter-stage');
+    if (!stageSelect) return;
+    const currentVal = stageSelect.value;
+    const optionsHtml = '<option value="">All Stages</option>' + (stages || []).map(s => 
+      `<option value="${this.escapeHtml(s.id)}">${this.escapeHtml(s.name)} (${this.escapeHtml(s.id)})</option>`
+    ).join('');
+    if (stageSelect.innerHTML !== optionsHtml) {
+      stageSelect.innerHTML = optionsHtml;
+      stageSelect.value = currentVal;
     }
   }
 
@@ -342,6 +376,16 @@ class ServerManagerApp {
      ------------------------------------------------------------------------ */
   async loadPipeline() {
     try {
+      const stageSelect = document.getElementById('pipeline-filter-stage');
+      if (stageSelect) {
+        if (this.settingsData && this.settingsData.stages) {
+          this.updatePipelineStageOptions(this.settingsData.stages);
+        } else {
+          fetch('/api/v1/settings').then(r => r.json()).then(s => {
+            if (s && s.stages) this.updatePipelineStageOptions(s.stages);
+          }).catch(() => {});
+        }
+      }
       const stage = document.getElementById('pipeline-filter-stage')?.value;
       const status = document.getElementById('pipeline-filter-status')?.value;
 
