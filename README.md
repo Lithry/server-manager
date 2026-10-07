@@ -8,9 +8,11 @@
 
 1. **Universal Ingestion Pipeline (`SERVICES_PIPELINE`) & Dynamic Schema Engine**:
    - Centralizes media tracking and application telemetry across external services (Sonarr, Radarr, Shoko Server, Jellyfin, AniBridge, etc.).
-   - **Dynamic Schema Mapper**: Live-sample service APIs, select fields, and automatically apply sanitized columns (`^[A-Z0-9_]+$`).
-   - **Field Transformers**: Map incoming attributes using conditional expressions (e.g. `if "anime" in tags then 1 else 0 -> IS_ANIME`).
-   - **Clean Database Principle**: Non-monitored or filtered files are dispatched to an in-memory volatile ring-buffer event log for operator review, preventing unneeded rows in SQLite.
+   - **Dynamic Schema Mapper**: Live-sample service APIs, discover scalar arrays (`genres`, `tags`), and automatically apply sanitized columns (`^[A-Z0-9_]+$`).
+   - **Namespaced Multi-Enrichment**: Configure multiple secondary API endpoints per service without key collisions (e.g., `series: /api/v3/series/{seriesId}`, `episode: /api/v3/episode/{episodeId}`, `movie: /api/v3/movie/{movieId}`).
+   - **Generic Dotted-Path List Projection**: Extract attributes across arrays of nested objects (e.g. `movie.alternateTitles.title` or `[*]`) into clean string lists without hardcoded schemas.
+   - **Field Transformers & Tag Resolution**: Map incoming attributes using conditional expressions (e.g. `if 'anime' in tags then 1 else 0 -> IS_ANIME`). Automatically resolves numeric tag IDs to human-readable labels via in-memory cached `/api/v3/tag` queries.
+   - **Clean Database Principle & Cross-Stage Merging**: Empty lists, empty objects, and blank strings normalize to SQL `NULL` (preventing `"[]"` noise). Multi-stage updates merge list elements deduplicating entries while preserving earlier stage data. Ignored files route to a volatile ring-buffer.
 
 2. **DAG Stage Engine, Predicate Execution & Correlation Model**:
    - **Semantic Slugs**: Stages are defined by semantic keys (`id: "ingest"`, `id: "recognition"`, `id: "library"`) with visual drag-and-drop sequencing.
