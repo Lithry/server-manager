@@ -1816,7 +1816,7 @@ class ServerManagerApp {
               <td><span class="badge badge-secondary">${this.escapeHtml(m.data_type || 'TEXT')}</span></td>
               <td class="font-mono text-sm text-accent">${m.transformer ? this.escapeHtml(m.transformer) : '<span class="text-muted">Direct</span>'}</td>
               <td>
-                <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); app.openAddMappingModal('${this.escapeHtml(m.target_column)}')">Edit</button>
+                <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); app.openAddMappingModal('${activeService}', '${this.escapeHtml(m.target_column)}')">Edit</button>
                 <button class="btn btn-secondary btn-sm text-alert ml-1" onclick="event.stopPropagation(); app.deleteMapping('${activeService}', '${this.escapeHtml(m.target_column)}')">Delete</button>
               </td>
             </tr>
@@ -1876,8 +1876,26 @@ class ServerManagerApp {
     this.renderSettingsMappings();
   }
 
-  openAddMappingModal(colToEdit = null) {
+  openAddMappingModal(serviceIdOrCol = null, colToEdit = null) {
+    let targetCol = null;
+    let serviceId = null;
+
+    if (serviceIdOrCol && colToEdit) {
+      serviceId = serviceIdOrCol;
+      targetCol = colToEdit;
+    } else if (serviceIdOrCol && !colToEdit) {
+      if (this.settingsData?.services && this.settingsData.services[serviceIdOrCol]) {
+        serviceId = serviceIdOrCol;
+      } else {
+        targetCol = serviceIdOrCol;
+      }
+    }
+
     const selectEl = document.getElementById('select-mapping-service');
+    if (serviceId && selectEl) {
+      selectEl.value = serviceId;
+    }
+
     const titleEl = document.getElementById('modal-map-title');
     const serviceNameEl = document.getElementById('modal-map-service-name');
     const sourceEl = document.getElementById('input-map-source');
@@ -1915,12 +1933,12 @@ class ServerManagerApp {
     if (serviceNameEl) serviceNameEl.value = `${serviceName} (${activeService})`;
 
     const mappings = this.settingsData?.services?.[activeService]?.field_mappings || [];
-    if (colToEdit) {
-      const m = mappings.find(x => x.target_column === colToEdit);
+    if (targetCol) {
+      const m = mappings.find(x => x.target_column === targetCol);
       if (titleEl) titleEl.innerText = 'Edit Field Mapping';
-      this.editingMappingCol = colToEdit;
+      this.editingMappingCol = targetCol;
       if (sourceEl) sourceEl.value = m ? m.source_field : '';
-      if (colEl) colEl.value = m ? m.target_column : colToEdit;
+      if (colEl) colEl.value = m ? m.target_column : targetCol;
       if (typeEl) typeEl.value = m ? (m.data_type || 'TEXT') : 'TEXT';
       if (transEl) transEl.value = m ? (m.transformer || '') : '';
     } else {
@@ -2453,4 +2471,8 @@ class ServerManagerApp {
 // Global initialization
 window.addEventListener('DOMContentLoaded', () => {
   window.app = new ServerManagerApp();
+  try {
+    window.app = window.app;
+    if (typeof globalThis !== 'undefined') globalThis.app = window.app;
+  } catch (e) {}
 });
