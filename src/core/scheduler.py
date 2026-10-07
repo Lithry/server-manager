@@ -1,6 +1,7 @@
 """Task execution scheduler with stage priority, dependency management, and active ingestion."""
 
 import re
+import json
 import asyncio
 import datetime
 import httpx
@@ -260,6 +261,8 @@ class TaskScheduler:
                                 pass
 
                         if col_name in table_cols:
+                            if isinstance(val, (dict, list)):
+                                val = json.dumps(val, ensure_ascii=False)
                             mapped_fields[col_name] = val
 
                     col_names = ["PIPELINE_KEY", "STAGE", "STATUS"] + list(mapped_fields.keys())
