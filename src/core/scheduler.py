@@ -167,30 +167,33 @@ class TaskScheduler:
                     if existing:
                         continue
 
-                    # Secondary enrichment query if configured
-                    enrichment_dict: Dict[str, Any] = {}
-                    if service_cfg.enrichment_endpoint:
-                        try:
-                            resolved_ep = service_cfg.enrichment_endpoint
-                            for ph in re.findall(r"\{([^}]+)\}", service_cfg.enrichment_endpoint):
-                                val = extract_dotted_value(rec, ph) or rec.get(ph)
-                                if val is not None:
-                                    resolved_ep = resolved_ep.replace(f"{{{ph}}}", str(val))
+                    # Secondary enrichment queries with namespaces
+                    enrichment_data: Dict[str, Any] = {}
+                    if service_cfg.enrichment_endpoints:
+                        for namespace, ep_template in service_cfg.enrichment_endpoints.items():
+                            if not ep_template or not ep_template.strip():
+                                continue
+                            try:
+                                resolved_ep = ep_template.strip()
+                                for ph in re.findall(r"\{([^}]+)\}", ep_template):
+                                    val = extract_dotted_value(rec, ph) or rec.get(ph)
+                                    if val is not None:
+                                        resolved_ep = resolved_ep.replace(f"{{{ph}}}", str(val))
 
-                            if "{" not in resolved_ep:
-                                enrich_url, enrich_headers = prepare_service_request(
-                                    service_cfg.base_url, resolved_ep, service_cfg.api_key or ""
-                                )
-                                async with httpx.AsyncClient(timeout=10.0) as client:
-                                    e_resp = await client.get(enrich_url, headers=enrich_headers)
-                                    if e_resp.status_code == 200:
-                                        e_json = e_resp.json()
-                                        if isinstance(e_json, dict):
-                                            enrichment_dict = e_json
-                        except Exception as e_err:
-                            print(f"[!] Warning enrichment error for {pipeline_key}: {e_err}")
+                                if "{" not in resolved_ep:
+                                    enrich_url, enrich_headers = prepare_service_request(
+                                        service_cfg.base_url, resolved_ep, service_cfg.api_key or ""
+                                    )
+                                    async with httpx.AsyncClient(timeout=10.0) as client:
+                                        e_resp = await client.get(enrich_url, headers=enrich_headers)
+                                        if e_resp.status_code == 200:
+                                            e_json = e_resp.json()
+                                            if isinstance(e_json, dict):
+                                                enrichment_data[namespace.strip()] = e_json
+                            except Exception as e_err:
+                                print(f"[!] Warning enrichment error ({namespace}) for {pipeline_key}: {e_err}")
 
-                    context_dict = {"records": rec, **rec, **enrichment_dict}
+                    context_dict = {"records": rec, **rec, **enrichment_data}
 
                     # Evaluate field mappings
                     mapped_fields: Dict[str, Any] = {}

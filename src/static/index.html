@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/css/style.css?v=0.1.4">
+  <link rel="stylesheet" href="/static/css/style.css?v=0.1.5">
 </head>
 <body class="dark-theme">
   <div class="app-layout">
@@ -659,7 +659,10 @@
           <button class="btn btn-secondary" id="btn-fetch-sample">Fetch Sample</button>
         </div>
         <div class="mb-3 hidden" id="sample-filter-container">
-          <input type="text" id="sample-filter-input" class="form-input" placeholder="🔍 Filter discovered attributes (e.g. episode, id, title)...">
+          <div class="form-grid-2">
+            <input type="text" id="sample-filter-input" class="form-input" placeholder="🔍 Filter discovered attributes (e.g. episode, id, title)...">
+            <input type="text" id="sample-namespace-input" class="form-input font-mono" placeholder="Namespace prefix (optional, e.g. series, episode)">
+          </div>
         </div>
         <div class="api-fields-viewer" id="api-sample-result">
           <p class="text-muted">Click 'Fetch Sample' to inspect JSON schema and keys.</p>
@@ -750,9 +753,9 @@
               <small class="text-muted">Unique tracking identifier. Presets: <code>{service}:{id}</code> or <code>{data.path}</code></small>
             </div>
             <div class="form-group">
-              <label>Secondary Enrichment URL (Optional)</label>
-              <input type="text" id="input-service-enrichment" class="form-input font-mono" placeholder="/api/v3/episode/{episodeId}">
-              <small class="text-muted">In-memory query to merge details (e.g. <code>/api/v3/episode/{episodeId}</code>).</small>
+              <label>Secondary Enrichment Endpoints (Optional)</label>
+              <textarea id="input-service-enrichment" class="form-input font-mono" rows="2" placeholder="episode: /api/v3/episode/{episodeId}&#10;series: /api/v3/series/{seriesId}"></textarea>
+              <small class="text-muted">Specify <code>namespace: /endpoint/{param}</code> per line to isolate attributes.</small>
             </div>
           </div>
 
@@ -1016,6 +1019,6 @@
     </div>
   </div>
 
-  <script src="/static/js/app.js?v=0.1.4"></script>
+  <script src="/static/js/app.js?v=0.1.5"></script>
 </body>
 </html>

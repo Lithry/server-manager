@@ -1280,6 +1280,7 @@ class ServerManagerApp {
             <span>Base URL: <code class="font-mono">${this.escapeHtml(cfg.base_url || 'None')}</code></span>
             ${cfg.api_key ? '<span class="ml-3">| API Key configured</span>' : ''}
             <span class="ml-3">| Field Mappings: <strong>${(cfg.field_mappings || []).length}</strong></span>
+            ${cfg.enrichment_endpoints && Object.keys(cfg.enrichment_endpoints).length > 0 ? `<span class="ml-3">| Enrichment: <code>${Object.keys(cfg.enrichment_endpoints).join(', ')}</code></span>` : ''}
           </div>
         </div>
       `;
@@ -1309,7 +1310,13 @@ class ServerManagerApp {
       if (keyEl) keyEl.value = s.api_key || '';
       if (enabledChk) enabledChk.checked = s.enabled !== false;
       if (keyTemplateEl) keyTemplateEl.value = s.pipeline_key_template || '{service}:{id}';
-      if (enrichEl) enrichEl.value = s.enrichment_endpoint || '';
+      if (enrichEl) {
+        if (s.enrichment_endpoints && typeof s.enrichment_endpoints === 'object' && Object.keys(s.enrichment_endpoints).length > 0) {
+          enrichEl.value = Object.entries(s.enrichment_endpoints).map(([k, v]) => `${k}: ${v}`).join('\n');
+        } else {
+          enrichEl.value = '';
+        }
+      }
 
       const hasOverride = s.poll_interval_seconds !== null && s.poll_interval_seconds !== undefined && s.poll_interval_seconds > 0;
       if (inheritChk) inheritChk.checked = !hasOverride;
@@ -1437,6 +1444,23 @@ class ServerManagerApp {
       checkedEvents.push(cb.value);
     });
 
+    const rawEnrich = enrichEl?.value.trim() || '';
+    const enrichmentEndpoints = {};
+    if (rawEnrich) {
+      rawEnrich.split('\n').forEach(line => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        const colIdx = trimmed.indexOf(':');
+        if (colIdx > 0) {
+          const alias = trimmed.substring(0, colIdx).trim();
+          const ep = trimmed.substring(colIdx + 1).trim();
+          if (alias && ep) {
+            enrichmentEndpoints[alias] = ep;
+          }
+        }
+      });
+    }
+
     const existing = this.settingsData.services[id] || {};
     this.settingsData.services[id] = {
       name: name,
@@ -1446,7 +1470,7 @@ class ServerManagerApp {
       poll_interval_seconds: pollInterval,
       pipeline_key_template: keyTemplateEl?.value.trim() || '{service}:{id}',
       allowed_event_types: checkedEvents,
-      enrichment_endpoint: enrichEl?.value.trim() || '',
+      enrichment_endpoints: enrichmentEndpoints,
       field_mappings: existing.field_mappings || [],
     };
 
@@ -2215,6 +2239,15 @@ class ServerManagerApp {
 
       if (filterContainer) filterContainer.classList.remove('hidden');
       if (filterInput) filterInput.value = '';
+      const nsInput = document.getElementById('sample-namespace-input');
+      if (nsInput) {
+        const epLower = endpoint.toLowerCase();
+        if (epLower.includes('series')) nsInput.value = 'series';
+        else if (epLower.includes('episode')) nsInput.value = 'episode';
+        else if (epLower.includes('movie')) nsInput.value = 'movie';
+        else if (epLower.includes('tag')) nsInput.value = 'tags';
+        else nsInput.value = '';
+      }
       this.renderSampleFieldsList(this.sampleFieldsCache, data.total_fields);
     } catch (e) {
       resultBox.innerHTML = `<div class="alert-box alert-danger">Network error: ${this.escapeHtml(e.message)}</div>`;
@@ -2251,10 +2284,13 @@ class ServerManagerApp {
   }
 
   useSampleField(path) {
+    const nsEl = document.getElementById('sample-namespace-input');
+    const ns = (nsEl?.value || '').trim();
+    const finalPath = ns ? `${ns}.${path}` : path;
     this.closeModals();
     this.openAddMappingModal();
     const sourceEl = document.getElementById('input-map-source');
-    if (sourceEl) sourceEl.value = path;
+    if (sourceEl) sourceEl.value = finalPath;
   }
 
   /* --- ENGINE OVERRIDES & RETENTION --- */
