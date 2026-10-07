@@ -2,6 +2,7 @@
 
 import re
 import httpx
+import urllib.parse
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -11,6 +12,31 @@ from src.core.config import config_manager
 
 
 router = APIRouter(prefix="/api/v1/pipeline", tags=["Pipeline"])
+
+
+def prepare_service_request(base_url: str, endpoint: str, api_key: str = "") -> tuple[str, dict]:
+    """Prepare target URL and headers, handling Docker network host routing and Kestrel Host headers."""
+    parsed = urllib.parse.urlparse(base_url.rstrip("/"))
+    hostname = (parsed.hostname or "").lower()
+    port = parsed.port
+
+    headers = {}
+    if api_key:
+        headers["X-Api-Key"] = api_key
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    # If the target is localhost, 127.0.0.1, or host.docker.internal:
+    # Inside a Docker container, we must connect to the host gateway (host.docker.internal).
+    # Furthermore, ASP.NET Core apps (Sonarr, Radarr, Jellyfin) reject "Host: host.docker.internal"
+    # with 400 Bad Request (Invalid Hostname), so we explicitly set "Host: localhost[:port]".
+    if hostname in ("localhost", "127.0.0.1", "host.docker.internal"):
+        target_netloc = f"host.docker.internal:{port}" if port else "host.docker.internal"
+        headers["Host"] = f"localhost:{port}" if port else "localhost"
+        parsed = parsed._replace(netloc=target_netloc)
+
+    clean_endpoint = endpoint.lstrip("/")
+    target_url = f"{urllib.parse.urlunparse(parsed)}/{clean_endpoint}" if clean_endpoint else urllib.parse.urlunparse(parsed)
+    return target_url, headers
 
 
 class AddColumnRequest(BaseModel):
@@ -123,11 +149,7 @@ async def sample_app_api(req: SampleApiRequest) -> Dict[str, Any]:
     if not service_cfg.base_url:
         raise HTTPException(status_code=400, detail=f"Service '{s_id}' has no base_url configured")
 
-    url = f"{service_cfg.base_url.rstrip('/')}/{req.endpoint.lstrip('/')}"
-    headers = {}
-    if service_cfg.api_key:
-        headers["X-Api-Key"] = service_cfg.api_key
-        headers["Authorization"] = f"Bearer {service_cfg.api_key}"
+    url, headers = prepare_service_request(service_cfg.base_url, req.endpoint, service_cfg.api_key or "")
 
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:

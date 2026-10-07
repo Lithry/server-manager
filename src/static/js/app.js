@@ -11,6 +11,7 @@ class ServerManagerApp {
     this.activeIncidentTab = 'active'; // 'active', 'resolved', 'catalog'
     this.selectedTool = null;
     this.settingsData = null;
+    this.manualSlugEdited = false;
 
     this.init();
   }
@@ -146,6 +147,19 @@ class ServerManagerApp {
     // Service modal bindings
     document.getElementById('btn-add-service')?.addEventListener('click', () => {
       this.openAddServiceModal();
+    });
+    const serviceNameEl = document.getElementById('input-service-name');
+    const serviceSlugEl = document.getElementById('input-service-id');
+    serviceSlugEl?.addEventListener('input', () => {
+      this.manualSlugEdited = true;
+    });
+    serviceNameEl?.addEventListener('input', () => {
+      if (!this.manualSlugEdited && !serviceSlugEl?.disabled) {
+        serviceSlugEl.value = this.slugify(serviceNameEl.value);
+      }
+    });
+    document.getElementById('sample-service-select')?.addEventListener('change', (e) => {
+      this.updateSampleEndpointSuggestion(e.target.value);
     });
     document.getElementById('chk-service-inherit-poll')?.addEventListener('change', (e) => {
       const customBlock = document.getElementById('service-custom-poll-block');
@@ -946,6 +960,7 @@ class ServerManagerApp {
       if (pollEl) pollEl.value = hasOverride ? s.poll_interval_seconds : (this.settingsData.global_poll_interval_seconds || 300);
       if (customBlock) customBlock.classList.toggle('hidden', !hasOverride);
     } else {
+      this.manualSlugEdited = false;
       if (titleEl) titleEl.innerText = 'Register Service';
       if (idEl) { idEl.value = ''; idEl.disabled = false; }
       if (nameEl) nameEl.value = '';
@@ -1450,6 +1465,31 @@ class ServerManagerApp {
   }
 
   /* --- API SAMPLING --- */
+  slugify(text) {
+    return (text || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/ñ/g, 'n')
+      .replace(/[^a-z0-9_-]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+  }
+
+  updateSampleEndpointSuggestion(serviceId) {
+    const input = document.getElementById('sample-endpoint-input');
+    if (!input || !serviceId) return;
+    const s = serviceId.toLowerCase();
+    if (s.includes('sonarr') || s.includes('radarr')) {
+      input.value = '/api/v3/history';
+    } else if (s.includes('jellyfin')) {
+      input.value = '/Items?Recursive=true';
+    } else if (s.includes('shoko')) {
+      input.value = '/api/v3/File/Recent';
+    } else if (s.includes('qbit')) {
+      input.value = '/api/v2/torrents/info';
+    }
+  }
+
   openSampleModal() {
     const selectEl = document.getElementById('sample-service-select');
     const services = this.settingsData?.services || {};
@@ -1462,6 +1502,7 @@ class ServerManagerApp {
         selectEl.innerHTML = serviceEntries.map(([sid, cfg]) => `
           <option value="${this.escapeHtml(sid)}">${this.escapeHtml(cfg.name)} (${this.escapeHtml(sid)})</option>
         `).join('');
+        this.updateSampleEndpointSuggestion(serviceEntries[0][0]);
       }
     }
 

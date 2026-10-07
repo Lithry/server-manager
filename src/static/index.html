@@ -592,7 +592,20 @@
           <select id="sample-service-select" class="form-select">
             <option value="">-- Select Service --</option>
           </select>
-          <input type="text" id="sample-endpoint-input" class="form-input font-mono" placeholder="/api/v3/history" style="flex: 1;" value="/api/v3/history">
+          <input type="text" id="sample-endpoint-input" list="common-endpoints-list" class="form-input font-mono" placeholder="/api/v3/history" style="flex: 1;" value="/api/v3/history">
+          <datalist id="common-endpoints-list">
+            <option value="/api/v3/history">History (Sonarr / Radarr)</option>
+            <option value="/api/v3/queue">Queue (Sonarr / Radarr)</option>
+            <option value="/api/v3/series">Series (Sonarr)</option>
+            <option value="/api/v3/movie">Movies (Radarr)</option>
+            <option value="/api/v3/tag">Tags (Sonarr / Radarr)</option>
+            <option value="/api/v3/system/status">System Status (Sonarr / Radarr)</option>
+            <option value="/api/v3/File/Recent">Recent Files (Shoko)</option>
+            <option value="/api/v3/Series">Series Catalog (Shoko)</option>
+            <option value="/Items?Recursive=true">Items (Jellyfin)</option>
+            <option value="/System/Info">System Info (Jellyfin)</option>
+            <option value="/api/v2/torrents/info">Torrents (qBittorrent)</option>
+          </datalist>
           <button class="btn btn-secondary" id="btn-fetch-sample">Fetch Sample</button>
         </div>
         <div class="api-fields-viewer" id="api-sample-result">
@@ -639,20 +652,21 @@
       <div class="modal-body">
         <div class="form-grid-2 mb-3">
           <div class="form-group">
-            <label>Service ID (Slug)</label>
-            <input type="text" id="input-service-id" class="form-input font-mono" placeholder="sonarr, radarr, jellyfin, custom_app" autocomplete="off">
-            <small class="text-muted">Unique identifier used internally (lowercase, no spaces).</small>
+            <label>Display Name</label>
+            <input type="text" id="input-service-name" class="form-input" placeholder="Sonarr, Radarr, Jellyfin, etc.">
           </div>
           <div class="form-group">
-            <label>Display Name</label>
-            <input type="text" id="input-service-name" class="form-input" placeholder="Sonarr, Radarr Anime, Custom Ingester">
+            <label>Service ID (Slug)</label>
+            <input type="text" id="input-service-id" class="form-input font-mono" placeholder="sonarr, radarr, jellyfin" autocomplete="off">
+            <small class="text-muted">Auto-generated or custom identifier (lowercase, no spaces).</small>
           </div>
         </div>
 
         <div class="form-grid-2 mb-3">
           <div class="form-group">
             <label>Base URL</label>
-            <input type="text" id="input-service-url" class="form-input font-mono" placeholder="http://host.docker.internal:8989">
+            <input type="text" id="input-service-url" class="form-input font-mono" placeholder="http://localhost:<port>">
+            <small class="text-muted">Use <code>http://localhost:&lt;port&gt;</code> for services on host.</small>
           </div>
           <div class="form-group">
             <label>API Key / Bearer Token</label>
