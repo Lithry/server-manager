@@ -14,20 +14,119 @@ from src.api.pipeline import prepare_service_request
 
 
 def extract_dotted_value(data: dict, path: str) -> Any:
-    """Extract nested value using dot notation, supporting flexible hierarchy."""
+    """Extract nested value using dot notation, supporting list projection and numeric indexing."""
     if not path or not isinstance(data, dict):
         return None
 
-    parts = path.strip().split(".")
-    curr = data
-    for part in parts:
-        if isinstance(curr, dict) and part in curr:
-            curr = curr[part]
-        elif isinstance(curr, list) and part.isdigit() and int(part) < len(curr):
-            curr = curr[int(part)]
-        else:
+    normalized_path = path.strip().replace("[*]", "")
+    parts = [p for p in normalized_path.split(".") if p]
+
+    def _resolve(curr: Any, remaining: List[str]) -> Any:
+        if not remaining:
+            return curr
+
+        part = remaining[0]
+        rest = remaining[1:]
+
+        if isinstance(curr, dict):
+            if part in curr:
+                return _resolve(curr[part], rest)
             return None
-    return curr
+
+        elif isinstance(curr, list):
+            if part.isdigit():
+                idx = int(part)
+                if 0 <= idx < len(curr):
+                    return _resolve(curr[idx], rest)
+                return None
+            else:
+                # Project over all items in the list
+                projected = []
+                for item in curr:
+                    res = _resolve(item, [part] + rest)
+                    if res is not None:
+                        projected.append(res)
+                return projected if projected else None
+
+        return None
+
+    return _resolve(data, parts)
+
+
+def sanitize_and_serialize(val: Any) -> Any:
+    """Sanitize and serialize field value for SQLite storage.
+    Empty strings, empty lists, empty dicts and None become None (SQL NULL).
+    Lists are deduplicated preserving order and serialized to JSON.
+    Dicts are serialized to JSON.
+    """
+    if val is None:
+        return None
+
+    if isinstance(val, str):
+        cleaned = val.strip()
+        return cleaned if cleaned else None
+
+    if isinstance(val, (list, tuple, set)):
+        seen = set()
+        unique_items = []
+        for item in val:
+            if item is None or (isinstance(item, str) and not item.strip()):
+                continue
+            key = item.strip().lower() if isinstance(item, str) else str(item)
+            if key not in seen:
+                seen.add(key)
+                unique_items.append(item.strip() if isinstance(item, str) else item)
+        if not unique_items:
+            return None
+        return json.dumps(unique_items, ensure_ascii=False)
+
+    if isinstance(val, dict):
+        return json.dumps(val, ensure_ascii=False) if val else None
+
+    return val
+
+
+def merge_field_value(existing_val: Any, new_val: Any) -> Any:
+    """Merge an incoming field value into an existing database value.
+    If new_val is empty, preserves existing_val.
+    If both are lists/JSON arrays, merges them deduplicating items.
+    """
+    sanitized_new = sanitize_and_serialize(new_val)
+    if sanitized_new is None:
+        return existing_val
+
+    if existing_val is None:
+        return sanitized_new
+
+    def _to_list(v: Any) -> Optional[List[Any]]:
+        if isinstance(v, list):
+            return v
+        if isinstance(v, str) and v.startswith("[") and v.endswith("]"):
+            try:
+                parsed = json.loads(v)
+                if isinstance(parsed, list):
+                    return parsed
+            except Exception:
+                pass
+        return None
+
+    existing_list = _to_list(existing_val)
+    new_list = _to_list(sanitized_new)
+
+    if existing_list is not None and new_list is not None:
+        seen = set()
+        merged = []
+        for item in existing_list + new_list:
+            if item is None or (isinstance(item, str) and not item.strip()):
+                continue
+            key = item.strip().lower() if isinstance(item, str) else str(item)
+            if key not in seen:
+                seen.add(key)
+                merged.append(item.strip() if isinstance(item, str) else item)
+        return json.dumps(merged, ensure_ascii=False) if merged else None
+
+    return sanitized_new
+
 
 
 def resolve_template_key(template: str, service_id: str, rec: dict) -> str:
@@ -261,9 +360,7 @@ class TaskScheduler:
                                 pass
 
                         if col_name in table_cols:
-                            if isinstance(val, (dict, list)):
-                                val = json.dumps(val, ensure_ascii=False)
-                            mapped_fields[col_name] = val
+                            mapped_fields[col_name] = sanitize_and_serialize(val)
 
                     col_names = ["PIPELINE_KEY", "STAGE", "STATUS"] + list(mapped_fields.keys())
                     placeholders = ["?"] * len(col_names)

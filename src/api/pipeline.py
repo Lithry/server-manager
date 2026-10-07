@@ -82,8 +82,12 @@ def flatten_json_keys(obj: Any, prefix: str = "") -> List[Dict[str, Any]]:
             else:
                 fields.append({"path": full_key, "sample": str(v)[:60], "type": type(v).__name__})
     elif isinstance(obj, list) and obj:
-        # Sample first item
-        fields.extend(flatten_json_keys(obj[0], prefix))
+        if isinstance(obj[0], (dict, list)):
+            fields.extend(flatten_json_keys(obj[0], prefix))
+        else:
+            fields.append({"path": prefix, "sample": str(obj)[:60], "type": "list"})
+    elif isinstance(obj, list) and not obj:
+        fields.append({"path": prefix, "sample": "[]", "type": "list"})
     return fields
 
 
