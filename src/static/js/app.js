@@ -12,6 +12,9 @@ class ServerManagerApp {
     this.selectedTool = null;
     this.settingsData = null;
     this.manualSlugEdited = false;
+    this.editingMappingCol = null;
+    this.sampleFieldsCache = [];
+    this.existingColsMap = new Map();
 
     this.init();
   }
@@ -158,8 +161,23 @@ class ServerManagerApp {
         serviceSlugEl.value = this.slugify(serviceNameEl.value);
       }
     });
-    document.getElementById('sample-service-select')?.addEventListener('change', (e) => {
-      this.updateSampleEndpointSuggestion(e.target.value);
+    // Filter discovered attributes in Sample modal
+    document.getElementById('sample-filter-input')?.addEventListener('input', (e) => {
+      const q = (e.target.value || '').toLowerCase().trim();
+      if (!this.sampleFieldsCache) return;
+      const filtered = q
+        ? this.sampleFieldsCache.filter(f => f.path.toLowerCase().includes(q) || (f.sample && f.sample.toLowerCase().includes(q)))
+        : this.sampleFieldsCache;
+      this.renderSampleFieldsList(filtered);
+    });
+
+    // Auto-detect data type when selecting an existing column
+    document.getElementById('input-map-col')?.addEventListener('input', (e) => {
+      const colVal = (e.target.value || '').trim().toUpperCase();
+      if (this.existingColsMap && this.existingColsMap.has(colVal)) {
+        const typeEl = document.getElementById('input-map-type');
+        if (typeEl) typeEl.value = this.existingColsMap.get(colVal);
+      }
     });
     document.getElementById('chk-service-inherit-poll')?.addEventListener('change', (e) => {
       const customBlock = document.getElementById('service-custom-poll-block');
@@ -1326,6 +1344,7 @@ class ServerManagerApp {
       <table class="mapping-table">
         <thead>
           <tr>
+            <th class="drag-handle-cell"></th>
             <th>Source Field</th>
             <th>Target DB Column</th>
             <th>Data Type</th>
@@ -1333,28 +1352,79 @@ class ServerManagerApp {
             <th>Actions</th>
           </tr>
         </thead>
-        <tbody>
-          ${mappings.map(m => `
-            <tr>
+        <tbody id="mapping-table-body">
+          ${mappings.map((m, idx) => `
+            <tr draggable="true" data-index="${idx}">
+              <td class="drag-handle-cell">
+                <span class="drag-handle" title="Drag to reorder">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="4" y1="7" x2="20" y2="7"></line>
+                    <line x1="4" y1="12" x2="20" y2="12"></line>
+                    <line x1="4" y1="17" x2="20" y2="17"></line>
+                  </svg>
+                </span>
+              </td>
               <td class="font-mono">${this.escapeHtml(m.source_field)}</td>
               <td><span class="badge badge-info font-mono">${this.escapeHtml(m.target_column)}</span></td>
               <td><span class="badge badge-secondary">${this.escapeHtml(m.data_type || 'TEXT')}</span></td>
               <td class="font-mono text-sm text-accent">${m.transformer ? this.escapeHtml(m.transformer) : '<span class="text-muted">Direct</span>'}</td>
               <td>
-                <button class="btn btn-secondary btn-sm text-alert" onclick="app.deleteMapping('${activeService}', '${m.target_column}')">Delete</button>
+                <button class="btn btn-secondary btn-sm" onclick="app.openAddMappingModal('${this.escapeHtml(m.target_column)}')">Edit</button>
+                <button class="btn btn-secondary btn-sm text-alert ml-1" onclick="app.deleteMapping('${activeService}', '${this.escapeHtml(m.target_column)}')">Delete</button>
               </td>
             </tr>
           `).join('')}
         </tbody>
       </table>
     `;
+
+    // Attach drag & drop listeners to mapping rows
+    let draggedIdx = null;
+    const rows = container.querySelectorAll('#mapping-table-body tr');
+    rows.forEach(row => {
+      row.addEventListener('dragstart', (e) => {
+        draggedIdx = parseInt(row.getAttribute('data-index'), 10);
+        row.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+      });
+      row.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        row.classList.add('drag-over');
+      });
+      row.addEventListener('dragleave', () => {
+        row.classList.remove('drag-over');
+      });
+      row.addEventListener('drop', (e) => {
+        e.preventDefault();
+        row.classList.remove('drag-over');
+        const targetIdx = parseInt(row.getAttribute('data-index'), 10);
+        if (draggedIdx !== null && draggedIdx !== targetIdx) {
+          this.reorderMappings(activeService, draggedIdx, targetIdx);
+        }
+      });
+      row.addEventListener('dragend', () => {
+        row.classList.remove('dragging');
+        rows.forEach(r => r.classList.remove('drag-over'));
+      });
+    });
   }
 
-  openAddMappingModal() {
+  reorderMappings(serviceId, fromIndex, toIndex) {
+    const list = this.settingsData?.services?.[serviceId]?.field_mappings;
+    if (!list || fromIndex === toIndex) return;
+    const [moved] = list.splice(fromIndex, 1);
+    list.splice(toIndex, 0, moved);
+    this.renderSettingsMappings();
+  }
+
+  openAddMappingModal(colToEdit = null) {
     const selectEl = document.getElementById('select-mapping-service');
+    const titleEl = document.getElementById('modal-map-title');
     const serviceNameEl = document.getElementById('modal-map-service-name');
     const sourceEl = document.getElementById('input-map-source');
     const colEl = document.getElementById('input-map-col');
+    const typeEl = document.getElementById('input-map-type');
     const transEl = document.getElementById('input-map-transformer');
     const sampleEl = document.getElementById('input-map-sample');
     const resultEl = document.getElementById('transformer-test-result');
@@ -1365,11 +1435,45 @@ class ServerManagerApp {
       return;
     }
 
+    // Populate existing columns datalist across all services
+    const existingCols = new Map();
+    Object.values(this.settingsData?.services || {}).forEach(srv => {
+      (srv.field_mappings || []).forEach(m => {
+        if (m.target_column && !existingCols.has(m.target_column)) {
+          existingCols.set(m.target_column, m.data_type || 'TEXT');
+        }
+      });
+    });
+    this.existingColsMap = existingCols;
+
+    const datalist = document.getElementById('existing-columns-datalist');
+    if (datalist) {
+      datalist.innerHTML = Array.from(existingCols.entries()).map(([col, type]) => `
+        <option value="${this.escapeHtml(col)}">${type ? `(${type})` : ''}</option>
+      `).join('');
+    }
+
     const serviceName = this.settingsData?.services?.[activeService]?.name || activeService;
     if (serviceNameEl) serviceNameEl.value = `${serviceName} (${activeService})`;
-    if (sourceEl) sourceEl.value = '';
-    if (colEl) colEl.value = '';
-    if (transEl) transEl.value = '';
+
+    const mappings = this.settingsData?.services?.[activeService]?.field_mappings || [];
+    if (colToEdit) {
+      const m = mappings.find(x => x.target_column === colToEdit);
+      if (titleEl) titleEl.innerText = 'Edit Field Mapping';
+      this.editingMappingCol = colToEdit;
+      if (sourceEl) sourceEl.value = m ? m.source_field : '';
+      if (colEl) colEl.value = m ? m.target_column : colToEdit;
+      if (typeEl) typeEl.value = m ? (m.data_type || 'TEXT') : 'TEXT';
+      if (transEl) transEl.value = m ? (m.transformer || '') : '';
+    } else {
+      if (titleEl) titleEl.innerText = 'Configure Field Mapping & Transformer';
+      this.editingMappingCol = null;
+      if (sourceEl) sourceEl.value = '';
+      if (colEl) colEl.value = '';
+      if (typeEl) typeEl.value = 'TEXT';
+      if (transEl) transEl.value = '';
+    }
+
     if (sampleEl) sampleEl.value = '';
     if (resultEl) resultEl.classList.add('hidden');
 
@@ -1443,15 +1547,31 @@ class ServerManagerApp {
       this.settingsData.services[activeService].field_mappings = [];
     }
 
-    // Filter existing with same column name
-    this.settingsData.services[activeService].field_mappings = this.settingsData.services[activeService].field_mappings.filter(m => m.target_column !== col);
-    this.settingsData.services[activeService].field_mappings.push({
-      source_field: source,
-      target_column: col,
-      data_type: dataType,
-      transformer: transformer
-    });
+    const list = this.settingsData.services[activeService].field_mappings;
+    if (this.editingMappingCol) {
+      const idx = list.findIndex(m => m.target_column === this.editingMappingCol);
+      const updated = {
+        source_field: source,
+        target_column: col,
+        data_type: dataType,
+        transformer: transformer
+      };
+      if (idx >= 0) {
+        list[idx] = updated;
+      } else {
+        list.push(updated);
+      }
+    } else {
+      this.settingsData.services[activeService].field_mappings = list.filter(m => m.target_column !== col);
+      this.settingsData.services[activeService].field_mappings.push({
+        source_field: source,
+        target_column: col,
+        data_type: dataType,
+        transformer: transformer
+      });
+    }
 
+    this.editingMappingCol = null;
     this.renderSettingsMappings();
     this.closeModals();
   }
@@ -1491,31 +1611,43 @@ class ServerManagerApp {
   }
 
   openSampleModal() {
-    const selectEl = document.getElementById('sample-service-select');
+    const activeService = document.getElementById('select-mapping-service')?.value;
     const services = this.settingsData?.services || {};
-    const serviceEntries = Object.entries(services);
+    const serviceCfg = services[activeService];
 
-    if (selectEl) {
-      if (serviceEntries.length === 0) {
-        selectEl.innerHTML = '<option value="">-- No services configured --</option>';
-      } else {
-        selectEl.innerHTML = serviceEntries.map(([sid, cfg]) => `
-          <option value="${this.escapeHtml(sid)}">${this.escapeHtml(cfg.name)} (${this.escapeHtml(sid)})</option>
-        `).join('');
-        this.updateSampleEndpointSuggestion(serviceEntries[0][0]);
-      }
+    const badgeEl = document.getElementById('sample-service-badge');
+    const idEl = document.getElementById('sample-service-id');
+    const filterInput = document.getElementById('sample-filter-input');
+    const filterContainer = document.getElementById('sample-filter-container');
+    const resultBox = document.getElementById('api-sample-result');
+
+    if (badgeEl && serviceCfg) {
+      badgeEl.innerText = `${serviceCfg.name} (${activeService})`;
+    } else if (badgeEl) {
+      badgeEl.innerText = activeService || 'No service';
+    }
+    if (idEl) idEl.value = activeService || '';
+
+    if (filterInput) filterInput.value = '';
+    if (filterContainer) filterContainer.classList.add('hidden');
+    if (resultBox) resultBox.innerHTML = '<p class="text-muted">Click \'Fetch Sample\' to inspect JSON schema and keys.</p>';
+
+    this.sampleFieldsCache = [];
+    if (activeService) {
+      this.updateSampleEndpointSuggestion(activeService);
     }
 
     document.getElementById('modal-sample-api')?.classList.remove('hidden');
   }
 
   async fetchApiSample() {
-    const serviceSelect = document.getElementById('sample-service-select');
+    const serviceId = document.getElementById('sample-service-id')?.value || document.getElementById('select-mapping-service')?.value;
     const endpointInput = document.getElementById('sample-endpoint-input');
     const resultBox = document.getElementById('api-sample-result');
+    const filterContainer = document.getElementById('sample-filter-container');
+    const filterInput = document.getElementById('sample-filter-input');
     if (!resultBox) return;
 
-    const serviceId = serviceSelect?.value;
     const endpoint = endpointInput?.value.trim() || '/api/v3/history';
 
     if (!serviceId) {
@@ -1542,31 +1674,47 @@ class ServerManagerApp {
         return;
       }
 
-      const fields = data.fields || [];
-      if (fields.length === 0) {
+      this.sampleFieldsCache = data.fields || [];
+      if (this.sampleFieldsCache.length === 0) {
         resultBox.innerHTML = '<p class="text-warning">Endpoint responded successfully, but returned an empty or unparseable object.</p>';
         return;
       }
 
-      resultBox.innerHTML = `
-        <div class="mb-2 text-sm">
-          <strong>Discovered ${data.total_fields} attributes.</strong> Click any path to use as mapping source:
-        </div>
-        <div class="fields-list" style="max-height: 280px; overflow-y: auto;">
-          ${fields.map(f => `
-            <div class="field-item p-2 mb-1 bg-surface rounded border d-flex justify-content-between align-items-center">
-              <div>
-                <code class="font-mono text-accent cursor-pointer" onclick="app.useSampleField('${this.escapeHtml(f.path)}')">${this.escapeHtml(f.path)}</code>
-                <span class="badge badge-secondary ml-2">${this.escapeHtml(f.type)}</span>
-              </div>
-              <span class="text-muted text-sm font-mono truncate" style="max-width: 250px;">${this.escapeHtml(f.sample)}</span>
-            </div>
-          `).join('')}
-        </div>
-      `;
+      if (filterContainer) filterContainer.classList.remove('hidden');
+      if (filterInput) filterInput.value = '';
+      this.renderSampleFieldsList(this.sampleFieldsCache, data.total_fields);
     } catch (e) {
       resultBox.innerHTML = `<div class="alert-box alert-danger">Network error: ${this.escapeHtml(e.message)}</div>`;
     }
+  }
+
+  renderSampleFieldsList(fields, totalCount = null) {
+    const resultBox = document.getElementById('api-sample-result');
+    if (!resultBox) return;
+
+    if (fields.length === 0) {
+      resultBox.innerHTML = '<p class="text-muted text-sm">No attributes matching search query.</p>';
+      return;
+    }
+
+    const countLabel = totalCount !== null ? `Discovered ${totalCount} attributes.` : `Showing ${fields.length} attributes.`;
+
+    resultBox.innerHTML = `
+      <div class="mb-2 text-sm">
+        <strong>${countLabel}</strong> Click any path to use as mapping source:
+      </div>
+      <div class="fields-list">
+        ${fields.map(f => `
+          <div class="field-item p-2 mb-1 bg-surface rounded border d-flex justify-content-between align-items-center">
+            <div>
+              <code class="font-mono text-accent cursor-pointer" onclick="app.useSampleField('${this.escapeHtml(f.path)}')">${this.escapeHtml(f.path)}</code>
+              <span class="badge badge-secondary ml-2">${this.escapeHtml(f.type)}</span>
+            </div>
+            <span class="text-muted text-sm font-mono truncate" style="max-width: 250px;">${this.escapeHtml(f.sample)}</span>
+          </div>
+        `).join('')}
+      </div>
+    `;
   }
 
   useSampleField(path) {

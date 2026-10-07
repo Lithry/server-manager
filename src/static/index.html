@@ -589,9 +589,8 @@
       </div>
       <div class="modal-body">
         <div class="form-inline mb-3">
-          <select id="sample-service-select" class="form-select">
-            <option value="">-- Select Service --</option>
-          </select>
+          <span class="badge badge-info" id="sample-service-badge" style="font-size: 0.95rem; padding: 7px 14px;">Service</span>
+          <input type="hidden" id="sample-service-id" value="">
           <input type="text" id="sample-endpoint-input" list="common-endpoints-list" class="form-input font-mono" placeholder="/api/v3/history" style="flex: 1;" value="/api/v3/history">
           <datalist id="common-endpoints-list">
             <option value="/api/v3/history">History (Sonarr / Radarr)</option>
@@ -608,8 +607,11 @@
           </datalist>
           <button class="btn btn-secondary" id="btn-fetch-sample">Fetch Sample</button>
         </div>
+        <div class="mb-3 hidden" id="sample-filter-container">
+          <input type="text" id="sample-filter-input" class="form-input" placeholder="🔍 Filter discovered attributes (e.g. episode, id, title)...">
+        </div>
         <div class="api-fields-viewer" id="api-sample-result">
-          <p class="text-muted">Select a service and click 'Fetch Sample' to inspect JSON schema and keys.</p>
+          <p class="text-muted">Click 'Fetch Sample' to inspect JSON schema and keys.</p>
         </div>
       </div>
       <div class="modal-footer">
@@ -773,7 +775,7 @@
   <div class="modal-backdrop hidden" id="modal-add-mapping">
     <div class="modal modal-lg">
       <div class="modal-header">
-        <h3 class="modal-title">Configure Field Mapping & Transformer</h3>
+        <h3 class="modal-title" id="modal-map-title">Configure Field Mapping & Transformer</h3>
         <button class="btn-close" onclick="app.closeModals()">&times;</button>
       </div>
       <div class="modal-body">
@@ -789,8 +791,9 @@
           </div>
           <div class="form-group">
             <label>Target DB Column (Uppercase)</label>
-            <input type="text" id="input-map-col" class="form-input font-mono" placeholder="IS_ANIME, TITLE_SONARR">
-            <small class="text-muted">Strict regex: <code>^[A-Z0-9_]+$</code></small>
+            <input type="text" id="input-map-col" list="existing-columns-datalist" class="form-input font-mono" placeholder="IS_ANIME, TITLE_SONARR" autocomplete="off">
+            <datalist id="existing-columns-datalist"></datalist>
+            <small class="text-muted">Strict regex: <code>^[A-Z0-9_]+$</code> (Type or select from existing columns)</small>
           </div>
         </div>
 
@@ -806,8 +809,14 @@
 
         <div class="card p-3 mb-2 bg-surface-subtle">
           <label class="form-label text-sm">Transformer Expression (Optional)</label>
-          <input type="text" id="input-map-transformer" class="form-input font-mono mb-2" placeholder="if 'anime' in value then 1 else 0">
-          <small class="text-muted">Leave empty to store the direct value. Supports <code>if COND then TRUE else FALSE</code> or Python expression on <code>value</code>.</small>
+          <input type="text" id="input-map-transformer" class="form-input font-mono mb-2" placeholder="'anime' in value">
+          <div class="text-xs text-muted mb-2">
+            Leave empty to store direct value. The payload data is in <code>value</code>.<br>
+            <strong>Syntax examples:</strong><br>
+            • Direct boolean: <code>'anime' in value</code> or <code>value == 'anime'</code><br>
+            • Explicit condition: <code>if 'anime' in value then 1 else 0</code><br>
+            • Functions: <code>lower(value)</code> or <code>len(value) &gt; 0</code>
+          </div>
           
           <div class="mt-3">
             <label class="form-label text-sm">Test Transformer with Sample Value</label>
