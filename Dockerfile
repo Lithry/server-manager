@@ -27,6 +27,8 @@ RUN mkdir -p /data /config/custom_tools /host/proc /repo
 # Environment defaults
 ENV PUID=1000 \
     PGID=1000 \
+    UMASK=002 \
+    TZ=America/Argentina/Buenos_Aires \
     PORT=8099 \
     DB_PATH=/data/server_manager.db \
     SETTINGS_PATH=/data/settings.json

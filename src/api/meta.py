@@ -106,7 +106,15 @@ async def server_query(
         }
 
     elif clean_target == "catalog":
-        # Query MEDIA_CATALOG preset view
+        # Query MEDIA_CATALOG preset view if instantiated
+        view_exists = await db_manager.query("SELECT name FROM sqlite_master WHERE type='view' AND name='MEDIA_CATALOG';")
+        if not view_exists:
+            return {
+                "target": "media_catalog",
+                "count": 0,
+                "items": [],
+                "note": "MEDIA_CATALOG view is not instantiated",
+            }
         items = await db_manager.query(
             "SELECT * FROM MEDIA_CATALOG ORDER BY LAST_UPDATED DESC LIMIT ?;",
             (limit,),

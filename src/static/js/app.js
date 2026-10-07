@@ -461,6 +461,23 @@ class ServerManagerApp {
       const views = await resp.json();
 
       const tabsContainer = document.getElementById('views-tabs-container');
+      if (views.length === 0) {
+        if (tabsContainer) tabsContainer.innerHTML = '<span class="text-muted" style="font-size: 0.85rem;">No views configured yet.</span>';
+        const titleEl = document.getElementById('active-view-title');
+        if (titleEl) titleEl.innerText = 'No Views Configured';
+        const subEl = document.getElementById('active-view-subtitle');
+        if (subEl) subEl.innerText = 'Click "+ Create Custom View" to define an aggregated projection over SERVICES_PIPELINE.';
+        const headersRow = document.getElementById('view-data-headers');
+        if (headersRow) headersRow.innerHTML = '';
+        const bodyEl = document.getElementById('view-data-body');
+        if (bodyEl) bodyEl.innerHTML = '<tr><td class="text-center" style="padding: 24px;">No active views in database. Click "+ Create Custom View" to define a projection.</td></tr>';
+        return;
+      }
+
+      if (!views.some(v => v.VIEW_NAME === this.activeView)) {
+        this.activeView = views[0].VIEW_NAME;
+      }
+
       if (tabsContainer) {
         tabsContainer.innerHTML = views.map(v => `
           <button class="tab-sub-btn ${v.VIEW_NAME === this.activeView ? 'active' : ''}" 

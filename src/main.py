@@ -2,6 +2,14 @@
 
 import os
 from contextlib import asynccontextmanager
+
+# Apply UMASK from environment variable (default: 002 for homelab permissions 664/775)
+_umask_str = os.getenv("UMASK", "002")
+try:
+    os.umask(int(_umask_str, 8))
+except ValueError:
+    os.umask(0o002)
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse

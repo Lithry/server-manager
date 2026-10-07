@@ -96,51 +96,6 @@ class DatabaseManager:
 
             await db.commit()
 
-        # Seed initial columns for standard media flow
-        standard_cols = [
-            ("SONARR_TITLE", "TEXT"),
-            ("SONARR_STATUS", "TEXT"),
-            ("SONARR_SERIES_ID", "INTEGER"),
-            ("SONARR_EPISODE_ID", "INTEGER"),
-            ("RADARR_TITLE", "TEXT"),
-            ("RADARR_STATUS", "TEXT"),
-            ("RADARR_MOVIE_ID", "INTEGER"),
-            ("ANIDB_ID", "INTEGER"),
-            ("SHOKO_STATUS", "TEXT"),
-            ("SHOKO_VFS_PATH", "TEXT"),
-            ("JELLYFIN_ITEM_ID", "TEXT"),
-            ("JELLYFIN_STATUS", "TEXT"),
-            ("JELLYFIN_PLAY_COUNT", "INTEGER DEFAULT 0"),
-            ("ANIBRIDGE_SYNC", "TEXT"),
-        ]
-
-        for col_name, col_type in standard_cols:
-            await self.ensure_column("SERVICES_PIPELINE", col_name, col_type)
-
-        # Seed MEDIA_CATALOG factory preset view
-        preset_query = """
-            CREATE VIEW IF NOT EXISTS MEDIA_CATALOG AS
-            SELECT 
-                ID,
-                PIPELINE_KEY,
-                COALESCE(SONARR_TITLE, RADARR_TITLE, PIPELINE_KEY) AS TITLE,
-                ANIDB_ID,
-                JELLYFIN_STATUS,
-                JELLYFIN_PLAY_COUNT,
-                LAST_UPDATED
-            FROM SERVICES_PIPELINE
-            WHERE JELLYFIN_STATUS = 'AVAILABLE';
-        """
-        async with self.get_connection() as db:
-            # Drop old view if it referenced legacy APPS_PIPELINE
-            await db.execute("DROP VIEW IF EXISTS MEDIA_CATALOG;")
-            await db.execute(preset_query)
-            await db.execute("""
-                INSERT OR REPLACE INTO CUSTOM_VIEWS (VIEW_NAME, SQL_QUERY, IS_PRESET)
-                VALUES ('MEDIA_CATALOG', ?, 1);
-            """, (preset_query,))
-            await db.commit()
-
     async def ensure_column(self, table_name: str, column_name: str, column_type: str = "TEXT") -> bool:
         """Dynamically add column to table if it does not already exist."""
         clean_col = column_name.strip().upper()
