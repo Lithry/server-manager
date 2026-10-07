@@ -111,8 +111,6 @@ class TaskScheduler:
             }
             return self._status[service_id]
 
-        active_stage = active_root_stages[0]
-
         try:
             # 1. Fetch recent history from service
             history_url, headers = prepare_service_request(
@@ -133,82 +131,101 @@ class TaskScheduler:
             # Read existing table columns to avoid referencing non-existent columns
             table_cols = {c["name"].upper() for c in await db_manager.get_table_columns("SERVICES_PIPELINE")}
 
-            for rec in records:
-                if not isinstance(rec, dict):
-                    continue
-
-                event_type = rec.get("eventType")
-                if allowed_events and event_type not in allowed_events:
-                    continue
-
-                pipeline_key = resolve_template_key(service_cfg.pipeline_key_template, service_id, rec)
-                if not pipeline_key:
-                    continue
-
-                # Avoid duplicate entries
-                existing = await db_manager.query("SELECT 1 FROM SERVICES_PIPELINE WHERE PIPELINE_KEY = ?", (pipeline_key,))
-                if existing:
-                    continue
-
-                # Secondary enrichment query if configured
-                enrichment_dict: Dict[str, Any] = {}
-                if service_cfg.enrichment_endpoint:
+            for active_stage in active_root_stages:
+                stage_activated_dt = None
+                if active_stage.last_activated_at:
                     try:
-                        resolved_ep = service_cfg.enrichment_endpoint
-                        for ph in re.findall(r"\{([^}]+)\}", service_cfg.enrichment_endpoint):
-                            val = extract_dotted_value(rec, ph) or rec.get(ph)
-                            if val is not None:
-                                resolved_ep = resolved_ep.replace(f"{{{ph}}}", str(val))
+                        clean_ts = active_stage.last_activated_at.replace("Z", "+00:00")
+                        stage_activated_dt = datetime.datetime.fromisoformat(clean_ts)
+                    except Exception as ts_err:
+                        print(f"[!] Warning invalid last_activated_at for stage {active_stage.id}: {ts_err}")
 
-                        if "{" not in resolved_ep:
-                            enrich_url, enrich_headers = prepare_service_request(
-                                service_cfg.base_url, resolved_ep, service_cfg.api_key or ""
-                            )
-                            async with httpx.AsyncClient(timeout=10.0) as client:
-                                e_resp = await client.get(enrich_url, headers=enrich_headers)
-                                if e_resp.status_code == 200:
-                                    e_json = e_resp.json()
-                                    if isinstance(e_json, dict):
-                                        enrichment_dict = e_json
-                    except Exception as e_err:
-                        print(f"[!] Warning enrichment error for {pipeline_key}: {e_err}")
-
-                context_dict = {"records": rec, **rec, **enrichment_dict}
-
-                # Evaluate field mappings
-                mapped_fields: Dict[str, Any] = {}
-                for mapping in service_cfg.field_mappings:
-                    if not mapping.target_column:
-                        continue
-                    col_name = mapping.target_column.strip().upper()
-                    if col_name in SYSTEM_RESERVED_COLUMNS:
+                for rec in records:
+                    if not isinstance(rec, dict):
                         continue
 
-                    val = extract_dotted_value(context_dict, mapping.source_field)
-                    if val is None:
-                        val = context_dict.get(mapping.source_field)
+                    event_type = rec.get("eventType")
+                    if allowed_events and event_type not in allowed_events:
+                        continue
 
-                    if mapping.transformer:
+                    # Filter out historical events that occurred prior to stage activation
+                    if stage_activated_dt and rec.get("date"):
                         try:
-                            val = TransformerEvaluator.evaluate(mapping.transformer, val)
+                            rec_date_str = str(rec["date"]).replace("Z", "+00:00")
+                            rec_dt = datetime.datetime.fromisoformat(rec_date_str)
+                            if rec_dt < stage_activated_dt:
+                                continue
                         except Exception:
                             pass
 
-                    if col_name in table_cols:
-                        mapped_fields[col_name] = val
+                    pipeline_key = resolve_template_key(service_cfg.pipeline_key_template, service_id, rec)
+                    if not pipeline_key:
+                        continue
 
-                col_names = ["PIPELINE_KEY", "STAGE", "STATUS"] + list(mapped_fields.keys())
-                placeholders = ["?"] * len(col_names)
-                values = [pipeline_key, active_stage.order, "PENDING"] + list(mapped_fields.values())
+                    # Avoid duplicate entries
+                    existing = await db_manager.query("SELECT 1 FROM SERVICES_PIPELINE WHERE PIPELINE_KEY = ?", (pipeline_key,))
+                    if existing:
+                        continue
 
-                insert_sql = f'INSERT INTO SERVICES_PIPELINE ({", ".join(col_names)}) VALUES ({", ".join(placeholders)});'
-                await db_manager.execute(insert_sql, tuple(values))
-                new_ingested += 1
+                    # Secondary enrichment query if configured
+                    enrichment_dict: Dict[str, Any] = {}
+                    if service_cfg.enrichment_endpoint:
+                        try:
+                            resolved_ep = service_cfg.enrichment_endpoint
+                            for ph in re.findall(r"\{([^}]+)\}", service_cfg.enrichment_endpoint):
+                                val = extract_dotted_value(rec, ph) or rec.get(ph)
+                                if val is not None:
+                                    resolved_ep = resolved_ep.replace(f"{{{ph}}}", str(val))
+
+                            if "{" not in resolved_ep:
+                                enrich_url, enrich_headers = prepare_service_request(
+                                    service_cfg.base_url, resolved_ep, service_cfg.api_key or ""
+                                )
+                                async with httpx.AsyncClient(timeout=10.0) as client:
+                                    e_resp = await client.get(enrich_url, headers=enrich_headers)
+                                    if e_resp.status_code == 200:
+                                        e_json = e_resp.json()
+                                        if isinstance(e_json, dict):
+                                            enrichment_dict = e_json
+                        except Exception as e_err:
+                            print(f"[!] Warning enrichment error for {pipeline_key}: {e_err}")
+
+                    context_dict = {"records": rec, **rec, **enrichment_dict}
+
+                    # Evaluate field mappings
+                    mapped_fields: Dict[str, Any] = {}
+                    for mapping in service_cfg.field_mappings:
+                        if not mapping.target_column:
+                            continue
+                        col_name = mapping.target_column.strip().upper()
+                        if col_name in SYSTEM_RESERVED_COLUMNS:
+                            continue
+
+                        val = extract_dotted_value(context_dict, mapping.source_field)
+                        if val is None:
+                            val = context_dict.get(mapping.source_field)
+
+                        if mapping.transformer:
+                            try:
+                                val = TransformerEvaluator.evaluate(mapping.transformer, val)
+                            except Exception:
+                                pass
+
+                        if col_name in table_cols:
+                            mapped_fields[col_name] = val
+
+                    col_names = ["PIPELINE_KEY", "STAGE", "STATUS"] + list(mapped_fields.keys())
+                    placeholders = ["?"] * len(col_names)
+                    values = [pipeline_key, active_stage.order, "PENDING"] + list(mapped_fields.values())
+
+                    insert_sql = f'INSERT INTO SERVICES_PIPELINE ({", ".join(col_names)}) VALUES ({", ".join(placeholders)});'
+                    await db_manager.execute(insert_sql, tuple(values))
+                    new_ingested += 1
 
             self._status[service_id] = {
                 "last_run": now_str,
                 "status": "success",
-                "message": f"Ingestion executed ({service_cfg.name}): {new_ingested} new items added to Stage {active_stage.order}.",
+                "message": f"Ingestion executed ({service_cfg.name}): {new_ingested} new items added to active stages.",
                 "new_items": new_ingested,
             }
             return self._status[service_id]

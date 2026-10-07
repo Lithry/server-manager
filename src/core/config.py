@@ -17,6 +17,7 @@ class StageConfig(BaseModel):
     timeout_minutes: int = 30
     service_ids: list[str] = Field(default_factory=list)  # Assigned service IDs (M:N)
     enabled: bool = False
+    last_activated_at: str | None = None  # ISO timestamp recorded when stage is toggled active
 
 
 class FieldMapping(BaseModel):

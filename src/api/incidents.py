@@ -27,6 +27,7 @@ class ErrorIndexEntry(BaseModel):
     category: str
     severity: str = "WARNING"
     description: str
+    trigger_condition: str = ""
     remedy: str = ""
 
 
@@ -176,19 +177,30 @@ async def list_error_index() -> List[Dict[str, Any]]:
 
 @router.post("/catalog/errors")
 async def upsert_error_index_entry(req: ErrorIndexEntry) -> Dict[str, Any]:
-    """Upsert an error definition with category and remediation guidance."""
+    """Upsert an error definition with category, trigger condition, and remediation guidance."""
     clean_code = req.error_code.strip().upper()
     await db_manager.execute(
         """
-        INSERT INTO ERROR_INDEX (ERROR_CODE, CATEGORY, SEVERITY, DESCRIPTION, REMEDY, UPDATED_AT)
-        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        INSERT INTO ERROR_INDEX (ERROR_CODE, CATEGORY, SEVERITY, DESCRIPTION, TRIGGER_CONDITION, REMEDY, UPDATED_AT)
+        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(ERROR_CODE) DO UPDATE SET
             CATEGORY = excluded.CATEGORY,
             SEVERITY = excluded.SEVERITY,
             DESCRIPTION = excluded.DESCRIPTION,
+            TRIGGER_CONDITION = excluded.TRIGGER_CONDITION,
             REMEDY = excluded.REMEDY,
             UPDATED_AT = CURRENT_TIMESTAMP;
         """,
-        (clean_code, req.category.upper(), req.severity.upper(), req.description, req.remedy),
+        (clean_code, req.category.upper(), req.severity.upper(), req.description, req.trigger_condition, req.remedy),
     )
     return {"success": True, "error_code": clean_code}
+
+
+@router.delete("/catalog/errors/{error_code}")
+async def delete_error_index_entry(error_code: str) -> Dict[str, Any]:
+    """Delete an error definition from ERROR_INDEX."""
+    clean_code = error_code.strip().upper()
+    rowcount = await db_manager.execute("DELETE FROM ERROR_INDEX WHERE ERROR_CODE = ?;", (clean_code,))
+    if rowcount == 0:
+        raise HTTPException(status_code=404, detail=f"Error code '{clean_code}' not found")
+    return {"success": True, "deleted": clean_code}

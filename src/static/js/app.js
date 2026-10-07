@@ -111,6 +111,10 @@ class ServerManagerApp {
       this.pruneDeprecatedColumns();
     });
 
+    document.getElementById('btn-purge-pipeline')?.addEventListener('click', () => {
+      this.purgePipelineDb();
+    });
+
     this.setupColumnSanitizer(document.getElementById('input-col-name'), document.getElementById('btn-submit-add-column'));
     this.setupColumnSanitizer(document.getElementById('input-map-col'), document.getElementById('btn-submit-add-mapping'));
 
@@ -134,7 +138,7 @@ class ServerManagerApp {
       this.submitCreateView();
     });
 
-    // Incidents segmented control
+    // Incidents segmented control & actions
     document.getElementById('seg-incidents-active')?.addEventListener('click', () => {
       this.switchIncidentSubTab('active');
     });
@@ -143,6 +147,14 @@ class ServerManagerApp {
     });
     document.getElementById('seg-error-catalog')?.addEventListener('click', () => {
       this.switchIncidentSubTab('catalog');
+    });
+
+    document.getElementById('btn-add-error-template')?.addEventListener('click', () => {
+      this.openErrorTemplateModal();
+    });
+
+    document.getElementById('btn-submit-error-template')?.addEventListener('click', () => {
+      this.submitErrorTemplate();
     });
 
     // Custom tools
@@ -581,8 +593,8 @@ class ServerManagerApp {
           <tr>
             <td>
               <div style="display: flex; gap: 4px;">
-                <button class="col-reorder-btn" onclick="app.moveColumnOrder('${col.name}', -1)" ${isFirst ? 'disabled' : ''} title="Move Left">&larr;</button>
-                <button class="col-reorder-btn" onclick="app.moveColumnOrder('${col.name}', 1)" ${isLast ? 'disabled' : ''} title="Move Right">&rarr;</button>
+                <button class="col-reorder-btn" onclick="app.moveColumnOrder('${col.name}', -1)" ${isFirst ? 'disabled' : ''} title="Move Up">&uarr;</button>
+                <button class="col-reorder-btn" onclick="app.moveColumnOrder('${col.name}', 1)" ${isLast ? 'disabled' : ''} title="Move Down">&darr;</button>
               </div>
             </td>
             <td><strong class="font-mono">${this.escapeHtml(col.name)}</strong></td>
@@ -824,14 +836,20 @@ class ServerManagerApp {
 
     const incContainer = document.getElementById('incidents-container');
     const catalogContainer = document.getElementById('error-catalog-container');
+    const addErrorBtn = document.getElementById('btn-add-error-template');
+    const reportIncidentBtn = document.getElementById('btn-report-incident');
 
     if (subTab === 'catalog') {
       incContainer?.classList.add('hidden');
       catalogContainer?.classList.remove('hidden');
+      addErrorBtn?.classList.remove('hidden');
+      reportIncidentBtn?.classList.add('hidden');
       this.loadErrorCatalog();
     } else {
       catalogContainer?.classList.add('hidden');
       incContainer?.classList.remove('hidden');
+      addErrorBtn?.classList.add('hidden');
+      reportIncidentBtn?.classList.remove('hidden');
       this.loadIncidents();
     }
   }
@@ -891,21 +909,162 @@ class ServerManagerApp {
     try {
       const resp = await fetch('/api/v1/incidents/catalog/errors');
       const items = await resp.json();
+      this.currentErrorCatalog = items;
 
       const bodyEl = document.getElementById('catalog-table-body');
       if (!bodyEl) return;
 
+      if (!items || items.length === 0) {
+        bodyEl.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No error templates registered in catalog.</td></tr>';
+        return;
+      }
+
       bodyEl.innerHTML = items.map(err => `
         <tr>
-          <td class="font-mono text-accent">${this.escapeHtml(err.ERROR_CODE)}</td>
-          <td><span class="badge badge-info">${err.CATEGORY}</span></td>
-          <td><span class="badge ${err.SEVERITY === 'CRITICAL' ? 'badge-alert' : 'badge-warning'}">${err.SEVERITY}</span></td>
+          <td class="font-mono text-accent"><strong>${this.escapeHtml(err.ERROR_CODE)}</strong></td>
+          <td><span class="badge badge-info">${this.escapeHtml(err.CATEGORY)}</span></td>
+          <td><span class="badge ${err.SEVERITY === 'CRITICAL' ? 'badge-alert' : err.SEVERITY === 'WARNING' ? 'badge-warning' : 'badge-secondary'}">${this.escapeHtml(err.SEVERITY)}</span></td>
           <td>${this.escapeHtml(err.DESCRIPTION)}</td>
+          <td class="font-mono text-accent text-sm">${err.TRIGGER_CONDITION ? this.escapeHtml(err.TRIGGER_CONDITION) : '<span class="text-muted">None</span>'}</td>
           <td class="font-mono text-muted" style="font-size: 0.8rem;">${this.escapeHtml(err.REMEDY || '-')}</td>
+          <td style="text-align: right;">
+            <button class="btn btn-secondary btn-sm" onclick="app.openErrorTemplateModal('${this.escapeHtml(err.ERROR_CODE)}')">Edit</button>
+            <button class="btn btn-secondary btn-sm text-alert ml-1" onclick="app.deleteErrorTemplate('${this.escapeHtml(err.ERROR_CODE)}')">Delete</button>
+          </td>
         </tr>
       `).join('');
     } catch (e) {
       console.error('Error loading error catalog:', e);
+    }
+  }
+
+  openErrorTemplateModal(errorCode = null) {
+    const modal = document.getElementById('modal-error-template');
+    if (!modal) return;
+    const titleEl = document.getElementById('modal-error-title');
+    const codeEl = document.getElementById('input-error-code');
+    const catEl = document.getElementById('input-error-category');
+    const sevEl = document.getElementById('input-error-severity');
+    const descEl = document.getElementById('input-error-description');
+    const trigEl = document.getElementById('input-error-trigger');
+    const remEl = document.getElementById('input-error-remedy');
+
+    if (errorCode && this.currentErrorCatalog) {
+      const err = this.currentErrorCatalog.find(e => e.ERROR_CODE === errorCode);
+      if (err) {
+        if (titleEl) titleEl.innerText = `Edit Error Template: ${err.ERROR_CODE}`;
+        if (codeEl) { codeEl.value = err.ERROR_CODE; codeEl.disabled = true; }
+        if (catEl) catEl.value = err.CATEGORY || '';
+        if (sevEl) sevEl.value = err.SEVERITY || 'WARNING';
+        if (descEl) descEl.value = err.DESCRIPTION || '';
+        if (trigEl) trigEl.value = err.TRIGGER_CONDITION || '';
+        if (remEl) remEl.value = err.REMEDY || '';
+      }
+    } else {
+      if (titleEl) titleEl.innerText = 'Add Error Template';
+      if (codeEl) { codeEl.value = ''; codeEl.disabled = false; }
+      if (catEl) catEl.value = 'GENERAL';
+      if (sevEl) sevEl.value = 'WARNING';
+      if (descEl) descEl.value = '';
+      if (trigEl) trigEl.value = '';
+      if (remEl) remEl.value = '';
+    }
+
+    modal.classList.remove('hidden');
+  }
+
+  async submitErrorTemplate() {
+    const codeEl = document.getElementById('input-error-code');
+    const catEl = document.getElementById('input-error-category');
+    const sevEl = document.getElementById('input-error-severity');
+    const descEl = document.getElementById('input-error-description');
+    const trigEl = document.getElementById('input-error-trigger');
+    const remEl = document.getElementById('input-error-remedy');
+
+    const code = codeEl?.value?.trim()?.toUpperCase();
+    const category = catEl?.value?.trim()?.toUpperCase() || 'GENERAL';
+    const severity = sevEl?.value || 'WARNING';
+    const description = descEl?.value?.trim();
+    const triggerCondition = trigEl?.value?.trim() || '';
+    const remedy = remEl?.value?.trim() || '';
+
+    if (!code || !description) {
+      alert('Error code and description are required.');
+      return;
+    }
+
+    try {
+      const resp = await fetch('/api/v1/incidents/catalog/errors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          error_code: code,
+          category: category,
+          severity: severity,
+          description: description,
+          trigger_condition: triggerCondition,
+          remedy: remedy,
+        }),
+      });
+
+      if (!resp.ok) {
+        const err = await resp.json();
+        alert(`Error saving template: ${err.detail || 'Request failed'}`);
+        return;
+      }
+
+      this.closeModals();
+      this.loadErrorCatalog();
+    } catch (e) {
+      alert(`Network error: ${e.message}`);
+    }
+  }
+
+  async deleteErrorTemplate(errorCode) {
+    if (!confirm(`Are you sure you want to remove error template '${errorCode}' from catalog?`)) {
+      return;
+    }
+
+    try {
+      const resp = await fetch(`/api/v1/incidents/catalog/errors/${encodeURIComponent(errorCode)}`, {
+        method: 'DELETE',
+      });
+      if (!resp.ok) {
+        const err = await resp.json();
+        alert(`Error deleting error template: ${err.detail || 'Request failed'}`);
+        return;
+      }
+      this.loadErrorCatalog();
+    } catch (e) {
+      alert(`Network error: ${e.message}`);
+    }
+  }
+
+  async purgePipelineDb() {
+    if (!confirm('¿Estás seguro de que deseas purgar la base de datos del pipeline? Esta acción eliminará permanentemente todos los registros.')) {
+      return;
+    }
+
+    const conf = prompt('Esta acción es irreversible. Para confirmar la eliminación completa de los registros del pipeline, escribe PURGE:');
+    if (conf !== 'PURGE') {
+      alert('Operación cancelada. El código de confirmación no coincide.');
+      return;
+    }
+
+    try {
+      const resp = await fetch('/api/v1/pipeline/purge', {
+        method: 'POST',
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        alert(`Error al purgar base de datos: ${data.detail || 'Request failed'}`);
+        return;
+      }
+      alert(`Pipeline purgado exitosamente. ${data.deleted_rows || 0} registros eliminados.`);
+      this.pipelineOffset = 0;
+      this.loadPipeline();
+    } catch (e) {
+      alert(`Error de red: ${e.message}`);
     }
   }
 
@@ -1390,12 +1549,16 @@ class ServerManagerApp {
     }).join('');
   }
 
-  toggleStage(stageId) {
+  async toggleStage(stageId) {
     if (!this.settingsData?.stages) return;
     const st = this.settingsData.stages.find(s => s.id === stageId);
     if (!st) return;
     st.enabled = !st.enabled;
+    if (st.enabled) {
+      st.last_activated_at = new Date().toISOString();
+    }
     this.renderSettingsStages();
+    await this.saveSettings();
   }
 
   openAddStageModal(editStageId = null) {
@@ -1493,7 +1656,7 @@ class ServerManagerApp {
     }
   }
 
-  saveStageFromModal() {
+  async saveStageFromModal() {
     const idEl = document.getElementById('input-stage-id');
     const nameEl = document.getElementById('input-stage-name');
     const descEl = document.getElementById('input-stage-desc');
@@ -1531,6 +1694,12 @@ class ServerManagerApp {
     const existingIdx = this.settingsData.stages.findIndex(s => s.id === id);
     const order = existingIdx >= 0 ? this.settingsData.stages[existingIdx].order : (this.settingsData.stages.length + 1);
 
+    let lastActivatedAt = existingIdx >= 0 ? this.settingsData.stages[existingIdx].last_activated_at : null;
+    const wasEnabled = existingIdx >= 0 ? !!this.settingsData.stages[existingIdx].enabled : false;
+    if (enabled && !wasEnabled) {
+      lastActivatedAt = new Date().toISOString();
+    }
+
     const stageObj = {
       id: id,
       name: name,
@@ -1540,7 +1709,8 @@ class ServerManagerApp {
       grace_period_minutes: parseInt(graceEl?.value || '10', 10),
       timeout_minutes: parseInt(timeoutEl?.value || '30', 10),
       service_ids: checkedServices,
-      enabled: enabled
+      enabled: enabled,
+      last_activated_at: lastActivatedAt
     };
 
     if (existingIdx >= 0) {
@@ -1551,14 +1721,16 @@ class ServerManagerApp {
 
     this.renderSettingsStages();
     this.closeModals();
+    await this.saveSettings();
   }
 
-  deleteStage(stageId) {
+  async deleteStage(stageId) {
     if (!confirm(`Are you sure you want to delete stage '${stageId}'?`)) return;
     if (!this.settingsData?.stages) return;
 
     this.settingsData.stages = this.settingsData.stages.filter(s => s.id !== stageId);
     this.renderSettingsStages();
+    await this.saveSettings();
   }
 
   moveStage(stageId, direction) {
@@ -1629,7 +1801,7 @@ class ServerManagerApp {
         </thead>
         <tbody id="mapping-table-body">
           ${mappings.map((m, idx) => `
-            <tr draggable="true" data-index="${idx}">
+            <tr data-index="${idx}">
               <td class="drag-handle-cell">
                 <span class="drag-handle" title="Drag to reorder">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1644,8 +1816,8 @@ class ServerManagerApp {
               <td><span class="badge badge-secondary">${this.escapeHtml(m.data_type || 'TEXT')}</span></td>
               <td class="font-mono text-sm text-accent">${m.transformer ? this.escapeHtml(m.transformer) : '<span class="text-muted">Direct</span>'}</td>
               <td>
-                <button class="btn btn-secondary btn-sm" onclick="app.openAddMappingModal('${this.escapeHtml(m.target_column)}')">Edit</button>
-                <button class="btn btn-secondary btn-sm text-alert ml-1" onclick="app.deleteMapping('${activeService}', '${this.escapeHtml(m.target_column)}')">Delete</button>
+                <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); app.openAddMappingModal('${this.escapeHtml(m.target_column)}')">Edit</button>
+                <button class="btn btn-secondary btn-sm text-alert ml-1" onclick="event.stopPropagation(); app.deleteMapping('${activeService}', '${this.escapeHtml(m.target_column)}')">Delete</button>
               </td>
             </tr>
           `).join('')}
@@ -1653,10 +1825,20 @@ class ServerManagerApp {
       </table>
     `;
 
-    // Attach drag & drop listeners to mapping rows
+    // Attach drag & drop listeners to mapping rows triggered via drag-handle
     let draggedIdx = null;
     const rows = container.querySelectorAll('#mapping-table-body tr');
     rows.forEach(row => {
+      const handle = row.querySelector('.drag-handle');
+      if (handle) {
+        handle.addEventListener('mousedown', () => {
+          row.setAttribute('draggable', 'true');
+        });
+        handle.addEventListener('mouseup', () => {
+          row.removeAttribute('draggable');
+        });
+      }
+
       row.addEventListener('dragstart', (e) => {
         draggedIdx = parseInt(row.getAttribute('data-index'), 10);
         row.classList.add('dragging');
@@ -1679,6 +1861,7 @@ class ServerManagerApp {
         }
       });
       row.addEventListener('dragend', () => {
+        row.removeAttribute('draggable');
         row.classList.remove('dragging');
         rows.forEach(r => r.classList.remove('drag-over'));
       });

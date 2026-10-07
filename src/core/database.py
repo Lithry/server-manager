@@ -45,6 +45,7 @@ class DatabaseManager:
                     CATEGORY TEXT NOT NULL,
                     SEVERITY TEXT NOT NULL,
                     DESCRIPTION TEXT NOT NULL,
+                    TRIGGER_CONDITION TEXT DEFAULT '',
                     REMEDY TEXT DEFAULT '',
                     UPDATED_AT TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
@@ -79,21 +80,21 @@ class DatabaseManager:
 
             # Baseline Seed for ERROR_INDEX
             baseline_errors = [
-                ("ERR_DISK_UNMOUNTED", "STORAGE", "CRITICAL", "Storage disk unmounted or unavailable", "Run 'sudo mount -a' and verify /etc/fstab"),
-                ("ERR_FS_READONLY", "STORAGE", "CRITICAL", "Storage mounted read-only due to dirty bit or I/O error", "Check dmesg for I/O errors and remount with rw,force"),
-                ("ERR_DB_CORRUPTION", "DATABASE", "CRITICAL", "Database integrity error detected", "Run 'fixjellyfindb' on host to verify and vacuum SQLite DB"),
-                ("WARN_DB_ORPHAN_RECORDS", "DATABASE", "WARNING", "UserData orphan records detected", "Run 'fixjellyfindb' on host to clean orphan rows"),
-                ("ERR_VFS_PATH_MISSING", "VFS", "CRITICAL", "Broken symlinks detected in Jellyfin Shokofin VFS", "Run 'fixperms' to clean broken symlinks"),
-                ("ERR_CONTAINER_DOWN", "DOCKER", "CRITICAL", "Core service container is stopped or unhealthy", "Run 'docker start <container>' or check logs"),
-                ("WARN_PERM_DRIFT", "PERMISSIONS", "WARNING", "Permissions or ownership drift detected on AppData", "Run 'fixperms' on host to reconcile 1000:1000"),
-                ("INFO_CONTAINER_UPDATE", "UPDATES", "INFO", "Outdated container image detected", "Run 'updateapps' on host to pull latest images"),
+                ("ERR_DISK_UNMOUNTED", "STORAGE", "CRITICAL", "Storage disk unmounted or unavailable", "mounted == false", "Run 'sudo mount -a' and verify /etc/fstab"),
+                ("ERR_FS_READONLY", "STORAGE", "CRITICAL", "Storage mounted read-only due to dirty bit or I/O error", "readonly == true", "Check dmesg for I/O errors and remount with rw,force"),
+                ("ERR_DB_CORRUPTION", "DATABASE", "CRITICAL", "Database integrity error detected", "integrity_check == false", "Run 'fixjellyfindb' on host to verify and vacuum SQLite DB"),
+                ("WARN_DB_ORPHAN_RECORDS", "DATABASE", "WARNING", "UserData orphan records detected", "orphan_count > 0", "Run 'fixjellyfindb' on host to clean orphan rows"),
+                ("ERR_VFS_PATH_MISSING", "VFS", "CRITICAL", "Broken symlinks detected in Jellyfin Shokofin VFS", "broken_links > 0", "Run 'fixperms' to clean broken symlinks"),
+                ("ERR_CONTAINER_DOWN", "DOCKER", "CRITICAL", "Core service container is stopped or unhealthy", "status != 'running'", "Run 'docker start <container>' or check logs"),
+                ("WARN_PERM_DRIFT", "PERMISSIONS", "WARNING", "Permissions or ownership drift detected on AppData", "ownership_drift == true", "Run 'fixperms' on host to reconcile 1000:1000"),
+                ("INFO_CONTAINER_UPDATE", "UPDATES", "INFO", "Outdated container image detected", "update_available == true", "Run 'updateapps' on host to pull latest images"),
             ]
 
-            for code, cat, sev, desc, rem in baseline_errors:
+            for code, cat, sev, desc, cond, rem in baseline_errors:
                 await db.execute("""
-                    INSERT OR IGNORE INTO ERROR_INDEX (ERROR_CODE, CATEGORY, SEVERITY, DESCRIPTION, REMEDY)
-                    VALUES (?, ?, ?, ?, ?);
-                """, (code, cat, sev, desc, rem))
+                    INSERT OR IGNORE INTO ERROR_INDEX (ERROR_CODE, CATEGORY, SEVERITY, DESCRIPTION, TRIGGER_CONDITION, REMEDY)
+                    VALUES (?, ?, ?, ?, ?, ?);
+                """, (code, cat, sev, desc, cond, rem))
 
             await db.commit()
 

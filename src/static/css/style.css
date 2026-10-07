@@ -458,6 +458,13 @@ body {
   max-height: calc(100vh - 240px);
 }
 
+.modal .table-container,
+.modal-body .table-container {
+  max-height: none;
+  overflow-y: visible;
+  overflow-x: auto;
+}
+
 .data-table {
   width: 100%;
   border-collapse: collapse;

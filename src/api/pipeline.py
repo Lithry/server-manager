@@ -87,12 +87,26 @@ def flatten_json_keys(obj: Any, prefix: str = "") -> List[Dict[str, Any]]:
     return fields
 
 
+@router.post("/purge")
+async def purge_pipeline() -> Dict[str, Any]:
+    """Purge all records from SERVICES_PIPELINE and reset autoincrement ID sequence."""
+    async with db_manager.get_connection() as db:
+        res = await db.execute("DELETE FROM SERVICES_PIPELINE;")
+        deleted_count = res.rowcount
+        try:
+            await db.execute("DELETE FROM sqlite_sequence WHERE name = 'SERVICES_PIPELINE';")
+        except Exception:
+            pass
+        await db.commit()
+    return {"success": True, "deleted_rows": deleted_count}
+
+
 @router.get("")
 async def get_pipeline_items(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     status: Optional[str] = None,
-    stage: Optional[int] = None,
+    stage: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Retrieve universal pipeline entries with all dynamic columns ordered by preference."""
     where_clauses = []
@@ -101,9 +115,23 @@ async def get_pipeline_items(
     if status:
         where_clauses.append("STATUS = ?")
         params.append(status)
-    if stage is not None:
-        where_clauses.append("STAGE = ?")
-        params.append(stage)
+    if stage is not None and str(stage).strip() != "":
+        stage_str = str(stage).strip()
+        settings = await config_manager.get_settings()
+        resolved_stage = None
+        for st in settings.stages:
+            if st.id == stage_str or str(st.order) == stage_str:
+                resolved_stage = st.order
+                break
+        if resolved_stage is None and stage_str.isdigit():
+            resolved_stage = int(stage_str)
+
+        if resolved_stage is not None:
+            where_clauses.append("STAGE = ?")
+            params.append(resolved_stage)
+        else:
+            where_clauses.append("STAGE = ?")
+            params.append(stage_str)
 
     where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
