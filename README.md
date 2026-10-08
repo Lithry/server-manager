@@ -14,13 +14,13 @@
    - **Field Transformers & Tag Resolution**: Map incoming attributes using conditional expressions (e.g. `if 'anime' in tags then 1 else 0 -> IS_ANIME`). Automatically resolves numeric tag IDs to human-readable labels via in-memory cached `/api/v3/tag` queries.
    - **Clean Database Principle & Cross-Stage Merging**: Empty lists, empty objects, and blank strings normalize to SQL `NULL` (preventing `"[]"` noise). Multi-stage updates merge list elements deduplicating entries while preserving earlier stage data. Ignored files route to a volatile ring-buffer.
 
-2. **DAG Stage Engine, Predicate Execution & Correlation Model**:
-   - **Semantic Slugs**: Stages are defined by semantic keys (`id: "ingest"`, `id: "recognition"`, `id: "library"`) with visual drag-and-drop sequencing.
-   - **Root Producer Stages (`start_condition IS NULL`)**: Only stages without prerequisites can create new rows in `SERVICES_PIPELINE`. Multiple root services produce independent rows.
-   - **Consumer Stages (`start_condition IS NOT NULL`)**: Require correlation with existing rows and evaluate boolean predicates to `true` (e.g. `stage.ingest.completed AND IS_ANIME == 1`).
-   - **Two-Phase Handshake Correlation**:
-     - *Handshake Phase*: Correlates items via physical `FILE_PATH` (or `VFS_PATH` resolved via `os.readlink()` over `/DATA:ro` with zero disk spin).
-     - *Lifecycle Phase*: Services track and update items strictly by native IDs (`SONARR_EPISODE_ID`, `SHOKO_FILE_ID`, `JELLYFIN_ITEM_ID`).
+2. **Tri-State Unidirectional Stage Progression Engine (`SERVICES_PIPELINE`)**:
+   - **Tri-State Stage Taxonomy**:
+     - **Root Producer (`start_condition IS NULL`)**: Autonomously ingests new rows into `SERVICES_PIPELINE` from upstream APIs (Sonarr, Radarr). Multiple root producers can exist for different services and stages. Initial state: `STAGE = order, STATUS = 'PENDING' -> 'COMPLETED'`.
+     - **Consumer Stage (`start_condition != NULL` & `complete_condition != NULL`)**: Forward-only intermediate processing stage. Promotes rows with `STATUS = 'COMPLETED'` from earlier stages (`STAGE < target_stage`). Assigned services query enrichment endpoints resolving `{COLUMN}` placeholders from row data and apply field mappings. Once `complete_condition` passes, marks `STATUS = 'COMPLETED'`.
+     - **Sink Stage (`start_condition != NULL` & `complete_condition IS NULL`)**: Collector / terminal end-state (e.g. archived, discarded, or permanent library items). Promotes qualifying rows directly to `STATUS = 'SINK'` rendered with an orange visual badge. Terminal state prevents any further stage transitions.
+   - **Unidirectional Progression**: Progresses strictly forward (`order > current_stage`). Stages cannot transition backward or jump to Root Producers. Enables dynamic skipping of stages based on predicates (e.g. anime routes to Shoko recognition, while non-anime skips directly to downstream stages or sinks).
+   - **Context-Aware Predicate Evaluation**: Injects row columns, numeric stage indicators (`STAGE`, `stage`), and stage completion flags (`stage.<id>.completed = True`) into AST evaluation context.
    - **Stability & Watchdogs**:
      - Ingestion grace period (`grace_period_minutes`, default 10m) ensures files stabilize on disk before Stage 1 completes.
      - Stage watchdog timeout (`timeout_minutes`, default 30m) automatically emits `WARN_PIPELINE_STALLED`.
