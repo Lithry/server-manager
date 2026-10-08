@@ -126,10 +126,6 @@ class ServerManagerApp {
       document.getElementById('modal-sample-api')?.classList.remove('hidden');
     });
 
-    document.getElementById('btn-fetch-sample')?.addEventListener('click', () => {
-      this.fetchApiSample();
-    });
-
     document.getElementById('btn-create-view')?.addEventListener('click', () => {
       document.getElementById('modal-create-view')?.classList.remove('hidden');
     });
@@ -682,38 +678,6 @@ class ServerManagerApp {
       this.loadPipeline();
     } catch (e) {
       alert(`Network error: ${e.message}`);
-    }
-  }
-
-  async fetchApiSample() {
-    const appId = document.getElementById('sample-app-select')?.value || 'sonarr';
-    const viewer = document.getElementById('api-sample-result');
-    if (viewer) viewer.innerHTML = '<span class="text-muted">Querying application sample schema...</span>';
-
-    try {
-      const resp = await fetch('/api/v1/pipeline/sample-api', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ app_id: appId, endpoint: '/api/v3/history' }),
-      });
-      const data = await resp.json();
-      if (!resp.ok || !data.success) {
-        viewer.innerHTML = `<span class="text-alert">${this.escapeHtml(data.detail || data.error || 'Connection failed')}</span>`;
-        return;
-      }
-
-      if (data.fields && data.fields.length > 0) {
-        viewer.innerHTML = data.fields.map(f => `
-          <div style="padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: space-between;">
-            <span style="color: var(--accent-cyan); font-weight: 500;">${this.escapeHtml(f.path)}</span>
-            <span class="text-muted font-mono" style="font-size: 0.75rem;">Sample: ${this.escapeHtml(f.sample || '')}</span>
-          </div>
-        `).join('');
-      } else {
-        viewer.innerHTML = '<span class="text-muted">No fields extracted from response.</span>';
-      }
-    } catch (e) {
-      if (viewer) viewer.innerHTML = `<span class="text-alert">${e.message}</span>`;
     }
   }
 
@@ -1425,7 +1389,7 @@ class ServerManagerApp {
     }
   }
 
-  saveServiceFromModal() {
+  async saveServiceFromModal() {
     const idEl = document.getElementById('input-service-id');
     const nameEl = document.getElementById('input-service-name');
     const urlEl = document.getElementById('input-service-url');
@@ -1500,9 +1464,10 @@ class ServerManagerApp {
     this.renderSettingsMappings();
     this.renderEngineOverrides();
     this.closeModals();
+    await this.saveSettings();
   }
 
-  deleteService(serviceId) {
+  async deleteService(serviceId) {
     if (!confirm(`Are you sure you want to delete service '${serviceId}'?`)) return;
     if (!this.settingsData?.services) return;
 
@@ -1521,6 +1486,7 @@ class ServerManagerApp {
     this.renderSettingsStages();
     this.renderSettingsMappings();
     this.renderEngineOverrides();
+    await this.saveSettings();
   }
 
   /* --- DAG STAGES MANAGEMENT (M:N SERVICES) --- */
@@ -1620,7 +1586,7 @@ class ServerManagerApp {
       st.last_activated_at = new Date().toISOString();
     }
     this.renderSettingsStages();
-    await this.saveSettings();
+    await this.saveSettings(true);
   }
 
   openAddStageModal(editStageId = null) {
@@ -1831,7 +1797,7 @@ class ServerManagerApp {
     await this.saveSettings();
   }
 
-  moveStage(stageId, direction) {
+  async moveStage(stageId, direction) {
     if (!this.settingsData?.stages) return;
     const stages = this.settingsData.stages.slice().sort((a, b) => (a.order || 0) - (b.order || 0));
     const idx = stages.findIndex(s => s.id === stageId);
@@ -1846,6 +1812,7 @@ class ServerManagerApp {
 
     this.settingsData.stages = stages;
     this.renderSettingsStages();
+    await this.saveSettings(true);
   }
 
   /* --- FIELD MAPPINGS & TRANSFORMERS --- */
@@ -1966,12 +1933,13 @@ class ServerManagerApp {
     });
   }
 
-  reorderMappings(serviceId, fromIndex, toIndex) {
+  async reorderMappings(serviceId, fromIndex, toIndex) {
     const list = this.settingsData?.services?.[serviceId]?.field_mappings;
     if (!list || fromIndex === toIndex) return;
     const [moved] = list.splice(fromIndex, 1);
     list.splice(toIndex, 0, moved);
     this.renderSettingsMappings();
+    await this.saveSettings(true);
   }
 
   openAddMappingModal(serviceIdOrCol = null, colToEdit = null) {
@@ -2094,7 +2062,7 @@ class ServerManagerApp {
     }
   }
 
-  saveMappingFromModal() {
+  async saveMappingFromModal() {
     const selectEl = document.getElementById('select-mapping-service');
     const sourceEl = document.getElementById('input-map-source');
     const colEl = document.getElementById('input-map-col');
@@ -2154,14 +2122,16 @@ class ServerManagerApp {
     this.editingMappingCol = null;
     this.renderSettingsMappings();
     this.closeModals();
+    await this.saveSettings();
   }
 
-  deleteMapping(serviceId, colName) {
+  async deleteMapping(serviceId, colName) {
     if (!confirm(`Delete mapping for column '${colName}'?`)) return;
     if (!this.settingsData?.services?.[serviceId]?.field_mappings) return;
 
     this.settingsData.services[serviceId].field_mappings = this.settingsData.services[serviceId].field_mappings.filter(m => m.target_column !== colName);
     this.renderSettingsMappings();
+    await this.saveSettings();
   }
 
   /* --- API SAMPLING --- */
@@ -2429,11 +2399,12 @@ class ServerManagerApp {
     `;
   }
 
-  resetServiceOverride(serviceId) {
+  async resetServiceOverride(serviceId) {
     if (!this.settingsData?.services?.[serviceId]) return;
     this.settingsData.services[serviceId].poll_interval_seconds = null;
     this.renderEngineOverrides();
     this.renderSettingsServices();
+    await this.saveSettings();
   }
 
   /* --- NOTIFICATION TRIGGERS --- */
@@ -2471,7 +2442,7 @@ class ServerManagerApp {
     `).join('');
   }
 
-  saveTriggerFromModal() {
+  async saveTriggerFromModal() {
     const idEl = document.getElementById('input-trigger-id');
     const evEl = document.getElementById('input-trigger-event');
     const chEl = document.getElementById('input-trigger-channel');
@@ -2501,13 +2472,15 @@ class ServerManagerApp {
 
     this.renderSettingsNotifications();
     this.closeModals();
+    await this.saveSettings();
   }
 
-  deleteTrigger(trigId) {
+  async deleteTrigger(trigId) {
     if (!confirm(`Delete trigger '${trigId}'?`)) return;
     if (!this.settingsData?.notification_triggers) return;
     this.settingsData.notification_triggers = this.settingsData.notification_triggers.filter(t => t.id !== trigId);
     this.renderSettingsNotifications();
+    await this.saveSettings();
   }
 
   async restartScheduler() {
@@ -2521,7 +2494,7 @@ class ServerManagerApp {
   }
 
   /* --- SAVE ALL SETTINGS --- */
-  async saveSettings() {
+  async saveSettings(silent = false) {
     if (!this.settingsData) return;
 
     // Collect global retention & polling
@@ -2543,11 +2516,14 @@ class ServerManagerApp {
       });
       if (resp.ok) {
         this.settingsData = await resp.json();
-        alert('✓ Settings saved successfully, SERVICES_PIPELINE schema migrated, and scheduler refreshed.');
+        if (!silent) {
+          alert('✓ Settings saved successfully, SERVICES_PIPELINE schema migrated, and scheduler refreshed.');
+        }
         this.renderSettingsServices();
         this.renderSettingsStages();
         this.renderSettingsMappings();
         this.renderEngineOverrides();
+        this.renderSettingsNotifications();
       } else {
         const err = await resp.text();
         alert(`Failed to save settings: ${err}`);
