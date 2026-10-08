@@ -650,8 +650,13 @@
             <option value="/api/v3/movie">Movies (Radarr)</option>
             <option value="/api/v3/tag">Tags (Sonarr / Radarr)</option>
             <option value="/api/v3/system/status">System Status (Sonarr / Radarr)</option>
-            <option value="/api/v3/File/Recent">Recent Files (Shoko)</option>
-            <option value="/api/v3/Series">Series Catalog (Shoko)</option>
+            <option value="/api/v3/File?pageSize=10">Files List (Shoko)</option>
+            <option value="/api/v3/File/Search/{query}?includeDataFrom=AniDB,TvDB">Search Files (Shoko)</option>
+            <option value="/api/v3/File/PathEndsWith/{path}">File by Path Suffix (Shoko)</option>
+            <option value="/api/v3/Series?pageSize=10">Series Catalog (Shoko)</option>
+            <option value="/api/v3/Series/{seriesId}/AniDB">AniDB Titles & Info (Shoko)</option>
+            <option value="/api/v3/Group/{groupId}">Franchise Group (Shoko)</option>
+            <option value="/api/v3/Init/Status">System Status (Shoko)</option>
             <option value="/Items?Recursive=true">Items (Jellyfin)</option>
             <option value="/System/Info">System Info (Jellyfin)</option>
             <option value="/api/v2/torrents/info">Torrents (qBittorrent)</option>
@@ -749,7 +754,7 @@
           <div class="form-group mb-3">
             <label>Primary Ingestion Endpoint (Root Stages)</label>
             <input type="text" id="input-service-poll-endpoint" class="form-input font-mono" placeholder="/api/v3/history?pageSize=50" value="/api/v3/history?pageSize=50&sortKey=date&sortDirection=descending">
-            <small class="text-muted">Polled when this service is assigned to a Root Stage (e.g. <code>/api/v3/history</code> for Sonarr/Radarr, <code>/api/v3/File/Recent</code> for Shoko).</small>
+            <small class="text-muted">Polled when this service is assigned to a Root Stage (e.g. <code>/api/v3/history</code> for Sonarr/Radarr, <code>/api/v3/File?pageSize=50</code> for Shoko).</small>
           </div>
 
           <div class="form-grid-2 mb-3">

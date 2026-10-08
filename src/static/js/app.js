@@ -2172,7 +2172,7 @@ class ServerManagerApp {
     } else if (s.includes('jellyfin')) {
       input.value = '/Items?Recursive=true';
     } else if (s.includes('shoko')) {
-      input.value = '/api/v3/File/Recent';
+      input.value = '/api/v3/File?pageSize=10';
     } else if (s.includes('qbit')) {
       input.value = '/api/v2/torrents/info';
     }
@@ -2227,8 +2227,16 @@ class ServerManagerApp {
         { endpoint: '/System/Info', label: 'System Info' },
       ],
       shoko: [
-        { endpoint: '/api/v3/File/Recent', label: 'Recent Files' },
-        { endpoint: '/api/v3/Series', label: 'Series Catalog' },
+        { endpoint: '/api/v3/File?pageSize=10', label: 'Files List' },
+        { endpoint: '/api/v3/File/Search/{query}?includeDataFrom=AniDB,TvDB', label: 'Search Files (Metadata)' },
+        { endpoint: '/api/v3/File/PathEndsWith/{path}', label: 'File by Path Suffix' },
+        { endpoint: '/api/v3/File/{fileID}?includeDataFrom=AniDB,TvDB', label: 'File Detail (with AniDB & TvDB)' },
+        { endpoint: '/api/v3/File/{fileID}/Episode', label: 'File Episode Cross-Ref' },
+        { endpoint: '/api/v3/Series?pageSize=10', label: 'Series Catalog' },
+        { endpoint: '/api/v3/Series/{seriesId}', label: 'Series Detail' },
+        { endpoint: '/api/v3/Series/{seriesId}/AniDB', label: 'Series AniDB Titles' },
+        { endpoint: '/api/v3/Group/{groupId}', label: 'Franchise Group' },
+        { endpoint: '/api/v3/Init/Status', label: 'System Status' },
       ],
       qbittorrent: [
         { endpoint: '/api/v2/torrents/info', label: 'Active Torrents' },
@@ -2287,7 +2295,7 @@ class ServerManagerApp {
       if (!resp.ok || !data.success) {
         resultBox.innerHTML = `
           <div class="alert-box alert-danger">
-            <strong>Sample Error:</strong> ${this.escapeHtml(data.error || 'Failed to fetch payload')}
+            <strong>Sample Error:</strong> ${this.escapeHtml(data.error || data.detail || 'Failed to fetch payload')}
           </div>
         `;
         return;
