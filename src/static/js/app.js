@@ -1541,10 +1541,18 @@ class ServerManagerApp {
 
     container.innerHTML = stages.map((st, idx) => {
       const isRoot = !st.start_condition || !st.start_condition.trim();
-      const cardClass = isRoot ? 'stage-card root-stage' : 'stage-card consumer-stage';
-      const badge = isRoot 
-        ? '<span class="badge badge-root">Root Producer</span>'
-        : '<span class="badge badge-consumer">Consumer Stage</span>';
+      const isSink = !isRoot && (!st.complete_condition || !st.complete_condition.trim());
+
+      let cardClass = 'stage-card consumer-stage';
+      let badge = '<span class="badge badge-consumer">Consumer Stage</span>';
+      if (isRoot) {
+        cardClass = 'stage-card root-stage';
+        badge = '<span class="badge badge-root">Root Producer</span>';
+      } else if (isSink) {
+        cardClass = 'stage-card sink-stage';
+        badge = '<span class="badge badge-sink">Sink Stage</span>';
+      }
+
       const statusBadge = st.enabled 
         ? '<span class="badge badge-success">Active</span>' 
         : '<span class="badge badge-secondary">Disabled</span>';
@@ -1584,11 +1592,15 @@ class ServerManagerApp {
               ✓ start_condition IS NULL — Autonomously initiates rows in SERVICES_PIPELINE
             </div>
           `}
-          ${st.complete_condition ? `
+          ${isSink ? `
+            <div class="text-sm font-mono mt-2 text-warning">
+              ✓ complete_condition IS NULL — Terminal Collector (STATUS = 'SINK', no further transitions)
+            </div>
+          ` : (st.complete_condition ? `
             <div class="stage-predicate-display mt-1 text-xs">
               <strong class="text-muted">complete_condition:</strong> <span class="font-mono text-muted">${this.escapeHtml(st.complete_condition)}</span>
             </div>
-          ` : ''}
+          ` : '')}
           <div class="stage-meta-row">
             <span>Grace Period: <strong>${st.grace_period_minutes ?? 10} min</strong></span>
             <span>Watchdog Timeout: <strong>${st.timeout_minutes ?? 30} min</strong></span>

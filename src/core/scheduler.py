@@ -4,6 +4,7 @@ import re
 import json
 import asyncio
 import datetime
+import urllib.parse
 import httpx
 from typing import Any, Dict, List, Optional
 
@@ -231,43 +232,47 @@ class TaskScheduler:
             }
             return self._status[service_id]
 
-        # Check if the service is assigned to any ACTIVE (enabled) root stage
+        # Check if the service is assigned to any ACTIVE root stage or ACTIVE consumer stage
         active_root_stages = [
             st for st in settings.stages
             if st.enabled and (not st.start_condition or st.start_condition.strip() == "") and service_id in st.service_ids
         ]
+        active_consumer_stages = [
+            st for st in settings.stages
+            if st.enabled and st.start_condition and st.start_condition.strip() and service_id in st.service_ids
+        ]
 
-        if not active_root_stages:
+        if not active_root_stages and not active_consumer_stages:
             self._status[service_id] = {
                 "last_run": now_str,
                 "status": "idle",
-                "message": f"Service '{service_cfg.name}' is idle (not assigned to an active root stage).",
+                "message": f"Service '{service_cfg.name}' is idle (not assigned to any active stage).",
             }
             return self._status[service_id]
 
         try:
-            # 1. Fetch recent items from service
-            poll_ep = getattr(service_cfg, "poll_endpoint", None) or "/api/v3/history?pageSize=50&sortKey=date&sortDirection=descending"
-            history_url, headers = prepare_service_request(
-                service_cfg.base_url,
-                poll_ep,
-                service_cfg.api_key or "",
-            )
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.get(history_url, headers=headers)
-                if resp.status_code != 200:
-                    raise Exception(f"HTTP {resp.status_code}: {resp.text[:150]}")
-                data = resp.json()
-
-            if isinstance(data, list):
-                records = data
-            elif isinstance(data, dict):
-                records = data.get("records") or data.get("Items") or data.get("files") or []
-            else:
-                records = []
-
             allowed_events = set(service_cfg.allowed_event_types) if service_cfg.allowed_event_types else None
             new_ingested = 0
+            records = []
+
+            # 1. Fetch recent items from service for active ROOT stages
+            if active_root_stages:
+                poll_ep = getattr(service_cfg, "poll_endpoint", None) or "/api/v3/history?pageSize=50&sortKey=date&sortDirection=descending"
+                history_url, headers = prepare_service_request(
+                    service_cfg.base_url,
+                    poll_ep,
+                    service_cfg.api_key or "",
+                )
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    resp = await client.get(history_url, headers=headers)
+                    if resp.status_code != 200:
+                        raise Exception(f"HTTP {resp.status_code}: {resp.text[:150]}")
+                    data = resp.json()
+
+                if isinstance(data, list):
+                    records = data
+                elif isinstance(data, dict):
+                    records = data.get("records") or data.get("Items") or data.get("files") or []
 
             # Read existing table columns to avoid referencing non-existent columns
             table_cols = {c["name"].upper() for c in await db_manager.get_table_columns("SERVICES_PIPELINE")}
@@ -396,13 +401,27 @@ class TaskScheduler:
                     await db_manager.execute(insert_sql, tuple(values))
                     new_ingested += 1
 
-            # Reconcile any pending records for active stages
+            # 2. Process pending items for active CONSUMER stages
+            if active_consumer_stages:
+                table_cols = {c["name"].upper() for c in await db_manager.get_table_columns("SERVICES_PIPELINE")}
+                for c_stage in active_consumer_stages:
+                    pending_rows = await db_manager.query(
+                        "SELECT * FROM SERVICES_PIPELINE WHERE STAGE = ? AND STATUS = 'PENDING' LIMIT 50;",
+                        (c_stage.order,)
+                    )
+                    for p_row in pending_rows:
+                        p_row_dict = dict(p_row)
+                        updated = await self._execute_consumer_enrichment(service_cfg, p_row_dict, table_cols)
+                        if updated:
+                            new_ingested += 1
+
+            # 3. Continuous reconciliation of stage transitions & completions
             await self.reconcile_stages()
 
             self._status[service_id] = {
                 "last_run": now_str,
                 "status": "success",
-                "message": f"Ingestion executed ({service_cfg.name}): {new_ingested} new items added to active stages.",
+                "message": f"Execution completed ({service_cfg.name}): {new_ingested} items processed/updated.",
                 "new_items": new_ingested,
             }
             return self._status[service_id]
@@ -416,14 +435,131 @@ class TaskScheduler:
             }
             return self._status[service_id]
 
+    async def _execute_consumer_enrichment(
+        self, service_cfg: Any, row_dict: Dict[str, Any], table_cols: set
+    ) -> bool:
+        """Execute enrichment endpoints and apply field mappings for an existing pending row in a consumer stage."""
+        endpoints_to_query: Dict[str, str] = dict(service_cfg.enrichment_endpoints or {})
+        if service_cfg.poll_endpoint and "{" in service_cfg.poll_endpoint:
+            endpoints_to_query["primary"] = service_cfg.poll_endpoint
+
+        if not endpoints_to_query and not service_cfg.field_mappings:
+            return False
+
+        enrichment_data: Dict[str, Any] = {}
+        for namespace, ep_template in endpoints_to_query.items():
+            if not ep_template or not ep_template.strip():
+                continue
+            resolved_ep = ep_template.strip()
+            missing_ph = False
+            for ph in re.findall(r"\{([^}]+)\}", ep_template):
+                val = row_dict.get(ph)
+                if val is None:
+                    val = row_dict.get(ph.upper())
+                if val is None:
+                    val = row_dict.get(ph.lower())
+                if val is not None:
+                    resolved_ep = resolved_ep.replace(f"{{{ph}}}", urllib.parse.quote(str(val)))
+                else:
+                    missing_ph = True
+                    break
+
+            if missing_ph or "{" in resolved_ep:
+                continue
+
+            try:
+                enrich_url, enrich_headers = prepare_service_request(
+                    service_cfg.base_url, resolved_ep, service_cfg.api_key or ""
+                )
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    e_resp = await client.get(enrich_url, headers=enrich_headers)
+                    if e_resp.status_code == 200:
+                        e_json = e_resp.json()
+                        if isinstance(e_json, dict):
+                            enrichment_data[namespace.strip()] = e_json
+                        elif isinstance(e_json, list):
+                            enrichment_data[namespace.strip()] = {"List": e_json}
+            except Exception as e_err:
+                print(f"[!] Warning consumer enrichment error ({namespace}) for row {row_dict.get('ID')}: {e_err}")
+
+        context_dict = {**row_dict, **enrichment_data}
+        mapped_fields: Dict[str, Any] = {}
+        for mapping in service_cfg.field_mappings:
+            if not mapping.target_column:
+                continue
+            col_name = mapping.target_column.strip().upper()
+            if col_name in SYSTEM_RESERVED_COLUMNS or col_name not in table_cols:
+                continue
+
+            val = extract_dotted_value(context_dict, mapping.source_field)
+            if val is None:
+                val = context_dict.get(mapping.source_field)
+
+            if mapping.transformer:
+                try:
+                    val = TransformerEvaluator.evaluate(mapping.transformer, val)
+                except Exception:
+                    pass
+
+            mapped_fields[col_name] = sanitize_and_serialize(val)
+
+        if mapped_fields:
+            set_clauses = [f"{k} = ?" for k in mapped_fields.keys()]
+            vals = list(mapped_fields.values()) + [row_dict["ID"]]
+            await db_manager.execute(
+                f"UPDATE SERVICES_PIPELINE SET {', '.join(set_clauses)}, LAST_UPDATED = CURRENT_TIMESTAMP WHERE ID = ?;",
+                tuple(vals)
+            )
+            print(f"[i] Row {row_dict['ID']} ({row_dict.get('PIPELINE_KEY')}) enriched with {len(mapped_fields)} mapped columns.")
+            return True
+        return False
+
     async def reconcile_stages(self) -> None:
-        """Evaluate completion predicates on pending pipeline rows to transition them naturally."""
+        """Evaluate stage progression (unidirectional) and completion predicates."""
         try:
             settings = await config_manager.get_settings()
-            for stage in settings.stages:
-                if not stage.enabled:
-                    continue
+            enabled_stages = sorted([s for s in settings.stages if s.enabled], key=lambda s: s.order)
 
+            # 1. Unidirectional Stage Progression (Advancing COMPLETED rows)
+            completed_rows = await db_manager.query(
+                "SELECT * FROM SERVICES_PIPELINE WHERE STATUS = 'COMPLETED' LIMIT 100;"
+            )
+            for row in completed_rows:
+                row_dict = dict(row)
+                current_stage_order = row_dict.get("STAGE", 1)
+
+                # Target stages must be non-root and order > current_stage_order
+                candidate_stages = [
+                    s for s in enabled_stages
+                    if s.order > current_stage_order and s.start_condition and s.start_condition.strip()
+                ]
+
+                # Evaluation context
+                ctx = {**row_dict, "STAGE": current_stage_order, "stage": current_stage_order}
+                for s in enabled_stages:
+                    if s.order <= current_stage_order:
+                        ctx[f"stage.{s.id}.completed"] = True
+                        ctx[f"stage.{s.order}.completed"] = True
+                    else:
+                        ctx[f"stage.{s.id}.completed"] = False
+                        ctx[f"stage.{s.order}.completed"] = False
+
+                for target_stage in candidate_stages:
+                    try:
+                        if PredicateEvaluator.evaluate(target_stage.start_condition, ctx):
+                            is_sink = not target_stage.complete_condition or not target_stage.complete_condition.strip()
+                            new_status = "SINK" if is_sink else "PENDING"
+                            await db_manager.execute(
+                                "UPDATE SERVICES_PIPELINE SET STAGE = ?, STATUS = ?, LAST_UPDATED = CURRENT_TIMESTAMP WHERE ID = ?;",
+                                (target_stage.order, new_status, row_dict["ID"])
+                            )
+                            print(f"[i] Row {row_dict['ID']} ({row_dict.get('PIPELINE_KEY')}) transitioned: Stage {current_stage_order} -> Stage {target_stage.order} ('{target_stage.id}', STATUS = '{new_status}').")
+                            break
+                    except Exception as eval_err:
+                        print(f"[!] Error evaluating start_condition of stage '{target_stage.id}' for row {row_dict.get('ID')}: {eval_err}")
+
+            # 2. Stage Completion Evaluation (Consumer Stages with PENDING rows)
+            for stage in enabled_stages:
                 cond = stage.complete_condition
                 if not cond or not cond.strip():
                     continue
@@ -437,15 +573,17 @@ class TaskScheduler:
 
                 for row in pending_rows:
                     row_dict = dict(row)
+                    ctx = {**row_dict, "STAGE": stage.order, "stage": stage.order}
                     try:
-                        if PredicateEvaluator.evaluate(cond, row_dict):
+                        if PredicateEvaluator.evaluate(cond, ctx):
                             await db_manager.execute(
                                 "UPDATE SERVICES_PIPELINE SET STATUS = 'COMPLETED', LAST_UPDATED = CURRENT_TIMESTAMP WHERE ID = ?;",
                                 (row_dict["ID"],)
                             )
-                            print(f"[i] Stage '{stage.id}' marked COMPLETED for row {row_dict['ID']} ({row_dict.get('PIPELINE_KEY')}) via complete_condition.")
+                            print(f"[i] Stage '{stage.id}' (#{stage.order}) marked COMPLETED for row {row_dict['ID']} ({row_dict.get('PIPELINE_KEY')}) via complete_condition.")
                     except Exception as eval_err:
                         print(f"[!] Error evaluating complete_condition for row {row_dict.get('ID')}: {eval_err}")
+
         except Exception as err:
             print(f"[!] Error in reconcile_stages: {err}")
 
