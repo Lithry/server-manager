@@ -46,10 +46,44 @@ class PredicateEvaluator:
         """Validate if an expression syntax is valid without evaluating."""
         if not expr or not expr.strip():
             return True, "Root producer stage (no condition)"
+
+        cleaned = expr.strip()
+
+        # Check 1: Unbalanced quotes
+        if cleaned.count("'") % 2 != 0 or cleaned.count('"') % 2 != 0:
+            return False, "Syntax error: Unterminated string quote."
+
+        # Check 2: Unbalanced parentheses
+        if cleaned.count("(") != cleaned.count(")"):
+            return False, "Syntax error: Unbalanced parentheses."
+
+        # Check 3: Invalid IS usage (comparing with strings, numbers, or identifiers)
+        if re.search(r"\bIS\s+(?!NULL\b|NOT\s+NULL\b|TRUE\b|FALSE\b)", cleaned, flags=re.IGNORECASE):
+            return False, "Syntax error: Cannot compare values with 'IS'. Use '==' for equality comparison."
+
+        # Check 4: Single '=' assignment
+        if re.search(r"(?<![!=<>])=(?!=)", cleaned):
+            return False, "Syntax error: Use '==' for comparison instead of '='."
+
+        # Check 5: Trailing operator
+        if re.search(r"\b(AND|OR|NOT|==|!=|>|<|>=|<=|IS)\s*$", cleaned, flags=re.IGNORECASE):
+            return False, "Syntax error: Incomplete expression ending in operator."
+
+        # Check 6: Bitwise instead of boolean operators
+        if re.search(r"[&|]", cleaned):
+            return False, "Syntax error: Use 'AND' or 'OR' instead of '&' or '|'."
+
+        # Final check: Python AST parser
         try:
-            normalized = cls.normalize_expression(expr)
+            normalized = cls.normalize_expression(cleaned)
             ast.parse(normalized, mode="eval")
             return True, "Valid condition syntax"
+        except SyntaxError as e:
+            offset = e.offset or 1
+            sample = cleaned[max(0, offset - 12):min(len(cleaned), offset + 12)].strip()
+            if sample:
+                return False, f"Syntax error near '{sample}'. Check operators and format."
+            return False, f"Syntax error: {e.msg}."
         except Exception as e:
             return False, f"Syntax error: {str(e)}"
 
