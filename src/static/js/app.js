@@ -123,7 +123,7 @@ class ServerManagerApp {
     });
 
     document.getElementById('btn-sample-api')?.addEventListener('click', () => {
-      document.getElementById('modal-sample-api')?.classList.remove('hidden');
+      this.openSampleModal();
     });
 
     document.getElementById('btn-create-view')?.addEventListener('click', () => {
@@ -1166,6 +1166,7 @@ class ServerManagerApp {
     if (subtabId === 'stages') this.renderSettingsStages();
     if (subtabId === 'mappings') this.renderSettingsMappings();
     if (subtabId === 'engine') this.renderEngineOverrides();
+    if (subtabId === 'notifications') this.renderSettingsNotifications();
   }
 
   async loadSettings() {
@@ -2160,9 +2161,18 @@ class ServerManagerApp {
     }
   }
 
-  openSampleModal() {
-    const activeService = document.getElementById('select-mapping-service')?.value;
+  async openSampleModal(targetServiceId = null) {
+    if (!this.settingsData) {
+      try {
+        const resp = await fetch('/api/v1/settings');
+        this.settingsData = await resp.json();
+      } catch (e) {}
+    }
     const services = this.settingsData?.services || {};
+    let activeService = targetServiceId || document.getElementById('select-mapping-service')?.value;
+    if (!activeService && Object.keys(services).length > 0) {
+      activeService = Object.keys(services)[0];
+    }
     const serviceCfg = services[activeService];
 
     const badgeEl = document.getElementById('sample-service-badge');
