@@ -746,6 +746,12 @@
         <div class="card p-3 mb-3 bg-surface-subtle">
           <h4 class="card-subtitle mb-2" style="font-size: 0.95rem;">Ingestion & Pipeline Identity</h4>
           
+          <div class="form-group mb-3">
+            <label>Primary Ingestion Endpoint (Root Stages)</label>
+            <input type="text" id="input-service-poll-endpoint" class="form-input font-mono" placeholder="/api/v3/history?pageSize=50" value="/api/v3/history?pageSize=50&sortKey=date&sortDirection=descending">
+            <small class="text-muted">Polled when this service is assigned to a Root Stage (e.g. <code>/api/v3/history</code> for Sonarr/Radarr, <code>/api/v3/File/Recent</code> for Shoko).</small>
+          </div>
+
           <div class="form-grid-2 mb-3">
             <div class="form-group">
               <label>Pipeline Key Template</label>

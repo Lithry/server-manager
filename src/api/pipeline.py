@@ -41,6 +41,7 @@ def prepare_service_request(base_url: str, endpoint: str, api_key: str = "") -> 
     if api_key:
         headers["X-Api-Key"] = api_key
         headers["Authorization"] = f"Bearer {api_key}"
+        headers["apikey"] = api_key
 
     # If the target is localhost, 127.0.0.1, or host.docker.internal:
     # Inside a Docker container, we must connect to the host gateway (host.docker.internal).

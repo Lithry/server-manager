@@ -1300,6 +1300,7 @@ class ServerManagerApp {
 
     const keyTemplateEl = document.getElementById('input-service-key-template');
     const enrichEl = document.getElementById('input-service-enrichment');
+    const pollEndpointEl = document.getElementById('input-service-poll-endpoint');
 
     if (editServiceId && this.settingsData?.services?.[editServiceId]) {
       const s = this.settingsData.services[editServiceId];
@@ -1310,6 +1311,7 @@ class ServerManagerApp {
       if (keyEl) keyEl.value = s.api_key || '';
       if (enabledChk) enabledChk.checked = s.enabled !== false;
       if (keyTemplateEl) keyTemplateEl.value = s.pipeline_key_template || '{service}:{id}';
+      if (pollEndpointEl) pollEndpointEl.value = s.poll_endpoint || '/api/v3/history?pageSize=50&sortKey=date&sortDirection=descending';
       if (enrichEl) {
         if (s.enrichment_endpoints && typeof s.enrichment_endpoints === 'object' && Object.keys(s.enrichment_endpoints).length > 0) {
           enrichEl.value = Object.entries(s.enrichment_endpoints).map(([k, v]) => `${k}: ${v}`).join('\n');
@@ -1336,6 +1338,7 @@ class ServerManagerApp {
       if (pollEl) pollEl.value = this.settingsData?.global_poll_interval_seconds || 300;
       if (customBlock) customBlock.classList.add('hidden');
       if (keyTemplateEl) keyTemplateEl.value = '{service}:{id}';
+      if (pollEndpointEl) pollEndpointEl.value = '/api/v3/history?pageSize=50&sortKey=date&sortDirection=descending';
       if (enrichEl) enrichEl.value = '';
 
       this.renderServiceEventCheckboxes([]);
@@ -1348,20 +1351,29 @@ class ServerManagerApp {
     const container = document.getElementById('service-events-checkboxes');
     if (!container) return;
 
-    const defaults = [
-      { event_type: 'downloadFolderImported', description: 'File imported to media library', default_active: true },
-      { event_type: 'episodeFileRenamed', description: 'Episode file renamed to standard format', default_active: true },
-      { event_type: 'movieFileRenamed', description: 'Movie file renamed to standard format', default_active: true },
-      { event_type: 'episodeFileDeleted', description: 'File deleted from disk (ignored by default)', default_active: false },
-      { event_type: 'movieFileDeleted', description: 'File deleted from disk (ignored by default)', default_active: false },
-      { event_type: 'grabbed', description: 'Release sent to download client (ignored by default)', default_active: false },
-    ];
+    let list = [];
+    if (availableEvents && Array.isArray(availableEvents) && availableEvents.length > 0) {
+      list = availableEvents;
+    } else if (allowedEvents && Array.isArray(allowedEvents) && allowedEvents.length > 0) {
+      list = allowedEvents.map(ev => {
+        if (typeof ev === 'object' && ev !== null) return ev;
+        return { event_type: ev, description: 'Configured event filter', default_active: true };
+      });
+    }
 
-    const list = availableEvents || defaults;
+    if (list.length === 0) {
+      container.innerHTML = `
+        <div class="text-xs text-muted p-2 border border-surface-subtle rounded bg-surface">
+          No event filters configured. All items returned by the ingestion endpoint will be processed. Click <strong>Discover Events from API</strong> if this service publishes distinct event types.
+        </div>
+      `;
+      return;
+    }
+
     container.innerHTML = list.map(ev => {
       const isChecked = allowedEvents && allowedEvents.length > 0
-        ? allowedEvents.includes(ev.event_type)
-        : ev.default_active;
+        ? (allowedEvents.includes(ev.event_type) || allowedEvents.some(a => (typeof a === 'object' ? a.event_type : a) === ev.event_type))
+        : (ev.default_active !== false);
       return `
         <label class="form-checkbox-label d-flex align-items-center gap-2 mb-2 p-2 bg-surface rounded border cursor-pointer">
           <input type="checkbox" name="service-event-type" value="${this.escapeHtml(ev.event_type)}" ${isChecked ? 'checked' : ''}>
@@ -1392,8 +1404,12 @@ class ServerManagerApp {
       const data = await resp.json();
       if (!resp.ok || !data.success || !data.event_types || data.event_types.length === 0) {
         if (container) {
-          container.innerHTML = `<span class="text-alert text-sm">Could not discover events: ${data.error || 'Empty response'}. Showing standard presets.</span>`;
-          setTimeout(() => this.renderServiceEventCheckboxes(), 1500);
+          container.innerHTML = `<span class="text-alert text-sm">Could not discover events: ${this.escapeHtml(data.error || 'Endpoint returned no distinct events or service is unreachable')}.</span>`;
+          setTimeout(() => {
+            const currentSelected = [];
+            document.querySelectorAll('input[name="service-event-type"]:checked').forEach(cb => currentSelected.push(cb.value));
+            this.renderServiceEventCheckboxes(currentSelected);
+          }, 2500);
         }
         return;
       }
@@ -1401,7 +1417,7 @@ class ServerManagerApp {
       this.renderServiceEventCheckboxes([], data.event_types);
     } catch (e) {
       if (container) {
-        container.innerHTML = `<span class="text-alert text-sm">Network error discovering events: ${e.message}</span>`;
+        container.innerHTML = `<span class="text-alert text-sm">Network error discovering events: ${this.escapeHtml(e.message)}</span>`;
       }
     }
   }
@@ -1416,6 +1432,7 @@ class ServerManagerApp {
     const enabledChk = document.getElementById('chk-service-enabled');
     const keyTemplateEl = document.getElementById('input-service-key-template');
     const enrichEl = document.getElementById('input-service-enrichment');
+    const pollEndpointEl = document.getElementById('input-service-poll-endpoint');
 
     const id = idEl?.value.trim().toLowerCase();
     const name = nameEl?.value.trim();
@@ -1468,6 +1485,7 @@ class ServerManagerApp {
       base_url: urlEl?.value.trim() || '',
       api_key: keyEl?.value.trim() || '',
       poll_interval_seconds: pollInterval,
+      poll_endpoint: pollEndpointEl?.value.trim() || '/api/v3/history?pageSize=50&sortKey=date&sortDirection=descending',
       pipeline_key_template: keyTemplateEl?.value.trim() || '{service}:{id}',
       allowed_event_types: checkedEvents,
       enrichment_endpoints: enrichmentEndpoints,

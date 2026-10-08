@@ -246,10 +246,11 @@ class TaskScheduler:
             return self._status[service_id]
 
         try:
-            # 1. Fetch recent history from service
+            # 1. Fetch recent items from service
+            poll_ep = getattr(service_cfg, "poll_endpoint", None) or "/api/v3/history?pageSize=50&sortKey=date&sortDirection=descending"
             history_url, headers = prepare_service_request(
                 service_cfg.base_url,
-                "/api/v3/history?pageSize=50&sortKey=date&sortDirection=descending",
+                poll_ep,
                 service_cfg.api_key or "",
             )
             async with httpx.AsyncClient(timeout=15.0) as client:
@@ -258,7 +259,13 @@ class TaskScheduler:
                     raise Exception(f"HTTP {resp.status_code}: {resp.text[:150]}")
                 data = resp.json()
 
-            records = data.get("records", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+            if isinstance(data, list):
+                records = data
+            elif isinstance(data, dict):
+                records = data.get("records") or data.get("Items") or data.get("files") or []
+            else:
+                records = []
+
             allowed_events = set(service_cfg.allowed_event_types) if service_cfg.allowed_event_types else None
             new_ingested = 0
 
@@ -284,9 +291,10 @@ class TaskScheduler:
                         continue
 
                     # Filter out historical events that occurred prior to stage activation
-                    if stage_activated_dt and rec.get("date"):
+                    rec_date_val = rec.get("date") or rec.get("Imported") or rec.get("Created") or rec.get("DateCreated")
+                    if stage_activated_dt and rec_date_val:
                         try:
-                            rec_date_str = str(rec["date"]).replace("Z", "+00:00")
+                            rec_date_str = str(rec_date_val).replace("Z", "+00:00")
                             rec_dt = datetime.datetime.fromisoformat(rec_date_str)
                             if rec_dt < stage_activated_dt:
                                 continue

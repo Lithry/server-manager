@@ -33,6 +33,7 @@ class ServiceConfig(BaseModel):
     base_url: str = ""
     api_key: str = ""
     poll_interval_seconds: int | None = None  # None = inherit Settings.global_poll_interval_seconds
+    poll_endpoint: str = "/api/v3/history?pageSize=50&sortKey=date&sortDirection=descending"
     pipeline_key_template: str = "{service}:{id}"
     allowed_event_types: list[str] = Field(default_factory=list)
     enrichment_endpoints: Dict[str, str] = Field(default_factory=dict)
