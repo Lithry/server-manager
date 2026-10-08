@@ -3,6 +3,8 @@
  */
 
 class ServerManagerApp {
+  static RESERVED_COLUMNS = ['ID', 'PIPELINE_KEY', 'STAGE', 'STATUS', 'LAST_UPDATED'];
+
   constructor() {
     this.currentTab = 'overview';
     this.pipelineOffset = 0;
@@ -22,6 +24,7 @@ class ServerManagerApp {
   init() {
     this.bindEvents();
     this.loadGitOps();
+    this.loadAppVersion();
     this.switchTab('overview');
     
     // Auto-refresh overview every 15 seconds
@@ -458,8 +461,8 @@ class ServerManagerApp {
 
       if (!headersRow || !bodyEl) return;
 
-      const columns = data.columns || ['ID', 'PIPELINE_KEY', 'STAGE', 'STATUS', 'LAST_UPDATED'];
-      headersRow.innerHTML = columns.map(col => `<th>${col}</th>`).join('');
+      const columns = data.columns || ServerManagerApp.RESERVED_COLUMNS;
+      headersRow.innerHTML = columns.map(col => `<th>${this.escapeHtml(col)}</th>`).join('');
 
       if (!data.items || data.items.length === 0) {
         bodyEl.innerHTML = `<tr><td colspan="${columns.length}" class="text-center">No pipeline records found.</td></tr>`;
@@ -493,7 +496,7 @@ class ServerManagerApp {
 
   setupColumnSanitizer(inputEl, submitBtn) {
     if (!inputEl) return;
-    const reserved = ['ID', 'PIPELINE_KEY', 'STAGE', 'STATUS', 'LAST_UPDATED'];
+    const reserved = ServerManagerApp.RESERVED_COLUMNS;
     inputEl.addEventListener('input', () => {
       let val = inputEl.value;
       val = val.toUpperCase().replace(/\s+/g, '_').replace(/[^A-Z0-9_]/g, '');
@@ -515,13 +518,12 @@ class ServerManagerApp {
     const colName = colNameInput?.value?.trim()?.toUpperCase();
     const colType = colTypeInput?.value || 'TEXT';
 
-    if (!colName) {
-      alert('Please enter a column name.');
+    if (!colName || !/^[A-Z0-9_]+$/.test(colName)) {
+      alert('Invalid column name. Only uppercase alphanumeric characters and underscores are allowed (e.g. CUSTOM_FIELD).');
       return;
     }
 
-    const reserved = ['ID', 'PIPELINE_KEY', 'STAGE', 'STATUS', 'LAST_UPDATED'];
-    if (reserved.includes(colName)) {
+    if (ServerManagerApp.RESERVED_COLUMNS.includes(colName)) {
       alert(`Column name '${colName}' is a reserved system column and cannot be added.`);
       return;
     }
@@ -743,7 +745,7 @@ class ServerManagerApp {
       const bodyEl = document.getElementById('view-data-body');
 
       const cols = data.columns || [];
-      headersRow.innerHTML = cols.map(c => `<th>${c}</th>`).join('');
+      headersRow.innerHTML = cols.map(c => `<th>${this.escapeHtml(c)}</th>`).join('');
 
       if (!data.items || data.items.length === 0) {
         bodyEl.innerHTML = `<tr><td colspan="${cols.length}" class="text-center">No rows returned by view.</td></tr>`;
@@ -1008,13 +1010,13 @@ class ServerManagerApp {
   }
 
   async purgePipelineDb() {
-    if (!confirm('¿Estás seguro de que deseas purgar la base de datos del pipeline? Esta acción eliminará permanentemente todos los registros.')) {
+    if (!confirm('Are you sure you want to purge the pipeline database? This action will permanently delete all records.')) {
       return;
     }
 
-    const conf = prompt('Esta acción es irreversible. Para confirmar la eliminación completa de los registros del pipeline, escribe PURGE:');
+    const conf = prompt('This action is irreversible. To confirm full purge of pipeline records, type PURGE:');
     if (conf !== 'PURGE') {
-      alert('Operación cancelada. El código de confirmación no coincide.');
+      alert('Operation cancelled. Confirmation code did not match.');
       return;
     }
 
@@ -1024,14 +1026,14 @@ class ServerManagerApp {
       });
       const data = await resp.json();
       if (!resp.ok) {
-        alert(`Error al purgar base de datos: ${data.detail || 'Request failed'}`);
+        alert(`Failed to purge pipeline database: ${data.detail || 'Request failed'}`);
         return;
       }
-      alert(`Pipeline purgado exitosamente. ${data.deleted_rows || 0} registros eliminados.`);
+      alert(`Pipeline database purged successfully. ${data.deleted_rows || 0} records deleted.`);
       this.pipelineOffset = 0;
       this.loadPipeline();
     } catch (e) {
-      alert(`Error de red: ${e.message}`);
+      alert(`Network error: ${e.message}`);
     }
   }
 
@@ -1149,6 +1151,19 @@ class ServerManagerApp {
 
     } catch (e) {
       console.error('Error loading GitOps telemetry:', e);
+    }
+  }
+
+  async loadAppVersion() {
+    try {
+      const resp = await fetch('/health');
+      const data = await resp.json();
+      const versionEl = document.getElementById('app-version-tag');
+      if (versionEl && data?.version) {
+        versionEl.innerText = data.version.startsWith('v') ? data.version : `v${data.version}`;
+      }
+    } catch (e) {
+      // Retain static default if unreachable
     }
   }
 
@@ -2086,8 +2101,7 @@ class ServerManagerApp {
       return;
     }
 
-    const reserved = ['ID', 'PIPELINE_KEY', 'STAGE', 'STATUS', 'LAST_UPDATED'];
-    if (reserved.includes(col)) {
+    if (ServerManagerApp.RESERVED_COLUMNS.includes(col)) {
       alert(`Target column '${col}' is a reserved system column and cannot be used.`);
       return;
     }
@@ -2144,21 +2158,6 @@ class ServerManagerApp {
       .replace(/ñ/g, 'n')
       .replace(/[^a-z0-9_-]+/g, '-')
       .replace(/^-+|-+$/g, '');
-  }
-
-  updateSampleEndpointSuggestion(serviceId) {
-    const input = document.getElementById('sample-endpoint-input');
-    if (!input || !serviceId) return;
-    const s = serviceId.toLowerCase();
-    if (s.includes('sonarr') || s.includes('radarr')) {
-      input.value = '/api/v3/history';
-    } else if (s.includes('jellyfin')) {
-      input.value = '/Items?Recursive=true';
-    } else if (s.includes('shoko')) {
-      input.value = '/api/v3/File?pageSize=10';
-    } else if (s.includes('qbit')) {
-      input.value = '/api/v2/torrents/info';
-    }
   }
 
   async openSampleModal(targetServiceId = null) {
@@ -2253,7 +2252,8 @@ class ServerManagerApp {
     }
 
     if (endpointInput) {
-      endpointInput.value = epList[0].endpoint;
+      endpointInput.value = '';
+      endpointInput.placeholder = `Select an endpoint below or type custom (e.g. ${epList[0].endpoint})`;
     }
 
     document.getElementById('modal-sample-api')?.classList.remove('hidden');
@@ -2267,7 +2267,12 @@ class ServerManagerApp {
     const filterInput = document.getElementById('sample-filter-input');
     if (!resultBox) return;
 
-    const endpoint = endpointInput?.value.trim() || '/api/v3/history';
+    const endpoint = endpointInput?.value.trim();
+
+    if (!endpoint) {
+      alert('Please select or enter an API endpoint to sample.');
+      return;
+    }
 
     if (!serviceId) {
       alert('Please select a service to sample.');
