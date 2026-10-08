@@ -8,6 +8,7 @@ Zero raw Docker log streams, zero shell access.
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query
 
+from src import __version__
 from src.core.database import db_manager
 from src.core.gitops import gitops_manager
 from src.core.config import config_manager
@@ -67,6 +68,7 @@ async def server_query(
 
         return {
             "status": "healthy" if (incidents_summary and incidents_summary[0]["critical_incidents"] == 0) else "degraded",
+            "version": __version__,
             "active_incidents": incidents_summary[0]["active_incidents"] if incidents_summary else 0,
             "critical_incidents": incidents_summary[0]["critical_incidents"] if incidents_summary else 0,
             "pipeline_total_items": pipeline_total,

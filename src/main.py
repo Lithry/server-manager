@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from src import __version__
 from src.core.database import db_manager
 from src.core.scheduler import scheduler
 
@@ -45,7 +46,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Cubi ServerManager",
-    version="0.1.3",
+    version=__version__,
     description="Universal pipeline orchestrator, dynamic schema mapper, and telemetry engine for cubi-server.",
     lifespan=lifespan,
 )
@@ -85,7 +86,7 @@ async def health_check():
     return {
         "status": "healthy",
         "app": "server-manager",
-        "version": "0.1.3",
+        "version": __version__,
         "scheduler_running": scheduler.is_running(),
     }
 
