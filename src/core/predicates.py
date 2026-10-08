@@ -67,8 +67,14 @@ class PredicateEvaluator:
         if isinstance(node, ast.Constant):
             return node.value
         elif isinstance(node, ast.Name):
-            # Identifiers like IS_ANIME, FILE_PATH, VFS_PATH
-            return context.get(node.id, None)
+            # Identifiers like IS_ANIME, FILE_PATH, VFS_PATH (case-insensitive lookup)
+            if node.id in context:
+                return context[node.id]
+            if node.id.upper() in context:
+                return context[node.id.upper()]
+            if node.id.lower() in context:
+                return context[node.id.lower()]
+            return None
         elif isinstance(node, ast.Attribute):
             # Handles chained attributes like stage.ingest.completed
             parts = []
@@ -80,7 +86,13 @@ class PredicateEvaluator:
                 parts.append(curr.id)
             parts.reverse()
             full_attr = ".".join(parts)
-            return context.get(full_attr, None)
+            if full_attr in context:
+                return context[full_attr]
+            if full_attr.upper() in context:
+                return context[full_attr.upper()]
+            if full_attr.lower() in context:
+                return context[full_attr.lower()]
+            return None
         elif isinstance(node, ast.BoolOp):
             values = [cls._eval_node(val, context) for val in node.values]
             op_func = cls.ALLOWED_OPERATORS.get(type(node.op))

@@ -13,6 +13,7 @@ class StageConfig(BaseModel):
     description: str = ""
     order: int = 1
     start_condition: str | None = None  # None or empty = Root producer stage
+    complete_condition: str | None = None  # Boolean predicate evaluated to determine stage completion
     grace_period_minutes: int = 10
     timeout_minutes: int = 30
     service_ids: list[str] = Field(default_factory=list)  # Assigned service IDs (M:N)

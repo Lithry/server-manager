@@ -840,6 +840,18 @@
           </div>
         </div>
 
+        <div class="card mb-3 p-3 bg-surface-subtle">
+          <label class="form-label text-sm"><strong>Complete Condition Predicate (Optional)</strong></label>
+          <p class="modal-desc mb-2 text-sm text-muted">
+            Evaluated to determine if this stage has finished processing the item (e.g. <code>FILE_PATH is not None</code> or <code>SHOKO_STATUS == 'RECOGNIZED'</code>). Leave empty to complete immediately upon mapping.
+          </p>
+          <div class="input-with-action">
+            <input type="text" id="input-stage-complete-condition" class="form-input font-mono" placeholder="FILE_PATH is not None">
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-validate-complete-condition">Test Syntax</button>
+          </div>
+          <div id="complete-predicate-test-result" class="mt-2 text-sm hidden"></div>
+        </div>
+
         <div class="form-grid-2">
           <div class="form-group">
             <label>Grace Period (Minutes)</label>

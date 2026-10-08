@@ -229,6 +229,9 @@ class ServerManagerApp {
     document.getElementById('btn-validate-condition')?.addEventListener('click', () => {
       this.validateConditionSyntax();
     });
+    document.getElementById('btn-validate-complete-condition')?.addEventListener('click', () => {
+      this.validateCompleteConditionSyntax();
+    });
     document.getElementById('btn-submit-add-stage')?.addEventListener('click', () => {
       this.saveStageFromModal();
     });
@@ -1581,6 +1584,11 @@ class ServerManagerApp {
               ✓ start_condition IS NULL — Autonomously initiates rows in SERVICES_PIPELINE
             </div>
           `}
+          ${st.complete_condition ? `
+            <div class="stage-predicate-display mt-1 text-xs">
+              <strong class="text-muted">complete_condition:</strong> <span class="font-mono text-muted">${this.escapeHtml(st.complete_condition)}</span>
+            </div>
+          ` : ''}
           <div class="stage-meta-row">
             <span>Grace Period: <strong>${st.grace_period_minutes ?? 10} min</strong></span>
             <span>Watchdog Timeout: <strong>${st.timeout_minutes ?? 30} min</strong></span>
@@ -1610,14 +1618,17 @@ class ServerManagerApp {
     const descEl = document.getElementById('input-stage-desc');
     const rootChk = document.getElementById('chk-stage-root');
     const condEl = document.getElementById('input-stage-condition');
+    const completeCondEl = document.getElementById('input-stage-complete-condition');
     const graceEl = document.getElementById('input-stage-grace');
     const timeoutEl = document.getElementById('input-stage-timeout');
     const predBlock = document.getElementById('stage-predicate-block');
     const testResult = document.getElementById('predicate-test-result');
+    const completeTestResult = document.getElementById('complete-predicate-test-result');
     const servicesGrid = document.getElementById('stage-services-checkboxes');
     const enabledChk = document.getElementById('chk-stage-enabled');
 
     if (testResult) testResult.classList.add('hidden');
+    if (completeTestResult) completeTestResult.classList.add('hidden');
 
     let assigned = [];
     if (editStageId && this.settingsData?.stages) {
@@ -1630,6 +1641,7 @@ class ServerManagerApp {
         const isRoot = !st.start_condition || !st.start_condition.trim();
         if (rootChk) rootChk.checked = isRoot;
         if (condEl) condEl.value = st.start_condition || '';
+        if (completeCondEl) completeCondEl.value = st.complete_condition || '';
         if (predBlock) predBlock.classList.toggle('hidden', isRoot);
         if (graceEl) graceEl.value = st.grace_period_minutes ?? 10;
         if (timeoutEl) timeoutEl.value = st.timeout_minutes ?? 30;
@@ -1643,6 +1655,7 @@ class ServerManagerApp {
       if (descEl) descEl.value = '';
       if (rootChk) rootChk.checked = true;
       if (condEl) condEl.value = '';
+      if (completeCondEl) completeCondEl.value = '';
       if (predBlock) predBlock.classList.add('hidden');
       if (graceEl) graceEl.value = 10;
       if (timeoutEl) timeoutEl.value = 30;
@@ -1698,12 +1711,41 @@ class ServerManagerApp {
     }
   }
 
+  async validateCompleteConditionSyntax() {
+    const condEl = document.getElementById('input-stage-complete-condition');
+    const resultEl = document.getElementById('complete-predicate-test-result');
+    if (!condEl || !resultEl) return;
+
+    const expr = condEl.value.trim();
+    try {
+      const resp = await fetch('/api/v1/settings/test-predicate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expression: expr })
+      });
+      const data = await resp.json();
+      resultEl.classList.remove('hidden');
+      if (data.valid) {
+        resultEl.className = 'mt-2 text-sm text-success';
+        resultEl.innerText = `✓ ${data.message}`;
+      } else {
+        resultEl.className = 'mt-2 text-sm text-alert';
+        resultEl.innerText = `x ${data.message}`;
+      }
+    } catch (e) {
+      resultEl.classList.remove('hidden');
+      resultEl.className = 'mt-2 text-sm text-alert';
+      resultEl.innerText = `x Network error: ${e.message}`;
+    }
+  }
+
   async saveStageFromModal() {
     const idEl = document.getElementById('input-stage-id');
     const nameEl = document.getElementById('input-stage-name');
     const descEl = document.getElementById('input-stage-desc');
     const rootChk = document.getElementById('chk-stage-root');
     const condEl = document.getElementById('input-stage-condition');
+    const completeCondEl = document.getElementById('input-stage-complete-condition');
     const graceEl = document.getElementById('input-stage-grace');
     const timeoutEl = document.getElementById('input-stage-timeout');
     const enabledChk = document.getElementById('chk-stage-enabled');
@@ -1725,6 +1767,7 @@ class ServerManagerApp {
 
     const isRoot = rootChk ? rootChk.checked : true;
     const condition = isRoot ? null : (condEl?.value.trim() || null);
+    const completeCondition = completeCondEl?.value.trim() || null;
     const enabled = enabledChk ? enabledChk.checked : false;
 
     // Collect checked assigned services
@@ -1748,6 +1791,7 @@ class ServerManagerApp {
       description: descEl?.value.trim() || '',
       order: order,
       start_condition: condition,
+      complete_condition: completeCondition,
       grace_period_minutes: parseInt(graceEl?.value || '10', 10),
       timeout_minutes: parseInt(timeoutEl?.value || '30', 10),
       service_ids: checkedServices,

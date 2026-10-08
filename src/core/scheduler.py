@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from src.core.config import config_manager
 from src.core.database import db_manager, SYSTEM_RESERVED_COLUMNS
-from src.core.predicates import TransformerEvaluator
+from src.core.predicates import PredicateEvaluator, TransformerEvaluator
 from src.api.pipeline import prepare_service_request
 
 
@@ -370,13 +370,34 @@ class TaskScheduler:
                         if col_name in table_cols:
                             mapped_fields[col_name] = sanitize_and_serialize(val)
 
+                    # Determine initial STATUS based on active_stage.complete_condition
+                    initial_status = "COMPLETED"
+                    if active_stage.complete_condition and active_stage.complete_condition.strip():
+                        eval_ctx = {
+                            "records": rec,
+                            **rec,
+                            **enrichment_data,
+                            **mapped_fields,
+                            "STAGE": active_stage.order,
+                            "PIPELINE_KEY": pipeline_key,
+                        }
+                        try:
+                            is_completed = PredicateEvaluator.evaluate(active_stage.complete_condition, eval_ctx)
+                            initial_status = "COMPLETED" if is_completed else "PENDING"
+                        except Exception as cond_err:
+                            print(f"[!] Warning evaluating complete_condition for {pipeline_key}: {cond_err}")
+                            initial_status = "PENDING"
+
                     col_names = ["PIPELINE_KEY", "STAGE", "STATUS"] + list(mapped_fields.keys())
                     placeholders = ["?"] * len(col_names)
-                    values = [pipeline_key, active_stage.order, "PENDING"] + list(mapped_fields.values())
+                    values = [pipeline_key, active_stage.order, initial_status] + list(mapped_fields.values())
 
                     insert_sql = f'INSERT INTO SERVICES_PIPELINE ({", ".join(col_names)}) VALUES ({", ".join(placeholders)});'
                     await db_manager.execute(insert_sql, tuple(values))
                     new_ingested += 1
+
+            # Reconcile any pending records for active stages
+            await self.reconcile_stages()
 
             self._status[service_id] = {
                 "last_run": now_str,
@@ -395,6 +416,39 @@ class TaskScheduler:
             }
             return self._status[service_id]
 
+    async def reconcile_stages(self) -> None:
+        """Evaluate completion predicates on pending pipeline rows to transition them naturally."""
+        try:
+            settings = await config_manager.get_settings()
+            for stage in settings.stages:
+                if not stage.enabled:
+                    continue
+
+                cond = stage.complete_condition
+                if not cond or not cond.strip():
+                    continue
+
+                pending_rows = await db_manager.query(
+                    "SELECT * FROM SERVICES_PIPELINE WHERE STAGE = ? AND STATUS = 'PENDING' LIMIT 50;",
+                    (stage.order,)
+                )
+                if not pending_rows:
+                    continue
+
+                for row in pending_rows:
+                    row_dict = dict(row)
+                    try:
+                        if PredicateEvaluator.evaluate(cond, row_dict):
+                            await db_manager.execute(
+                                "UPDATE SERVICES_PIPELINE SET STATUS = 'COMPLETED', LAST_UPDATED = CURRENT_TIMESTAMP WHERE ID = ?;",
+                                (row_dict["ID"],)
+                            )
+                            print(f"[i] Stage '{stage.id}' marked COMPLETED for row {row_dict['ID']} ({row_dict.get('PIPELINE_KEY')}) via complete_condition.")
+                    except Exception as eval_err:
+                        print(f"[!] Error evaluating complete_condition for row {row_dict.get('ID')}: {eval_err}")
+        except Exception as err:
+            print(f"[!] Error in reconcile_stages: {err}")
+
     async def _service_loop(self, service_id: str) -> None:
         while self._running:
             try:
@@ -410,6 +464,7 @@ class TaskScheduler:
 
                 interval = max(int(configured_interval), 10)
                 await self.trigger_now(service_id)
+                await self.reconcile_stages()
                 await asyncio.sleep(interval)
             except asyncio.CancelledError:
                 break
