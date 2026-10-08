@@ -252,19 +252,6 @@ body {
   gap: 16px;
 }
 
-.version-pill {
-  display: flex;
-  align-items: center;
-  background-color: rgba(56, 189, 248, 0.1);
-  border: 1px solid rgba(56, 189, 248, 0.25);
-  color: var(--accent-cyan);
-  padding: 4px 10px;
-  border-radius: 20px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  font-family: var(--font-mono);
-}
-
 .live-pill {
   display: flex;
   align-items: center;
@@ -341,10 +328,6 @@ body {
   font-size: 0.85rem;
   font-weight: 500;
   color: var(--text-secondary);
-}
-
-.metric-icon {
-  font-size: 1.2rem;
 }
 
 .metric-value {
@@ -779,7 +762,7 @@ body {
 }
 
 .tools-console-container {
-  background-color: #050811;
+  background-color: var(--bg-base);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   display: flex;
@@ -865,18 +848,12 @@ body {
 .alert-info {
   background-color: rgba(14, 165, 233, 0.1);
   border: 1px solid rgba(14, 165, 233, 0.25);
-  color: #7dd3fc;
+  color: var(--accent-cyan);
 }
 
 /* --------------------------------------------------------------------------
-   Settings Page Grid
+   Settings Item Styles
    -------------------------------------------------------------------------- */
-.settings-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 24px;
-}
-
 .app-setting-item {
   padding: 16px;
   background-color: var(--bg-surface);
@@ -1034,18 +1011,18 @@ body {
 
 .badge-system {
   background: rgba(148, 163, 184, 0.15);
-  color: #94a3b8;
+  color: var(--text-secondary);
   border: 1px solid rgba(148, 163, 184, 0.3);
 }
 
 .badge-deprecated {
   background: rgba(245, 158, 11, 0.15);
-  color: #f59e0b;
+  color: var(--color-warning);
   border: 1px solid rgba(245, 158, 11, 0.3);
 }
 
 .api-fields-viewer {
-  background-color: #050811;
+  background-color: var(--bg-base);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   padding: 12px;
@@ -1319,7 +1296,7 @@ tr.drag-over {
     gap: 12px;
   }
 
-  .grid-2-col, .settings-grid, .tools-layout {
+  .grid-2-col, .tools-layout {
     grid-template-columns: 1fr;
   }
 }

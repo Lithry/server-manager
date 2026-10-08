@@ -1677,9 +1677,9 @@ class ServerManagerApp {
     document.getElementById('modal-add-stage')?.classList.remove('hidden');
   }
 
-  async validateConditionSyntax() {
-    const condEl = document.getElementById('input-stage-condition');
-    const resultEl = document.getElementById('predicate-test-result');
+  async validatePredicateSyntax(inputElementId, resultElementId) {
+    const condEl = document.getElementById(inputElementId);
+    const resultEl = document.getElementById(resultElementId);
     if (!condEl || !resultEl) return;
 
     const expr = condEl.value.trim();
@@ -1705,32 +1705,12 @@ class ServerManagerApp {
     }
   }
 
-  async validateCompleteConditionSyntax() {
-    const condEl = document.getElementById('input-stage-complete-condition');
-    const resultEl = document.getElementById('complete-predicate-test-result');
-    if (!condEl || !resultEl) return;
+  validateConditionSyntax() {
+    return this.validatePredicateSyntax('input-stage-condition', 'predicate-test-result');
+  }
 
-    const expr = condEl.value.trim();
-    try {
-      const resp = await fetch('/api/v1/settings/test-predicate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ expression: expr })
-      });
-      const data = await resp.json();
-      resultEl.classList.remove('hidden');
-      if (data.valid) {
-        resultEl.className = 'mt-2 text-sm text-success';
-        resultEl.innerText = `✓ ${data.message}`;
-      } else {
-        resultEl.className = 'mt-2 text-sm text-alert';
-        resultEl.innerText = `x ${data.message}`;
-      }
-    } catch (e) {
-      resultEl.classList.remove('hidden');
-      resultEl.className = 'mt-2 text-sm text-alert';
-      resultEl.innerText = `x Network error: ${e.message}`;
-    }
+  validateCompleteConditionSyntax() {
+    return this.validatePredicateSyntax('input-stage-complete-condition', 'complete-predicate-test-result');
   }
 
   async saveStageFromModal() {
@@ -2579,9 +2559,9 @@ class ServerManagerApp {
 
 // Global initialization
 window.addEventListener('DOMContentLoaded', () => {
-  window.app = new ServerManagerApp();
-  try {
-    window.app = window.app;
-    if (typeof globalThis !== 'undefined') globalThis.app = window.app;
-  } catch (e) {}
+  const appInstance = new ServerManagerApp();
+  window.app = appInstance;
+  if (typeof globalThis !== 'undefined') {
+    globalThis.app = appInstance;
+  }
 });
