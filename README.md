@@ -1,4 +1,4 @@
-# server-manager — Universal Pipeline, Monitoring & Telemetry Appliance (`v0.1.5`)
+# server-manager — Universal Pipeline, Monitoring & Telemetry Appliance (`v0.1.6`)
 
 `server-manager` is an autonomous, containerized administration and telemetry platform designed for homelab and media server environments (`cubi-server`). It operates on port **8099** with a native FastAPI backend, SQLite in WAL mode, and a responsive vanilla WebUI.
 
