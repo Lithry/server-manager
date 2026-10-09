@@ -476,9 +476,9 @@ ERROR: `+i.message}))}};return{mount(s){t=S.subscribe(ve.all,()=>s()),o=e.subscr
         ${b({label:"+ Add Stage",variant:"add",size:"sm",onClick:o})}
       </div>
       
-      <div class="u-flex u-flex-col">
-        ${t.length===0?c`<div class="u-text-muted u-text-sm" style="padding: var(--space-4);">No execution stages defined yet. Click <strong>+ Add Stage</strong> to create your first pipeline stage.</div>`:t.map((s,i)=>{const n=a(s);return c`
-              <div style="padding: var(--space-4); border-bottom: ${i===t.length-1?"none":"1px solid var(--color-border)"}; border-left: 4px solid ${n.color}; background: color-mix(in srgb, ${n.color} 5%, var(--color-bg-card)); transition: background 0.2s;">
+      <div class="u-flex u-flex-col u-gap-3" style="padding: var(--space-4);">
+        ${t.length===0?c`<div class="u-text-muted u-text-sm">No execution stages defined yet. Click <strong>+ Add Stage</strong> to create your first pipeline stage.</div>`:t.map((s,i)=>{const n=a(s);return c`
+              <div style="padding: var(--space-4); border: 1px solid var(--color-border); border-left: 4px solid ${n.color}; border-radius: var(--radius-md); background: color-mix(in srgb, ${n.color} 5%, var(--color-bg-card)); transition: background 0.2s;">
                 <div class="u-flex u-items-center u-justify-between">
                   <div class="u-flex u-items-center u-gap-3">
                     <strong style="color: var(--color-text); font-size: 1.1rem;">${s.name}</strong>
@@ -493,10 +493,10 @@ ERROR: `+i.message}))}};return{mount(s){t=S.subscribe(ve.all,()=>s()),o=e.subscr
                 <div class="u-text-sm u-text-muted u-mt-1">${s.description||"No description provided."}</div>
                 <div class="u-text-xs u-font-mono u-mt-3" style="background: color-mix(in srgb, var(--color-bg-card) 50%, transparent); padding: 8px; border-radius: 4px; border: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent);">
                   <div style="margin-bottom: 4px; color: var(--color-success);">
-                    <strong>START CONDITION:</strong> ${s.start_condition?s.start_condition:"✓ NULL (ROOT STAGE - Immediate Execution)"}
+                    ${s.start_condition?"":"✓ "}<strong>START CONDITION:</strong> ${s.start_condition?s.start_condition:"NULL (ROOT STAGE - Immediate Execution)"}
                   </div>
                   <div style="color: var(--color-warning);">
-                    <strong>COMPLETE CONDITION:</strong> ${s.complete_condition?s.complete_condition:"✓ NULL (SINK STAGE - Ends on Start)"}
+                    ${s.complete_condition?"":"✓ "}<strong>COMPLETE CONDITION:</strong> ${s.complete_condition?s.complete_condition:"NULL (SINK STAGE - Ends on Start)"}
                   </div>
                 </div>
               </div>
