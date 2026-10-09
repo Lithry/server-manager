@@ -28,7 +28,7 @@ export function ConfirmDialog({ title, message, tone = 'danger', confirmLabel = 
             ${Button({ label: 'Cancelar', variant: 'ghost', onClick: () => { close(); resolve(false); } })}
             ${Button({ 
               label: confirmLabel, 
-              variant: tone === 'danger' ? 'danger' : 'primary', 
+              variant: tone === 'danger' ? 'delete' : 'add', 
               disabled: requireText ? inputValue !== requireText : false,
               onClick: () => { close(); resolve(true); } 
             })}

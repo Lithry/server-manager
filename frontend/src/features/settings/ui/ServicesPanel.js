@@ -28,8 +28,8 @@ export function createServicesPanel(store, servicesData = {}, globalPoll = 300) 
             </span>
           </div>
           <div class="u-flex u-gap-2">
-            ${Button({ label: 'Edit', variant: 'ghost', size: 'sm', onClick: () => alert('Edit ' + s.name) })}
-            ${Button({ label: 'Delete', variant: 'delete', size: 'sm', onClick: () => alert('Delete ' + s.name) })}
+            ${Button({ label: 'Edit', variant: 'ghost', size: 'sm', onClick: () => store.set(s => ({ ...s, isServiceModalOpen: true, editingServiceId: key })) })}
+            ${Button({ label: 'Delete', variant: 'delete', size: 'sm', onClick: () => confirm('Delete service?') })}
           </div>
         </div>
         <div class="u-text-sm u-font-mono u-text-muted" style="color: var(--color-text-muted);">

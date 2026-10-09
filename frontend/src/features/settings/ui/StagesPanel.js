@@ -3,7 +3,13 @@ import { Button } from '../../../shared/ui/atoms/Button/Button.js';
 
 export function createStagesPanel(store, stagesData = []) {
   const handleAddStage = () => {
-    store.set(s => ({ ...s, isStageModalOpen: true }));
+    store.set(s => ({ ...s, isStageModalOpen: true, editingStageId: null }));
+  };
+
+  const getStageType = (stage) => {
+    if (!stage.start_condition) return { label: 'ROOT', color: 'var(--color-success)', bg: 'color-mix(in srgb, var(--color-success) 20%, transparent)' };
+    if (!stage.complete_condition) return { label: 'SINK', color: 'var(--color-warning)', bg: 'color-mix(in srgb, var(--color-warning) 20%, transparent)' };
+    return { label: 'CONSUMER', color: 'var(--color-accent)', bg: 'color-mix(in srgb, var(--color-accent) 20%, transparent)' };
   };
 
   return html`
@@ -19,24 +25,29 @@ export function createStagesPanel(store, stagesData = []) {
       <div class="u-flex u-flex-col">
         ${stagesData.length === 0 
           ? html`<div class="u-text-muted u-text-sm" style="padding: var(--space-4);">No execution stages defined yet. Click <strong>+ Add Stage</strong> to create your first pipeline stage.</div>` 
-          : stagesData.map((stage, i) => html`
-              <div style="padding: var(--space-4); border-bottom: ${i === stagesData.length - 1 ? 'none' : '1px solid var(--color-border)'};">
+          : stagesData.map((stage, i) => {
+              const type = getStageType(stage);
+              return html`
+              <div style="padding: var(--space-4); border-bottom: ${i === stagesData.length - 1 ? 'none' : '1px solid var(--color-border)'}; border-left: 4px solid ${type.color}; background: var(--color-bg-card); transition: background 0.2s;">
                 <div class="u-flex u-items-center u-justify-between">
-                  <div>
-                    <strong style="color: var(--color-text);">${stage.name}</strong>
-                    <span class="u-font-mono u-text-xs u-ml-2" style="color: var(--color-text-muted);">${stage.id}</span>
+                  <div class="u-flex u-items-center u-gap-3">
+                    <strong style="color: var(--color-text); font-size: 1.1rem;">${stage.name}</strong>
+                    <span class="u-font-mono u-text-xs" style="color: var(--color-text-muted);">${stage.id}</span>
+                    <span class="u-font-mono u-text-xs" style="background: ${type.bg}; color: ${type.color}; padding: 2px 6px; border-radius: 4px; font-weight: bold;">${type.label}</span>
                   </div>
                   <div class="u-flex u-gap-2">
-                    ${Button({ label: 'Edit', variant: 'ghost', size: 'sm', onClick: () => alert('Edit ' + stage.name) })}
-                    ${Button({ label: 'Delete', variant: 'delete', size: 'sm', onClick: () => alert('Delete ' + stage.name) })}
+                    ${Button({ label: 'Edit', variant: 'ghost', size: 'sm', onClick: () => store.set(s => ({ ...s, isStageModalOpen: true, editingStageId: stage.id })) })}
+                    ${Button({ label: 'Delete', variant: 'delete', size: 'sm', onClick: () => confirm('Delete stage?') })}
                   </div>
                 </div>
                 <div class="u-text-sm u-text-muted u-mt-1">${stage.description || 'No description provided.'}</div>
-                <div class="u-text-xs u-font-mono u-text-muted u-mt-2" style="background: var(--color-bg-subtle); padding: 4px 8px; border-radius: 4px;">
-                  START: ${stage.start_condition || 'NULL (ROOT)'} | COMPLETE: ${stage.complete_condition || 'IMMEDIATE / SINK'}
+                <div class="u-text-xs u-font-mono u-text-muted u-mt-3" style="background: var(--color-bg-subtle); padding: 8px; border-radius: 4px; border: 1px dashed var(--color-border);">
+                  <div style="margin-bottom: 4px;"><strong style="color: var(--color-success);">START CONDITION:</strong> ${stage.start_condition || 'NULL (IMMEDIATE)'}</div>
+                  <div><strong style="color: var(--color-warning);">COMPLETE CONDITION:</strong> ${stage.complete_condition || 'NULL (SINK)'}</div>
                 </div>
               </div>
-            `)
+            `;
+          })
         }
       </div>
     </div>
