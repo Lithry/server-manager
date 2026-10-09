@@ -4,6 +4,8 @@ import { queryCache } from '../shared/api/index.js';
 import { createStore } from '../shared/lib/lib.js';
 import { Button } from '../shared/ui/atoms/Button/Button.js';
 import { Icon } from '../shared/ui/atoms/Icon/Icon.js';
+import { ConfirmDialog } from '../shared/ui/organisms/ConfirmDialog/ConfirmDialog.js';
+import { http } from '../shared/api/index.js';
 
 import { createServicesPanel } from '../features/settings/ui/ServicesPanel.js';
 import { createServiceModal } from '../features/settings/ui/ServiceModal.js';
@@ -16,10 +18,11 @@ import { createNotificationsPanel } from '../features/settings/ui/NotificationsP
 import { createNotificationTriggerModal } from '../features/settings/ui/NotificationTriggerModal.js';
 import { createEnginePanel } from '../features/settings/ui/EnginePanel.js';
 
-export function createSettingsPage() {
+export function createSettingsPage(router) {
   const store = createStore({ 
     activeTab: 'services', 
     saving: false,
+    isDirty: false,
     isServiceModalOpen: false,
     isStageModalOpen: false,
     isMappingModalOpen: false,
@@ -29,15 +32,39 @@ export function createSettingsPage() {
   });
   let unsubState, unsubData;
 
+  const handleBeforeUnload = (e) => {
+    if (store.get().isDirty) {
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  };
+
   return {
     mount(onUpdate) {
       unsubState = store.subscribe(() => onUpdate());
       unsubData = queryCache.subscribe(settingsKeys.all, () => onUpdate());
       settingsApi.getSettings();
+      
+      window.addEventListener('beforeunload', handleBeforeUnload);
+      if (router) {
+        router.setBeforeNavigateHook(async (hash) => {
+          if (store.get().isDirty) {
+            return await ConfirmDialog({
+              title: 'Unsaved Changes',
+              message: 'You have unsaved changes. Are you sure you want to leave this page without saving?',
+              confirmLabel: 'Leave without saving',
+              tone: 'danger'
+            });
+          }
+          return true;
+        });
+      }
     },
     unmount() {
       if (unsubState) unsubState();
       if (unsubData) unsubData();
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      if (router) router.setBeforeNavigateHook(null);
     },
     view() {
       const state = store.get();
@@ -84,7 +111,25 @@ export function createSettingsPage() {
               ${renderTabButton('notifications', 'bell', 'Notification Triggers')}
               ${renderTabButton('engine', 'settings', 'Engine & Retention')}
             </div>
-            ${Button({ label: 'Save All Settings', variant: 'save', size: 'sm', loading: saving, onClick: () => alert('Save coming soon') })}
+            ${Button({ 
+              label: 'Save All Settings', 
+              variant: state.isDirty ? 'add' : 'secondary', 
+              size: 'sm', 
+              loading: saving, 
+              disabled: !state.isDirty,
+              onClick: async () => {
+                const snapshot = queryCache.read(settingsKeys.all);
+                store.set(s => ({ ...s, saving: true }));
+                try {
+                  await http.post('/api/v1/settings', snapshot.data);
+                  store.set(s => ({ ...s, isDirty: false, saving: false }));
+                  alert('Settings saved successfully!');
+                } catch (err) {
+                  alert('Error saving settings: ' + err.message);
+                  store.set(s => ({ ...s, saving: false }));
+                }
+              } 
+            })}
           </div>
           
           ${activeTab === 'services' ? createServicesPanel(store, servicesData, globalPoll) : nothing}

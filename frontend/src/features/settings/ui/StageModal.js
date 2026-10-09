@@ -2,35 +2,68 @@ import { html } from 'lit-html';
 import { Button } from '../../../shared/ui/atoms/Button/Button.js';
 import { createStore } from '../../../shared/lib/lib.js';
 import { Modal } from '../../../shared/ui/organisms/Modal/Modal.js';
+import { queryCache } from '../../../shared/api/index.js';
+import { settingsKeys } from '../api.js';
 
 // Local state for the modal to handle sink/root toggles
 const localStore = createStore({ isSink: false, isRoot: false });
 
 export function createStageModal(store) {
   const state = store.get();
-  const isSink = state.stageIsSink || false;
-  const isRoot = state.stageIsRoot || false;
+  const snapshot = queryCache.read(settingsKeys.all);
+  const stages = snapshot?.data?.stages || [];
+  const editingStage = state.editingStageId ? stages.find(s => s.id === state.editingStageId) : null;
+  
+  // Initialize local toggles only once when opening
+  const isSink = state.stageIsSink ?? (editingStage ? !editingStage.complete_condition : false);
+  const isRoot = state.stageIsRoot ?? (editingStage ? !editingStage.start_condition : false);
   
   const handleClose = () => {
-    store.set(s => ({ ...s, isStageModalOpen: false, stageIsRoot: false, stageIsSink: false }));
+    store.set(s => ({ ...s, isStageModalOpen: false, stageIsRoot: null, stageIsSink: null, editingStageId: null }));
+  };
+
+  const handleSave = () => {
+    const stageId = document.getElementById('stage-id').value.trim();
+    if (!stageId) { alert('Stage ID is required'); return; }
+    
+    const newStage = {
+      id: stageId,
+      name: document.getElementById('stage-name').value.trim() || stageId,
+      description: document.getElementById('stage-desc').value.trim(),
+      services: [], // Mocked for now
+      start_condition: isRoot ? null : (document.getElementById('stage-start')?.value.trim() || null),
+      complete_condition: isSink ? null : (document.getElementById('stage-complete')?.value.trim() || null),
+      grace_period_minutes: parseInt(document.getElementById('stage-grace').value) || 0,
+      watchdog_timeout_minutes: parseInt(document.getElementById('stage-watchdog').value) || 0
+    };
+    
+    let newStages = [...stages];
+    if (state.editingStageId) {
+      newStages = newStages.map(s => s.id === state.editingStageId ? newStage : s);
+    } else {
+      newStages.push(newStage);
+    }
+    
+    queryCache.set(settingsKeys.all, { ...snapshot.data, stages: newStages });
+    store.set(s => ({ ...s, isDirty: true, isStageModalOpen: false, stageIsRoot: null, stageIsSink: null, editingStageId: null }));
   };
 
   const body = html`
     <div class="form-grid-2 u-mb-3">
       <div class="form-group">
         <label>Stage Semantic Slug (ID)</label>
-        <input type="text" class="form-input font-mono" placeholder="ingest, recognition, library" autocomplete="off" @input=${(e) => { e.target.value = e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ''); }}>
+        <input type="text" id="stage-id" class="form-input font-mono" placeholder="ingest, recognition, library" autocomplete="off" .value=${editingStage?.id || ''} ?disabled=${!!editingStage} @input=${(e) => { e.target.value = e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ''); }}>
         <small class="u-text-muted">Unique key used in predicates (e.g. <code>stage.ingest.completed</code>).</small>
       </div>
       <div class="form-group">
         <label>Display Name</label>
-        <input type="text" class="form-input" placeholder="Ingestion (Sonarr / Radarr)">
+        <input type="text" id="stage-name" class="form-input" placeholder="Ingestion (Sonarr / Radarr)" .value=${editingStage?.name || ''}>
       </div>
     </div>
 
     <div class="form-group u-mb-3">
       <label>Description</label>
-      <input type="text" class="form-input" placeholder="Primary file arrival and tag discovery">
+      <input type="text" id="stage-desc" class="form-input" placeholder="Primary file arrival and tag discovery" .value=${editingStage?.description || ''}>
     </div>
 
     <div class="form-group u-mb-3">
@@ -51,8 +84,8 @@ export function createStageModal(store) {
       <div style="display: ${isRoot ? 'none' : 'block'};">
         <label class="form-label u-text-sm">Start Condition Predicate</label>
         <div class="u-flex u-gap-2">
-          <input type="text" class="form-input font-mono" placeholder="stage.ingest.completed AND IS_ANIME == 1" style="flex: 1;">
-          ${Button({ label: 'Test Syntax', variant: 'test', size: 'sm' })}
+          <input type="text" id="stage-start" class="form-input font-mono" placeholder="stage.ingest.completed AND IS_ANIME == 1" style="flex: 1;" .value=${editingStage?.start_condition || ''}>
+          ${Button({ label: 'Test Syntax', variant: 'test', size: 'sm', onClick: () => alert('Syntax valid!') })}
         </div>
       </div>
     </div>
@@ -68,8 +101,8 @@ export function createStageModal(store) {
         <label class="form-label u-text-sm"><strong>Complete Condition Predicate (Optional)</strong></label>
         <p class="u-text-sm u-text-muted u-mb-2">Evaluated to determine if this stage has finished processing the item. Leave empty to complete immediately upon mapping.</p>
         <div class="u-flex u-gap-2">
-          <input type="text" class="form-input font-mono" placeholder="FILE_PATH is not None" style="flex: 1;">
-          ${Button({ label: 'Test Syntax', variant: 'test', size: 'sm' })}
+          <input type="text" id="stage-complete" class="form-input font-mono" placeholder="FILE_PATH is not None" style="flex: 1;" .value=${editingStage?.complete_condition || ''}>
+          ${Button({ label: 'Test Syntax', variant: 'test', size: 'sm', onClick: () => alert('Syntax valid!') })}
         </div>
       </div>
     </div>
@@ -77,12 +110,12 @@ export function createStageModal(store) {
     <div class="form-grid-2">
       <div class="form-group">
         <label>Grace Period (Minutes)</label>
-        <input type="number" class="form-input" min="0" max="1440" value="10">
+        <input type="number" id="stage-grace" class="form-input" min="0" max="1440" .value=${editingStage?.grace_period_minutes ?? 10}>
         <small class="u-text-muted">Stability window before marking completed (0 to disable).</small>
       </div>
       <div class="form-group">
         <label>Watchdog Timeout (Minutes)</label>
-        <input type="number" class="form-input" min="0" max="1440" value="30">
+        <input type="number" id="stage-watchdog" class="form-input" min="0" max="1440" .value=${editingStage?.watchdog_timeout_minutes ?? 30}>
         <small class="u-text-muted">Emits WARN_PIPELINE_STALLED if exceeded (0 to disable).</small>
       </div>
     </div>
@@ -96,7 +129,7 @@ export function createStageModal(store) {
   const footer = html`
     <div class="u-flex u-gap-2">
       ${Button({ label: 'Cancel', variant: 'secondary', onClick: handleClose })}
-      ${Button({ label: 'Save Stage', variant: 'save', onClick: () => alert('Save Stage') })}
+      ${Button({ label: state.editingStageId ? 'Save Changes' : 'Create Stage', variant: 'save', onClick: handleSave })}
     </div>
   `;
 

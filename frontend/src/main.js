@@ -24,7 +24,7 @@ const pages = {
   'views': createViewsPage(),
   'incidents': createIncidentsPage(),
   'gitops': createGitOpsPage(),
-  'settings': createSettingsPage()
+  'settings': createSettingsPage(router)
 };
 
 let activePage = null;
