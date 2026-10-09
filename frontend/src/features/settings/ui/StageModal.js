@@ -45,7 +45,7 @@ export function createStageModal(store) {
         newStages.push(newStage);
       }
       
-      queryCache.set(settingsKeys.all, { ...snapshot.data, stages: newStages });
+      queryCache.setData(settingsKeys.all, () => ({ ...snapshot.data, stages: newStages }));
       store.set(s => ({ ...s, isDirty: true, isStageModalOpen: false, stageIsRoot: null, stageIsSink: null, editingStageId: null }));
     } catch (err) {
       alert('Error in Save Stage: ' + err.stack);

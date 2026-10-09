@@ -48,7 +48,7 @@ export function createServiceModal(store) {
         delete newServices[state.editingServiceId]; // Handle rename slug
       }
       
-      queryCache.set(settingsKeys.all, { ...snapshot.data, services: newServices });
+      queryCache.setData(settingsKeys.all, () => ({ ...snapshot.data, services: newServices }));
       store.set(s => ({ ...s, isDirty: true, isServiceModalOpen: false, editingServiceId: null }));
     } catch (err) {
       alert('Error saving service: ' + err.stack);
