@@ -323,10 +323,13 @@ class TaskScheduler:
                                 continue
                             try:
                                 resolved_ep = ep_template.strip()
+                                context_dict = {**rec, **enrichment_data}
                                 for ph in re.findall(r"\{([^}]+)\}", ep_template):
-                                    val = extract_dotted_value(rec, ph) or rec.get(ph)
+                                    val = extract_dotted_value(context_dict, ph)
+                                    if val is None:
+                                        val = context_dict.get(ph)
                                     if val is not None:
-                                        resolved_ep = resolved_ep.replace(f"{{{ph}}}", str(val))
+                                        resolved_ep = resolved_ep.replace(f"{{{ph}}}", urllib.parse.quote(str(val)))
 
                                 if "{" not in resolved_ep:
                                     enrich_url, enrich_headers = prepare_service_request(
@@ -451,13 +454,16 @@ class TaskScheduler:
             if not ep_template or not ep_template.strip():
                 continue
             resolved_ep = ep_template.strip()
+            context_dict = {**row_dict, **enrichment_data}
             missing_ph = False
             for ph in re.findall(r"\{([^}]+)\}", ep_template):
-                val = row_dict.get(ph)
+                val = extract_dotted_value(context_dict, ph)
                 if val is None:
-                    val = row_dict.get(ph.upper())
+                    val = context_dict.get(ph)
                 if val is None:
-                    val = row_dict.get(ph.lower())
+                    val = context_dict.get(ph.upper())
+                if val is None:
+                    val = context_dict.get(ph.lower())
                 if val is not None:
                     resolved_ep = resolved_ep.replace(f"{{{ph}}}", urllib.parse.quote(str(val)))
                 else:
