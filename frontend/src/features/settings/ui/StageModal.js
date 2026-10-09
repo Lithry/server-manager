@@ -89,7 +89,15 @@ export function createStageModal(store) {
         <label class="form-label u-text-sm">Start Condition Predicate</label>
         <div class="u-flex u-gap-2">
           <input type="text" id="stage-start" class="form-input font-mono" placeholder="stage.ingest.completed AND IS_ANIME == 1" style="flex: 1;" .value=${editingStage?.start_condition || ''}>
-          ${Button({ label: 'Test Syntax', variant: 'test', size: 'sm', onClick: () => alert('Mockup: La validación de sintaxis no está conectada al parser todavía.') })}
+          ${Button({ label: 'Test Syntax', variant: 'test', size: 'sm', onClick: async () => {
+            const exp = document.getElementById('stage-start').value;
+            if (!exp.trim()) { alert('Expression is empty!'); return; }
+            try {
+              const res = await (await fetch('/api/v1/settings/test-predicate', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ expression: exp }) })).json();
+              if (res.valid) alert('Syntax Valid! ✅');
+              else alert('Syntax Error ❌: ' + res.message);
+            } catch(e) { alert('Validation failed: ' + e.message); }
+          } })}
         </div>
       </div>
     </div>
@@ -106,7 +114,15 @@ export function createStageModal(store) {
         <p class="u-text-sm u-text-muted u-mb-2">Evaluated to determine if this stage has finished processing the item. Leave empty to complete immediately upon mapping.</p>
         <div class="u-flex u-gap-2">
           <input type="text" id="stage-complete" class="form-input font-mono" placeholder="FILE_PATH is not None" style="flex: 1;" .value=${editingStage?.complete_condition || ''}>
-          ${Button({ label: 'Test Syntax', variant: 'test', size: 'sm', onClick: () => alert('Mockup: La validación de sintaxis no está conectada al parser todavía.') })}
+          ${Button({ label: 'Test Syntax', variant: 'test', size: 'sm', onClick: async () => {
+            const exp = document.getElementById('stage-complete').value;
+            if (!exp.trim()) { alert('Expression is empty!'); return; }
+            try {
+              const res = await (await fetch('/api/v1/settings/test-predicate', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ expression: exp }) })).json();
+              if (res.valid) alert('Syntax Valid! ✅');
+              else alert('Syntax Error ❌: ' + res.message);
+            } catch(e) { alert('Validation failed: ' + e.message); }
+          } })}
         </div>
       </div>
     </div>

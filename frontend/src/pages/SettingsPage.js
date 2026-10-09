@@ -111,8 +111,10 @@ export function createSettingsPage(router) {
               ${renderTabButton('notifications', 'bell', 'Notification Triggers')}
               ${renderTabButton('engine', 'settings', 'Engine & Retention')}
             </div>
-            ${Button({ 
-              label: 'Save All Settings', 
+            <div class="u-flex u-items-center u-gap-3">
+              ${state.isDirty ? html`<div title="Unsaved modifications" style="display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; background: var(--color-danger); color: white; border-radius: 50%; font-weight: bold; font-size: 12px; cursor: help;">!</div>` : nothing}
+              ${Button({ 
+                label: 'Save All Settings', 
               variant: state.isDirty ? 'add' : 'secondary', 
               size: 'sm', 
               loading: saving, 
@@ -121,7 +123,7 @@ export function createSettingsPage(router) {
                 const snapshot = queryCache.read(settingsKeys.all);
                 store.set(s => ({ ...s, saving: true }));
                 try {
-                  await http.post('/api/v1/settings', snapshot.data);
+                  await http.put('/api/v1/settings', snapshot.data);
                   store.set(s => ({ ...s, isDirty: false, saving: false }));
                   alert('Settings saved successfully!');
                 } catch (err) {
@@ -130,6 +132,7 @@ export function createSettingsPage(router) {
                 }
               } 
             })}
+            </div>
           </div>
           
           ${activeTab === 'services' ? createServicesPanel(store, servicesData, globalPoll) : nothing}
