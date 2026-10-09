@@ -15,40 +15,44 @@ export function createServiceModal(store) {
   };
 
   const handleSave = () => {
-    const srvId = document.getElementById('srv-id').value.trim();
-    if (!srvId) { alert('Service ID is required'); return; }
-    
-    // Parse enrichments from textarea
-    const enrichRaw = document.getElementById('srv-enrich').value.trim();
-    const enrichments = {};
-    if (enrichRaw) {
-      enrichRaw.split('\n').forEach(line => {
-        const parts = line.split(':');
-        if (parts.length >= 2) {
-          enrichments[parts[0].trim()] = parts.slice(1).join(':').trim();
-        }
-      });
-    }
+    try {
+      const srvId = document.getElementById('srv-id').value.trim();
+      if (!srvId) { alert('Service ID is required'); return; }
+      
+      // Parse enrichments from textarea
+      const enrichRaw = document.getElementById('srv-enrich').value.trim();
+      const enrichments = {};
+      if (enrichRaw) {
+        enrichRaw.split('\n').forEach(line => {
+          const parts = line.split(':');
+          if (parts.length >= 2) {
+            enrichments[parts[0].trim()] = parts.slice(1).join(':').trim();
+          }
+        });
+      }
 
-    const newService = {
-      name: document.getElementById('srv-name').value.trim() || srvId,
-      base_url: document.getElementById('srv-url').value.trim(),
-      api_key: document.getElementById('srv-api').value.trim(),
-      poll_interval_seconds: document.getElementById('chk-service-inherit-poll').checked ? null : 60,
-      primary_endpoint: document.getElementById('srv-endpoint').value.trim(),
-      pipeline_key_template: document.getElementById('srv-pipeline').value.trim(),
-      enrichment_endpoints: enrichments,
-      enabled: document.getElementById('chk-service-enabled').checked,
-      field_mappings: editingService?.field_mappings || []
-    };
-    
-    const newServices = { ...services, [srvId]: newService };
-    if (state.editingServiceId && state.editingServiceId !== srvId) {
-      delete newServices[state.editingServiceId]; // Handle rename slug
+      const newService = {
+        name: document.getElementById('srv-name').value.trim() || srvId,
+        base_url: document.getElementById('srv-url').value.trim(),
+        api_key: document.getElementById('srv-api').value.trim(),
+        poll_interval_seconds: document.getElementById('chk-service-inherit-poll').checked ? null : 60,
+        primary_endpoint: document.getElementById('srv-endpoint').value.trim(),
+        pipeline_key_template: document.getElementById('srv-pipeline').value.trim(),
+        enrichment_endpoints: enrichments,
+        enabled: document.getElementById('chk-service-enabled').checked,
+        field_mappings: editingService?.field_mappings || []
+      };
+      
+      const newServices = { ...services, [srvId]: newService };
+      if (state.editingServiceId && state.editingServiceId !== srvId) {
+        delete newServices[state.editingServiceId]; // Handle rename slug
+      }
+      
+      queryCache.set(settingsKeys.all, { ...snapshot.data, services: newServices });
+      store.set(s => ({ ...s, isDirty: true, isServiceModalOpen: false, editingServiceId: null }));
+    } catch (err) {
+      alert('Error saving service: ' + err.stack);
     }
-    
-    queryCache.set(settingsKeys.all, { ...snapshot.data, services: newServices });
-    store.set(s => ({ ...s, isDirty: true, isServiceModalOpen: false, editingServiceId: null }));
   };
 
   const applyPreset = (preset) => {

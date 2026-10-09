@@ -23,29 +23,33 @@ export function createStageModal(store) {
   };
 
   const handleSave = () => {
-    const stageId = document.getElementById('stage-id').value.trim();
-    if (!stageId) { alert('Stage ID is required'); return; }
-    
-    const newStage = {
-      id: stageId,
-      name: document.getElementById('stage-name').value.trim() || stageId,
-      description: document.getElementById('stage-desc').value.trim(),
-      services: [], // Mocked for now
-      start_condition: isRoot ? null : (document.getElementById('stage-start')?.value.trim() || null),
-      complete_condition: isSink ? null : (document.getElementById('stage-complete')?.value.trim() || null),
-      grace_period_minutes: parseInt(document.getElementById('stage-grace').value) || 0,
-      watchdog_timeout_minutes: parseInt(document.getElementById('stage-watchdog').value) || 0
-    };
-    
-    let newStages = [...stages];
-    if (state.editingStageId) {
-      newStages = newStages.map(s => s.id === state.editingStageId ? newStage : s);
-    } else {
-      newStages.push(newStage);
+    try {
+      const stageId = document.getElementById('stage-id').value.trim();
+      if (!stageId) { alert('Stage ID is required'); return; }
+      
+      const newStage = {
+        id: stageId,
+        name: document.getElementById('stage-name').value.trim() || stageId,
+        description: document.getElementById('stage-desc').value.trim(),
+        services: [], // Mocked for now
+        start_condition: isRoot ? null : (document.getElementById('stage-start')?.value.trim() || null),
+        complete_condition: isSink ? null : (document.getElementById('stage-complete')?.value.trim() || null),
+        grace_period_minutes: parseInt(document.getElementById('stage-grace').value) || 0,
+        watchdog_timeout_minutes: parseInt(document.getElementById('stage-watchdog').value) || 0
+      };
+      
+      let newStages = [...stages];
+      if (state.editingStageId) {
+        newStages = newStages.map(s => s.id === state.editingStageId ? newStage : s);
+      } else {
+        newStages.push(newStage);
+      }
+      
+      queryCache.set(settingsKeys.all, { ...snapshot.data, stages: newStages });
+      store.set(s => ({ ...s, isDirty: true, isStageModalOpen: false, stageIsRoot: null, stageIsSink: null, editingStageId: null }));
+    } catch (err) {
+      alert('Error in Save Stage: ' + err.stack);
     }
-    
-    queryCache.set(settingsKeys.all, { ...snapshot.data, stages: newStages });
-    store.set(s => ({ ...s, isDirty: true, isStageModalOpen: false, stageIsRoot: null, stageIsSink: null, editingStageId: null }));
   };
 
   const body = html`
@@ -85,7 +89,7 @@ export function createStageModal(store) {
         <label class="form-label u-text-sm">Start Condition Predicate</label>
         <div class="u-flex u-gap-2">
           <input type="text" id="stage-start" class="form-input font-mono" placeholder="stage.ingest.completed AND IS_ANIME == 1" style="flex: 1;" .value=${editingStage?.start_condition || ''}>
-          ${Button({ label: 'Test Syntax', variant: 'test', size: 'sm', onClick: () => alert('Syntax valid!') })}
+          ${Button({ label: 'Test Syntax', variant: 'test', size: 'sm', onClick: () => alert('Mockup: La validación de sintaxis no está conectada al parser todavía.') })}
         </div>
       </div>
     </div>
@@ -102,7 +106,7 @@ export function createStageModal(store) {
         <p class="u-text-sm u-text-muted u-mb-2">Evaluated to determine if this stage has finished processing the item. Leave empty to complete immediately upon mapping.</p>
         <div class="u-flex u-gap-2">
           <input type="text" id="stage-complete" class="form-input font-mono" placeholder="FILE_PATH is not None" style="flex: 1;" .value=${editingStage?.complete_condition || ''}>
-          ${Button({ label: 'Test Syntax', variant: 'test', size: 'sm', onClick: () => alert('Syntax valid!') })}
+          ${Button({ label: 'Test Syntax', variant: 'test', size: 'sm', onClick: () => alert('Mockup: La validación de sintaxis no está conectada al parser todavía.') })}
         </div>
       </div>
     </div>
