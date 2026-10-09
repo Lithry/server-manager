@@ -28,7 +28,7 @@ export function createStagesPanel(store, stagesData = []) {
           : stagesData.map((stage, i) => {
               const type = getStageType(stage);
               return html`
-              <div style="padding: var(--space-4); border-bottom: ${i === stagesData.length - 1 ? 'none' : '1px solid var(--color-border)'}; border-left: 4px solid ${type.color}; background: var(--color-bg-card); transition: background 0.2s;">
+              <div style="padding: var(--space-4); border-bottom: ${i === stagesData.length - 1 ? 'none' : '1px solid var(--color-border)'}; border-left: 4px solid ${type.color}; background: color-mix(in srgb, ${type.color} 5%, var(--color-bg-card)); transition: background 0.2s;">
                 <div class="u-flex u-items-center u-justify-between">
                   <div class="u-flex u-items-center u-gap-3">
                     <strong style="color: var(--color-text); font-size: 1.1rem;">${stage.name}</strong>
@@ -41,9 +41,13 @@ export function createStagesPanel(store, stagesData = []) {
                   </div>
                 </div>
                 <div class="u-text-sm u-text-muted u-mt-1">${stage.description || 'No description provided.'}</div>
-                <div class="u-text-xs u-font-mono u-text-muted u-mt-3" style="background: var(--color-bg-subtle); padding: 8px; border-radius: 4px; border: 1px dashed var(--color-border);">
-                  <div style="margin-bottom: 4px;"><strong style="color: var(--color-success);">START CONDITION:</strong> ${stage.start_condition || 'NULL (IMMEDIATE)'}</div>
-                  <div><strong style="color: var(--color-warning);">COMPLETE CONDITION:</strong> ${stage.complete_condition || 'NULL (SINK)'}</div>
+                <div class="u-text-xs u-font-mono u-mt-3" style="background: color-mix(in srgb, var(--color-bg-card) 50%, transparent); padding: 8px; border-radius: 4px; border: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent);">
+                  <div style="margin-bottom: 4px; color: var(--color-success);">
+                    <strong>START CONDITION:</strong> ${stage.start_condition ? stage.start_condition : '✓ NULL (ROOT STAGE - Immediate Execution)'}
+                  </div>
+                  <div style="color: var(--color-warning);">
+                    <strong>COMPLETE CONDITION:</strong> ${stage.complete_condition ? stage.complete_condition : '✓ NULL (SINK STAGE - Ends on Start)'}
+                  </div>
                 </div>
               </div>
             `;
