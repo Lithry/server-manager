@@ -48,10 +48,13 @@ export function createSettingsPage() {
       if (status === 'loading' && !data) return html`<p class="u-text-muted">Loading settings...</p>`;
       if (status === 'error' && !data) return html`<p class="u-text-danger">Error: ${error?.message}</p>`;
 
-      const config = data?.system_config || {};
-      const servicesData = data?.upstream_services || {};
-      const stagesData = data?.pipeline_stages || [];
-      const globalPoll = config.global_poll_interval_seconds || 300;
+      const config = {
+        retention_days: data?.retention_days || 30,
+        global_poll_interval_seconds: data?.global_poll_interval_seconds || 300
+      };
+      const servicesData = data?.services || {};
+      const stagesData = data?.stages || [];
+      const globalPoll = config.global_poll_interval_seconds;
 
       const renderTabButton = (id, icon, label) => {
         const isActive = activeTab === id;
