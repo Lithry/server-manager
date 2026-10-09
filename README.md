@@ -6,8 +6,10 @@
 
 ## 🌟 Core Features
 
-1. **Universal Ingestion Pipeline (`SERVICES_PIPELINE`) & Dynamic Schema Engine**:
-   - Centralizes media tracking and application telemetry across external services (Sonarr, Radarr, Shoko Server, Jellyfin, AniBridge, etc.).
+1. **Universal Multi-Pipeline Architecture & Dynamic Schema Engine**:
+   - Centralizes telemetry and item tracking across arbitrary, isolated workflows registered in `PIPELINES`:
+     - Dynamically provisions independent SQLite tables per pipeline: `PIPELINE_<SLUG>` (e.g. `PIPELINE_MEDIA`, `PIPELINE_BACKUPS`).
+     - Eliminates schema bloat: media metadata columns remain cleanly decoupled from backup or document tracking.
    - **Dynamic Schema Mapper**: Live-sample service APIs, discover scalar arrays (`genres`, `tags`), and automatically apply sanitized columns (`^[A-Z0-9_]+$`).
    - **Namespaced Multi-Enrichment**: Configure multiple secondary API endpoints per service without key collisions (e.g., `series: /api/v3/series/{seriesId}`, `episode: /api/v3/episode/{episodeId}`, `movie: /api/v3/movie/{movieId}`).
    - **Generic Dotted-Path List Projection**: Extract attributes across arrays of nested objects (e.g. `movie.alternateTitles.title` or `[*]`) into clean string lists without hardcoded schemas.
@@ -28,9 +30,12 @@
      - Resolves anime status directly from `/api/v3/tag` in Sonarr/Radarr. Zero regex or deduction from `FILE_PATH`.
      - Detects misclassified items (`WARN_ANIME_TAG_MISCLASSIFIED` if Jellyfin finds VFS with `IS_ANIME = 0`).
 
-3. **Visual SQL View Builder (`MEDIA_CATALOG` Preset)**:
-   - Create custom tables and views over `SERVICES_PIPELINE` using visual SQL builders.
-   - Factory preset for consolidated playable media libraries (`WHERE JELLYFIN_STATUS = 'AVAILABLE'`).
+3. **Dual-Mode Table & View Builder (`MEDIA_CATALOG` Preset)**:
+   - Create custom derived datasets over any active pipeline table supporting two distinct modes:
+     - **Persistent Materialized Tables**: Real destination SQLite tables with automated incremental Upsert synchronization. Decoupled 100% from pipeline retention to preserve catalogs and inventories even when operational pipeline history is pruned.
+     - **Virtual Dynamic Views**: Pure on-the-fly SQL views for ad-hoc inspection, temporary filtering, and rapid schema prototyping.
+   - **One-Click Promotion**: Test queries and schemas as a Dynamic View, then promote to a Persistent Materialized Table once validated.
+   - Factory preset for consolidated playable media library (`CATALOG_MEDIA`).
 
 4. **Extensible Error Index & System Incidents**:
    - Normalized incident tracker (`SYSTEM_INCIDENTS`) linked to an extensible error definition catalog (`ERROR_INDEX`).
@@ -45,8 +50,12 @@
    - Live streaming execution console directly in the WebUI.
 
 7. **Three-Tier Decoupled LLM Architecture (Rule 9)**:
-   - Lean read-only meta-tools API (`GET /api/v1/meta/query`) for edge LLMs (LibreChat / `llama3.2:3b`).
-   - Purely passive and informational; zero destructive host actions.
+   - Lean REST API for edge LLMs (LibreChat / Ollama `llama3.2:3b`) with minimal token footprint (<80 tokens prefill):
+     - `GET /api/v1/meta/status`: Compact system health and disk anti-wake state.
+     - `GET /api/v1/meta/incidents`: Unresolved anomaly catalog with priority tags.
+     - `GET /api/v1/meta/pipelines/{id}/summary`: Aggregated stage progression counts.
+     - `POST /api/v1/remedies/{remedy_id}/execute`: Triggers pre-approved operational runbook remedies with audit logging.
+   - Purely decoupled telemetry; zero raw database connections, log scraping, or unconstrained shell execution.
 
 ---
 

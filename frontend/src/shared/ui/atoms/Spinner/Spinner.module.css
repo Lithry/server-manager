@@ -1,0 +1,10 @@
+.spinner {
+  animation: spin 1.2s linear infinite;
+  color: inherit;
+}
+@keyframes spin {
+  100% { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation-duration: 4s; }
+}

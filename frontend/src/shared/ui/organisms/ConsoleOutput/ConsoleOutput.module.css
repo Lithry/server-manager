@@ -1,0 +1,36 @@
+.console {
+  background: #000;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.header {
+  background: var(--color-bg-card);
+  padding: var(--space-2) var(--space-3);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+}
+.dot {
+  width: 10px; height: 10px; border-radius: 50%;
+}
+.dot[data-status="info"] { background: var(--color-info); }
+.dot[data-status="warning"] { background: var(--color-warning); }
+.dot[data-status="danger"] { background: var(--color-danger); }
+.statusText {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+.output {
+  padding: var(--space-3);
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  color: var(--color-console-text);
+  white-space: pre-wrap;
+  flex: 1;
+  overflow-y: auto;
+}

@@ -1,0 +1,20 @@
+{
+  "name": "server-manager-frontend",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "lit-html": "^3.1.2",
+    "@fontsource/inter": "^5.0.17",
+    "@fontsource/jetbrains-mono": "^5.0.20"
+  },
+  "devDependencies": {
+    "vite": "^5.1.4",
+    "lightningcss": "^1.24.0"
+  }
+}
