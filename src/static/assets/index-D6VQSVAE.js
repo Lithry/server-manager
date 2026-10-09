@@ -496,7 +496,7 @@ ERROR: `+i.message}))}};return{mount(s){t=S.subscribe(ve.all,()=>s()),o=e.subscr
                     ${s.start_condition?"":"✓ "}<strong>START CONDITION:</strong> ${s.start_condition?s.start_condition:"NULL (ROOT STAGE - Immediate Execution)"}
                   </div>
                   <div style="color: var(--color-warning);">
-                    ${s.complete_condition?"":"✓ "}<strong>COMPLETE CONDITION:</strong> ${s.complete_condition?s.complete_condition:"NULL (SINK STAGE - Ends on Start)"}
+                    ${s.complete_condition?"":"✗ "}<strong>COMPLETE CONDITION:</strong> ${s.complete_condition?s.complete_condition:"NULL (SINK STAGE - Ends on Start)"}
                   </div>
                 </div>
               </div>

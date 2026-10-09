@@ -46,7 +46,7 @@ export function createStagesPanel(store, stagesData = []) {
                     ${!stage.start_condition ? '✓ ' : ''}<strong>START CONDITION:</strong> ${stage.start_condition ? stage.start_condition : 'NULL (ROOT STAGE - Immediate Execution)'}
                   </div>
                   <div style="color: var(--color-warning);">
-                    ${!stage.complete_condition ? '✓ ' : ''}<strong>COMPLETE CONDITION:</strong> ${stage.complete_condition ? stage.complete_condition : 'NULL (SINK STAGE - Ends on Start)'}
+                    ${!stage.complete_condition ? '✗ ' : ''}<strong>COMPLETE CONDITION:</strong> ${stage.complete_condition ? stage.complete_condition : 'NULL (SINK STAGE - Ends on Start)'}
                   </div>
                 </div>
               </div>
