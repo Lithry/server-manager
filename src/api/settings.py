@@ -37,7 +37,7 @@ async def get_settings() -> Settings:
     return await config_manager.get_settings()
 
 
-@router.put("")
+@router.post("")
 async def update_settings(settings: Settings) -> Settings:
     """Update settings, auto-migrate database columns, and reload background scheduler."""
     services_dict = getattr(settings, "services", {}) or getattr(settings, "apps", {})

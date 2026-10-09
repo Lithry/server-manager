@@ -112,10 +112,10 @@ export function createSettingsPage(router) {
               ${renderTabButton('engine', 'settings', 'Engine & Retention')}
             </div>
             <div class="u-flex u-items-center u-gap-3">
-              ${state.isDirty ? html`<div title="Unsaved modifications" style="display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; background: var(--color-danger); color: white; border-radius: 50%; font-weight: bold; font-size: 12px; cursor: help;">!</div>` : nothing}
+              <div style="position: relative; display: inline-block;">
               ${Button({ 
                 label: 'Save All Settings', 
-              variant: state.isDirty ? 'add' : 'secondary', 
+              variant: 'save', 
               size: 'sm', 
               loading: saving, 
               disabled: !state.isDirty,
@@ -123,7 +123,7 @@ export function createSettingsPage(router) {
                 const snapshot = queryCache.read(settingsKeys.all);
                 store.set(s => ({ ...s, saving: true }));
                 try {
-                  await http.put('/api/v1/settings', snapshot.data);
+                  await http.post('/api/v1/settings', snapshot.data);
                   store.set(s => ({ ...s, isDirty: false, saving: false }));
                   alert('Settings saved successfully!');
                 } catch (err) {
@@ -132,6 +132,8 @@ export function createSettingsPage(router) {
                 }
               } 
             })}
+              ${state.isDirty ? html`<div title="Unsaved modifications" style="position: absolute; top: -6px; right: -6px; display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; background: var(--color-danger); color: white; border-radius: 50%; font-weight: bold; font-size: 11px; cursor: help; pointer-events: none; z-index: 10;">!</div>` : nothing}
+            </div>
             </div>
           </div>
           
