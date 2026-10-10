@@ -64,7 +64,7 @@ class AddColumnRequest(BaseModel):
 
 class SandboxEnrichmentRequest(BaseModel):
     service_id: str
-    record_id: int
+    record_id: Optional[int] = None
     enrichment_endpoints: Dict[str, str]
 
 
@@ -390,11 +390,13 @@ async def sandbox_enrichment(req: SandboxEnrichmentRequest) -> Dict[str, Any]:
     if not service_cfg.base_url:
         raise HTTPException(status_code=400, detail=f"Service '{req.service_id}' has no base_url configured")
 
-    # Fetch the base record
-    rows = await db_manager.query("SELECT * FROM SERVICES_PIPELINE WHERE ID = ?", (req.record_id,))
-    if not rows:
-        raise HTTPException(status_code=404, detail=f"Pipeline record with ID {req.record_id} not found")
-    row_dict = dict(rows[0])
+    # Fetch the base record if provided
+    row_dict = {}
+    if req.record_id:
+        rows = await db_manager.query("SELECT * FROM SERVICES_PIPELINE WHERE ID = ?", (req.record_id,))
+        if not rows:
+            raise HTTPException(status_code=404, detail=f"Pipeline record with ID {req.record_id} not found")
+        row_dict = dict(rows[0])
 
     enrichment_data: Dict[str, Any] = {}
     from src.core.scheduler import extract_dotted_value

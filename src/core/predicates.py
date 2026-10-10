@@ -3,6 +3,7 @@
 import ast
 import operator
 import re
+import json
 from typing import Any, Dict, Optional, Tuple
 
 
@@ -195,6 +196,10 @@ class TransformerEvaluator:
             "len": len,
             "lower": lambda s: str(s).lower() if s is not None else "",
             "upper": lambda s: str(s).upper() if s is not None else "",
+            "merge": lambda existing, new: (
+                (json.loads(existing) if isinstance(existing, str) and existing.startswith("[") else ([existing] if existing else [])) +
+                (json.loads(new) if isinstance(new, str) and new.startswith("[") else ([new] if new else []))
+            ),
         }
         if context:
             safe_locals.update(context)

@@ -110,7 +110,7 @@ export function createSettingsPage(router) {
           <div class="u-flex u-items-center u-justify-between u-mb-2">
             <div class="u-flex u-gap-2">
               ${renderTabButton('services', 'database', 'Services')}
-              ${renderTabButton('sandbox', 'code', 'API Sandbox')}
+              ${renderTabButton('sandbox', 'terminal', 'API Sandbox')}
               ${renderTabButton('mappings', 'code', 'Field Mappings')}
               ${renderTabButton('stages', 'activity', 'Stages & Predicates')}
               ${renderTabButton('notifications', 'bell', 'Notification Triggers')}

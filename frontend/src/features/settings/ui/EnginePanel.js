@@ -1,29 +1,43 @@
 import { html } from 'lit-html';
 import { Button } from '../../../shared/ui/atoms/Button/Button.js';
+import { queryCache } from '../../../shared/api/index.js';
+import { settingsKeys } from '../../settings/api.js';
 
 export function createEnginePanel(store, config = {}) {
   const retention = config.retention_days || 30;
   const globalPoll = config.global_poll_interval_seconds || 300;
 
-  return html`
-    <div style="background: var(--color-bg-card); border-radius: var(--radius-md); border: 1px solid var(--color-border);">
-      <div style="padding: var(--space-4); border-bottom: 1px solid var(--color-border);">
-        <h3 style="margin: 0; font-size: 1rem; color: var(--color-text);">Storage & Engine Maintenance</h3>
-        <p class="u-text-muted u-text-sm u-mt-1" style="margin-bottom: 0;">Control data retention, global polling cadence, and inspect custom polling overrides.</p>
-      </div>
-      
-      <div style="padding: var(--space-4);">
-        <div class="form-grid-2 u-mb-4">
-          <div class="form-group">
-            <label>Data Retention (Days)</label>
-            <input type="number" class="form-input" min="1" max="365" .value=${retention}>
-            <small class="u-text-muted">Rows older than retention window will be pruned during maintenance routines.</small>
-          </div>
-          <div class="form-group">
-            <label>Global Polling Interval (Seconds)</label>
-            <input type="number" class="form-input" min="10" max="86400" .value=${globalPoll}>
-            <small class="u-text-muted">Default polling cadence for all services unless specifically overridden.</small>
-          </div>
+    return html`
+      <div style="background: var(--color-bg-card); border-radius: var(--radius-md); border: 1px solid var(--color-border);">
+        <div style="padding: var(--space-4); border-bottom: 1px solid var(--color-border);">
+          <h3 style="margin: 0; font-size: 1rem; color: var(--color-text);">Storage & Engine Maintenance</h3>
+          <p class="u-text-muted u-text-sm u-mt-1" style="margin-bottom: 0;">Control data retention, global polling cadence, and inspect custom polling overrides.</p>
+        </div>
+        
+        <div style="padding: var(--space-4);">
+          <div class="form-grid-2 u-mb-4">
+            <div class="form-group">
+              <label>Data Retention (Days)</label>
+              <input type="number" class="form-input" min="1" max="365" .value=${retention} 
+                @input=${e => {
+                  const snapshot = queryCache.read(settingsKeys.all);
+                  const updated = { ...snapshot.data, retention_days: parseInt(e.target.value, 10) || 30 };
+                  queryCache.setData(settingsKeys.all, () => updated);
+                  store.set(s => ({ ...s, isDirty: true }));
+                }}>
+              <small class="u-text-muted">Rows older than retention window will be pruned during maintenance routines.</small>
+            </div>
+            <div class="form-group">
+              <label>Global Polling Interval (Seconds)</label>
+              <input type="number" class="form-input" min="10" max="86400" .value=${globalPoll}
+                @input=${e => {
+                  const snapshot = queryCache.read(settingsKeys.all);
+                  const updated = { ...snapshot.data, global_poll_interval_seconds: parseInt(e.target.value, 10) || 300 };
+                  queryCache.setData(settingsKeys.all, () => updated);
+                  store.set(s => ({ ...s, isDirty: true }));
+                }}>
+              <small class="u-text-muted">Default polling cadence for all services unless specifically overridden.</small>
+            </div>
         </div>
 
         <div style="background: var(--color-bg-subtle); padding: var(--space-3); border-radius: var(--radius-md); border: 1px solid var(--color-border);" class="u-mb-4">
