@@ -371,7 +371,7 @@ class TaskScheduler:
 
                         if mapping.transformer:
                             try:
-                                val = TransformerEvaluator.evaluate(mapping.transformer, val)
+                                val = TransformerEvaluator.evaluate(mapping.transformer, val, context_dict)
                             except Exception:
                                 pass
 
@@ -503,7 +503,7 @@ class TaskScheduler:
 
             if mapping.transformer:
                 try:
-                    val = TransformerEvaluator.evaluate(mapping.transformer, val)
+                    val = TransformerEvaluator.evaluate(mapping.transformer, val, context_dict)
                 except Exception:
                     pass
 
