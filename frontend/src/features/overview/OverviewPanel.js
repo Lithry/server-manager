@@ -68,7 +68,7 @@ export function createOverviewPanel() {
                       <span class="u-text-sm"><strong>${s.name}</strong> <span class="u-text-muted">(${s.service_ids.join(', ')})</span></span>
                     </div>
                     <div style="text-align: right;">
-                      <span class="u-text-xs u-text-success">Active</span>
+                      ${s.enabled ? html`<span class="u-text-xs u-text-success">Active</span>` : html`<span class="u-text-xs u-text-muted">Inactive</span>`}
                     </div>
                   </div>
                 `) : html`<div class="u-text-muted u-text-center u-mt-4">No stages configured.</div>`}
