@@ -1,13 +1,20 @@
-import { html } from 'lit-html';
+import { html, nothing } from 'lit-html';
 import { createPipelineTable } from '../features/pipeline/PipelineTable.js';
 import { pipelineApi, pipelineKeys } from '../features/pipeline/api.js';
 import { queryCache, http } from '../shared/api/index.js';
 import { Button } from '../shared/ui/atoms/Button/Button.js';
 import { ConfirmDialog } from '../shared/ui/organisms/ConfirmDialog/ConfirmDialog.js';
+import { createStore } from '../shared/lib/lib.js';
+import { createManageColumnsModal } from '../features/pipeline/ui/ManageColumnsModal.js';
 
 export function createPipelinePage() {
+  const store = createStore({
+    isManageColumnsModalOpen: false,
+    columnsData: [],
+    isLoadingColumns: false
+  });
   const table = createPipelineTable();
-  let unsub;
+  let unsub, unsubStore;
 
   async function handlePurge() {
     const confirmed = await ConfirmDialog({
@@ -30,10 +37,12 @@ export function createPipelinePage() {
   return {
     mount(onUpdate) {
       unsub = queryCache.subscribe(pipelineKeys.all, () => onUpdate());
+      unsubStore = store.subscribe(() => onUpdate());
       pipelineApi.getPipeline(); // Triggers fetch
     },
     unmount() {
       if (unsub) unsub();
+      if (unsubStore) unsubStore();
     },
     view() {
       return html`
@@ -41,7 +50,16 @@ export function createPipelinePage() {
           <div class="u-flex u-items-center u-justify-between">
             <div class="u-flex u-gap-2">
               ${Button({ label: '+ Add Column', variant: 'add', size: 'sm', onClick: () => alert('Add Column') })}
-              ${Button({ label: 'Manage Columns', variant: 'secondary', size: 'sm', icon: 'settings', onClick: () => alert('Manage Columns') })}
+              ${Button({ label: 'Manage Columns', variant: 'secondary', size: 'sm', icon: 'settings', onClick: async () => {
+                store.set(s => ({ ...s, isManageColumnsModalOpen: true, isLoadingColumns: true }));
+                try {
+                  const cols = await http.get('/api/v1/pipeline/columns');
+                  store.set(s => ({ ...s, columnsData: cols, isLoadingColumns: false }));
+                } catch (e) {
+                  alert('Error loading columns: ' + e.message);
+                  store.set(s => ({ ...s, isLoadingColumns: false }));
+                }
+              }})}
               ${Button({ label: 'Sample Service API', variant: 'test', size: 'sm', icon: 'search', onClick: () => alert('Sample API') })}
             </div>
             <div>
@@ -53,6 +71,8 @@ export function createPipelinePage() {
             </div>
           </div>
           ${table.view()}
+          
+          ${store.get().isManageColumnsModalOpen ? createManageColumnsModal(store) : nothing}
         </div>
       `;
     }

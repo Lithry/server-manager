@@ -1,5 +1,7 @@
 import { html, nothing } from 'lit-html';
 import { Button } from '../../../shared/ui/atoms/Button/Button.js';
+import { queryCache } from '../../../shared/api/index.js';
+import { settingsKeys } from '../api.js';
 
 export function createMappingsPanel(store, servicesData = {}) {
   const serviceKeys = Object.keys(servicesData);
@@ -10,7 +12,31 @@ export function createMappingsPanel(store, servicesData = {}) {
   };
 
   const handleAddMapping = () => {
-    store.set(s => ({ ...s, isMappingModalOpen: true }));
+    store.set(s => ({ 
+      ...s, 
+      isMappingModalOpen: true,
+      editingMapping: { source_field: '', target_column: '', data_type: 'TEXT', transformer: '' },
+      editingMappingIndex: -1
+    }));
+  };
+
+  const handleEditMapping = (m, index) => {
+    store.set(s => ({
+      ...s,
+      isMappingModalOpen: true,
+      editingMapping: { ...m },
+      editingMappingIndex: index
+    }));
+  };
+
+  const handleDelete = (index) => {
+    if (confirm('Are you sure you want to delete this mapping?')) {
+      const snapshot = queryCache.read(settingsKeys.all);
+      const newSettings = { ...snapshot.data };
+      newSettings.services[selectedService].field_mappings.splice(index, 1);
+      queryCache.setData(settingsKeys.all, () => newSettings);
+      store.set(s => ({ ...s, isDirty: true }));
+    }
   };
 
   const renderServiceSelect = () => {
@@ -54,7 +80,7 @@ export function createMappingsPanel(store, servicesData = {}) {
           }
           return html`
             <div class="u-flex u-flex-col u-gap-3">
-              ${s.field_mappings.map(m => html`
+              ${s.field_mappings.map((m, i) => html`
                 <div style="background: var(--color-bg-subtle); padding: var(--space-3); border-radius: var(--radius-md); border: 1px solid var(--color-border);" class="u-flex u-items-center u-justify-between">
                   <div>
                     <strong style="color: var(--color-text); font-family: monospace;">${m.source_field}</strong>
@@ -64,8 +90,8 @@ export function createMappingsPanel(store, servicesData = {}) {
                     ${m.transformer ? html`<div class="u-text-xs u-text-muted u-mt-1 font-mono">Transformer: ${m.transformer}</div>` : nothing}
                   </div>
                   <div class="u-flex u-gap-2">
-                    ${Button({ label: 'Edit', variant: 'ghost', size: 'sm', onClick: () => alert('Edit mapping (coming soon)') })}
-                    ${Button({ label: 'Delete', variant: 'delete', size: 'sm', onClick: () => confirm('Delete mapping?') })}
+                    ${Button({ label: 'Edit', variant: 'ghost', size: 'sm', onClick: () => handleEditMapping(m, i) })}
+                    ${Button({ label: 'Delete', variant: 'delete', size: 'sm', onClick: () => handleDelete(i) })}
                   </div>
                 </div>
               `)}

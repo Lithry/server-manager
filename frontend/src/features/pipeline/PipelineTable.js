@@ -5,10 +5,10 @@ import { queryCache } from '../../shared/api/index.js';
 
 import { Button } from '../../shared/ui/atoms/Button/Button.js';
 
-// Deduce las columnas automáticamente basadas en el primer objeto del payload
-function inferColumns(items = []) {
-  if (!items.length) return [];
-  return Object.keys(items[0]).map(key => ({
+// Utiliza el orden y las columnas devueltas por la API
+function getColumns(data) {
+  if (!data || !data.columns) return [];
+  return data.columns.map(key => ({
     key, 
     header: key.toUpperCase(),
     render: (row) => html`<span class="u-truncate" style="max-width: 250px; display: inline-block;" title=${row[key]}>${row[key]}</span>`
@@ -35,7 +35,7 @@ export function createPipelineTable() {
       return DataTable({
         id: 'pipeline-table',
         snapshot,
-        columns: (data) => inferColumns(data?.items ?? []),
+        columns: (data) => getColumns(data),
         getRows: (data) => data?.items ?? [],
         rowKey: (r, i) => r.id ?? i,
         onRetry: () => pipelineApi.getPipeline(),

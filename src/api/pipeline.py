@@ -149,7 +149,7 @@ async def get_pipeline_items(
     count_rows = await db_manager.query(f"SELECT COUNT(*) as total FROM SERVICES_PIPELINE {where_sql}", tuple(params))
     total = count_rows[0]["total"] if count_rows else 0
 
-    query_sql = f"SELECT * FROM SERVICES_PIPELINE {where_sql} ORDER BY LAST_UPDATED DESC LIMIT ? OFFSET ?"
+    query_sql = f"SELECT * FROM SERVICES_PIPELINE {where_sql} ORDER BY ID DESC LIMIT ? OFFSET ?"
     params.extend([limit, offset])
     items = await db_manager.query(query_sql, tuple(params))
 

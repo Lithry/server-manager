@@ -8,13 +8,14 @@ function createSandboxStore() {
   let state = {
     selectedService: '',
     selectedRecordId: '',
-    namespaces: [{ name: 'file', endpoint: '/api/v3/File/PathEndsWith?path={FILE_PATH}' }],
+    testName: '',
+    testEndpoint: '',
+    testResponse: null,
     logs: [],
-    flattenedKeys: [],
-    contextData: null,
     isLoading: false,
     error: null,
-    saveSuccess: false
+    saveSuccess: false,
+    testVariable: ''
   };
   const listeners = new Set();
   
@@ -35,25 +36,34 @@ export function createSandboxPage() {
   const store = createSandboxStore();
 
   const handleTest = async () => {
-    const { selectedService, selectedRecordId, namespaces } = store.get();
+    const state = store.get();
+    const { selectedService, selectedRecordId, testEndpoint, testName } = state;
+    
     if (!selectedService || !selectedRecordId) {
       alert("Please select a service and provide a valid Pipeline Record ID.");
       return;
     }
 
-    const enrichmentEndpoints = {};
-    for (const ns of namespaces) {
-      if (ns.name.trim() && ns.endpoint.trim()) {
-        enrichmentEndpoints[ns.name.trim()] = ns.endpoint.trim();
-      }
-    }
-
-    if (Object.keys(enrichmentEndpoints).length === 0) {
-      alert("Please define at least one enrichment endpoint to test.");
+    if (!selectedService || !selectedRecordId) {
+      alert("Please select a service and provide a valid Pipeline Record ID.");
       return;
     }
 
-    store.set(s => ({ ...s, isLoading: true, error: null, logs: [], flattenedKeys: [], contextData: null }));
+    const snapshot = queryCache.read(settingsKeys.all);
+    const services = snapshot?.data?.services || {};
+    const currentService = services[selectedService];
+    
+    // Combine saved endpoints with the one being tested
+    const enrichmentEndpoints = { ...(currentService?.enrichment_endpoints || {}) };
+    
+    // We add the test endpoint under a temporary namespace 'sandbox_test' (or the provided name)
+    const activeNamespace = testName.trim() || 'sandbox_test';
+    const isTestEndpointProvided = !!testEndpoint.trim();
+    if (isTestEndpointProvided) {
+      enrichmentEndpoints[activeNamespace] = testEndpoint.trim();
+    }
+
+    store.set(s => ({ ...s, isLoading: true, error: null, logs: [], testResponse: null }));
     
     try {
       const res = await http.post('/api/v1/pipeline/sandbox/enrichment', {
@@ -62,12 +72,14 @@ export function createSandboxPage() {
         enrichment_endpoints: enrichmentEndpoints
       });
 
+      // If a new endpoint was provided, show its result. Otherwise, show the entire context tree!
+      const dataToShow = isTestEndpointProvided ? (res.context_data?.[activeNamespace] || null) : res.context_data;
+
       store.set(s => ({
         ...s,
         isLoading: false,
         logs: res.logs || [],
-        flattenedKeys: res.flattened_keys || [],
-        contextData: res.context_data || null
+        testResponse: dataToShow
       }));
     } catch (err) {
       store.set(s => ({ ...s, isLoading: false, error: err.message }));
@@ -80,28 +92,20 @@ export function createSandboxPage() {
 
     const snapshot = queryCache.read(settingsKeys.all);
     const services = snapshot?.data?.services || {};
-    const svc = services[state.selectedService];
-    
-    if (!svc) {
-      alert("Service not found in settings.");
+    const currentService = services[state.selectedService];
+
+    const enrichmentEndpoints = { ...(currentService?.enrichment_endpoints || {}) };
+    const name = state.testName.trim();
+    const endpoint = state.testEndpoint.trim();
+
+    if (!name || !endpoint) {
+      alert("Please provide both a namespace name and an endpoint to save.");
       return;
     }
 
-    const enrichmentEndpoints = { ...(svc.enrichment_endpoints || {}) };
-    let addedCount = 0;
-    
-    for (const ns of state.namespaces) {
-      const name = ns.name.trim();
-      const endpoint = ns.endpoint.trim();
-      if (name && endpoint) {
-        enrichmentEndpoints[name] = endpoint;
-        addedCount++;
-      }
-    }
+    enrichmentEndpoints[name] = endpoint;
 
-    if (addedCount === 0) return;
-
-    const newServices = { ...services, [state.selectedService]: { ...svc, enrichment_endpoints: enrichmentEndpoints } };
+    const newServices = { ...services, [state.selectedService]: { ...currentService, enrichment_endpoints: enrichmentEndpoints } };
     const newSettings = { ...snapshot.data, services: newServices };
     
     try {
@@ -117,175 +121,124 @@ export function createSandboxPage() {
     }
   };
 
-  const updateNamespace = (idx, field, value) => {
-    store.set(s => {
-      const newNamespaces = [...s.namespaces];
-      newNamespaces[idx] = { ...newNamespaces[idx], [field]: value };
-      return { ...s, namespaces: newNamespaces, saveSuccess: false };
-    });
-  };
-
-  const addNamespace = () => {
-    store.set(s => ({
-      ...s,
-      namespaces: [...s.namespaces, { name: '', endpoint: '' }]
-    }));
-  };
-
-  const removeNamespace = (idx) => {
-    store.set(s => {
-      const newNamespaces = s.namespaces.filter((_, i) => i !== idx);
-      return { ...s, namespaces: newNamespaces };
-    });
-  };
-
-  const renderNamespaces = (state) => {
-    return html`
-      <div class="u-flex u-flex-col u-gap-3 u-mb-4">
-        ${state.namespaces.map((ns, i) => html`
-          <div class="u-flex u-items-center u-gap-3" style="background: var(--color-bg-subtle); padding: var(--space-3); border-radius: var(--radius-md); border: 1px solid var(--color-border);">
-            <div style="flex: 1;">
-              <label class="u-text-xs u-text-muted u-mb-1 u-block">Namespace</label>
-              <input type="text" class="form-input font-mono" placeholder="e.g. file, episode" .value=${ns.name} @input=${e => updateNamespace(i, 'name', e.target.value)}>
-            </div>
-            <div style="flex: 3;">
-              <label class="u-text-xs u-text-muted u-mb-1 u-block">API Endpoint</label>
-              <input type="text" class="form-input font-mono" placeholder="/api/v3/Endpoint/{ID}" .value=${ns.endpoint} @input=${e => updateNamespace(i, 'endpoint', e.target.value)}>
-            </div>
-            <div style="align-self: flex-end; padding-bottom: 2px;">
-              ${Button({ label: Icon({ name: 'trash' }), variant: 'ghost', onClick: () => removeNamespace(i) })}
-            </div>
-          </div>
-        `)}
-      </div>
-      
-      <div class="u-mb-4">
-        ${Button({ label: '+ Add Endpoint to Chain', variant: 'secondary', size: 'sm', onClick: addNamespace })}
-      </div>
-    `;
-  };
-
-  const renderResults = (state) => {
-    if (state.isLoading) {
-      return html`<div class="u-text-muted" style="padding: var(--space-4); text-align: center;">Executing enrichment chain...</div>`;
-    }
-    
-    if (state.error) {
-      return html`<div style="color: var(--color-error); padding: var(--space-4); background: color-mix(in srgb, var(--color-error) 10%, transparent); border-radius: var(--radius-md);">${state.error}</div>`;
-    }
-
-    if (state.logs.length === 0 && state.flattenedKeys.length === 0) {
-      return html`<div class="u-text-muted u-text-sm" style="padding: var(--space-4); text-align: center; border: 1px dashed var(--color-border); border-radius: var(--radius-md);">
-        Configure a service, record ID, and at least one endpoint, then click Test.
-      </div>`;
-    }
-
-    return html`
-      <div class="form-grid-2">
-        <div style="background: var(--color-bg-subtle); border-radius: var(--radius-md); border: 1px solid var(--color-border); overflow: hidden; display: flex; flex-direction: column;">
-          <div style="padding: var(--space-2) var(--space-3); background: var(--color-bg-card); border-bottom: 1px solid var(--color-border); font-weight: bold; font-size: 0.9rem;">
-            Execution Logs
-          </div>
-          <div style="padding: var(--space-3); flex: 1; overflow-y: auto; max-height: 400px; font-family: monospace; font-size: 0.85rem; line-height: 1.5; color: var(--color-text-muted);">
-            ${state.logs.map(log => html`<div class="u-mb-1" style="color: ${log.includes('Error') || log.includes('Exception') ? 'var(--color-error)' : (log.includes('Skipped') ? 'var(--color-warning)' : 'inherit')};">${log}</div>`)}
-          </div>
-        </div>
-
-        <div style="background: var(--color-bg-subtle); border-radius: var(--radius-md); border: 1px solid var(--color-border); overflow: hidden; display: flex; flex-direction: column;">
-          <div style="padding: var(--space-2) var(--space-3); background: var(--color-bg-card); border-bottom: 1px solid var(--color-border); font-weight: bold; font-size: 0.9rem;">
-            Discovered Context Variables (Flattened)
-          </div>
-          <div style="padding: var(--space-3); flex: 1; overflow-y: auto; max-height: 400px; font-size: 0.85rem;">
-            ${state.flattenedKeys.length === 0 
-              ? html`<div class="u-text-muted">No additional fields discovered.</div>`
-              : html`<table style="width: 100%; text-align: left; border-collapse: collapse;">
-                  <tbody>
-                    ${state.flattenedKeys.map(k => html`
-                      <tr style="border-bottom: 1px solid var(--color-border);">
-                        <td style="padding: 4px 0; font-family: monospace; color: var(--color-accent);">{${k.path}}</td>
-                        <td style="padding: 4px 0; color: var(--color-text-muted); font-size: 0.8rem; text-align: right; overflow: hidden; text-overflow: ellipsis; max-width: 150px; white-space: nowrap;" title=${k.sample}>${k.sample}</td>
-                      </tr>
-                    `)}
-                  </tbody>
-                </table>`
-            }
-          </div>
-        </div>
-      </div>
-      
-      <div class="u-mt-4 u-flex u-items-center u-justify-between" style="padding-top: var(--space-4); border-top: 1px solid var(--color-border);">
-        <p class="u-text-sm u-text-muted" style="margin: 0; max-width: 500px;">
-          If the variables look correct, you can save these endpoints directly to the Service configuration.
-        </p>
-        <div class="u-flex u-gap-2 u-items-center">
-          ${state.saveSuccess ? html`<span style="color: var(--color-success); font-weight: bold; font-size: 0.9rem;" class="u-flex u-items-center u-gap-1">${Icon({ name: 'check' })} Saved!</span>` : nothing}
-          ${Button({ label: 'Save to Service Config', variant: 'save', onClick: handleSaveToService, disabled: state.isLoading || !state.contextData })}
-        </div>
-      </div>
-    `;
-  };
-
   const view = () => {
     const state = store.get();
     const snapshot = queryCache.read(settingsKeys.all);
     const services = snapshot?.data?.services || {};
     const serviceKeys = Object.keys(services);
+    const currentService = services[state.selectedService];
 
     if (!state.selectedService && serviceKeys.length > 0) {
       setTimeout(() => store.set(s => ({ ...s, selectedService: serviceKeys[0] })), 0);
     }
 
+    const resolvePath = (obj, path) => {
+      if (!path || !obj) return undefined;
+      try {
+        return path.split('.').reduce((acc, part) => acc && acc[part] !== undefined ? acc[part] : undefined, obj);
+      } catch (e) {
+        return undefined;
+      }
+    };
+    
+    const evaluatedVar = state.testVariable.trim() ? resolvePath(state.testResponse, state.testVariable.trim()) : undefined;
+
     return html`
-      <div class="page-container">
-        <header class="page-header u-mb-6">
+      <div class="page-container" style="max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; height: 100vh;">
+        <header class="page-header u-mb-4" style="flex-shrink: 0;">
           <div class="u-flex u-items-center u-gap-3 u-mb-2">
             <h1 class="page-title u-m-0">API Enrichment Sandbox</h1>
             <span class="badge" style="background: var(--color-accent); color: white; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 0.75rem;">BETA</span>
           </div>
-          <p class="page-subtitle">Interactively build, test, and chain enrichment endpoints before deploying them.</p>
         </header>
 
-        <div style="background: var(--color-bg-card); border-radius: var(--radius-md); border: 1px solid var(--color-border); padding: var(--space-4);" class="u-mb-5">
-          <h3 style="margin-top: 0; font-size: 1.1rem; color: var(--color-text); margin-bottom: var(--space-4);">1. Target & Context</h3>
+        <!-- Top Controls -->
+        <div class="u-flex u-gap-4 u-items-center u-mb-4" style="flex-shrink: 0;">
+          <div style="flex: 1; max-width: 300px;">
+            <select class="form-select font-mono" @change=${e => store.set(s => ({...s, selectedService: e.target.value}))} style="border: 1px solid var(--color-text);">
+              ${serviceKeys.length === 0 ? html`<option value="">No services</option>` : nothing}
+              ${serviceKeys.map(k => html`<option value=${k} ?selected=${state.selectedService === k}>${services[k].name || k}</option>`)}
+            </select>
+          </div>
           
-          <div class="form-grid-2 u-mb-4">
-            <div class="form-group u-mb-0">
-              <label>Service Configuration</label>
-              <select class="form-select" @change=${e => store.set(s => ({...s, selectedService: e.target.value}))}>
-                ${serviceKeys.length === 0 ? html`<option value="">No services configured</option>` : nothing}
-                ${serviceKeys.map(k => html`<option value=${k} ?selected=${state.selectedService === k}>${services[k].name || k}</option>`)}
-              </select>
+          <div style="flex: 1; max-width: 200px;">
+            <input type="number" class="form-input font-mono" placeholder="Record ID (e.g. 42)" .value=${state.selectedRecordId} @input=${e => store.set(s => ({...s, selectedRecordId: e.target.value}))} style="border: 1px solid var(--color-text);">
+          </div>
+          
+          ${Button({ label: 'RUN', variant: 'test', onClick: handleTest, disabled: state.isLoading, style: 'border: 1px solid var(--color-text); padding: 8px 32px; letter-spacing: 1px;' })}
+          
+          <div class="u-flex u-items-center u-gap-2" style="margin-left: auto;">
+            <span style="font-size: 1.2rem; color: var(--color-text);">&gt;</span>
+            <input type="text" class="form-input font-mono" placeholder="namespace" .value=${state.testName} @input=${e => store.set(s => ({...s, testName: e.target.value}))} style="border: 1px solid var(--color-text); width: 120px;">
+            ${Button({ label: 'SAVE', variant: 'secondary', onClick: handleSaveToService, disabled: state.isLoading, style: 'border: 1px solid var(--color-text); padding: 8px 32px; letter-spacing: 1px;' })}
+            ${state.saveSuccess ? html`<span style="color: var(--color-success);">${Icon({ name: 'check' })}</span>` : nothing}
+          </div>
+        </div>
+
+        <!-- Main Workspace -->
+        <div class="u-flex u-gap-4" style="flex: 1; min-height: 0;">
+          
+          <!-- Left Column (Inputs and Response) -->
+          <div class="u-flex u-flex-col u-gap-4" style="flex: 3; min-height: 0;">
+            
+            <div style="flex: 1; border: 1px solid var(--color-text); display: flex; flex-direction: column;">
+              <textarea class="font-mono" placeholder="/api/v3/Endpoint/{ID}?query=..." style="flex: 1; background: transparent; border: none; padding: var(--space-3); color: var(--color-text); resize: none; outline: none;" .value=${state.testEndpoint} @input=${e => store.set(s => ({...s, testEndpoint: e.target.value}))}></textarea>
             </div>
             
-            <div class="form-group u-mb-0">
-              <label>Pipeline Record ID (Base Context)</label>
-              <input type="number" class="form-input font-mono" placeholder="e.g. 42" .value=${state.selectedRecordId} @input=${e => store.set(s => ({...s, selectedRecordId: e.target.value}))}>
-              <small class="u-text-muted">Enter the numeric ID of a row in the Pipeline table to use its columns as starting variables.</small>
+            <div class="u-flex u-items-center u-justify-between u-mb-2">
+              <h4 style="margin: 0; color: var(--color-text);">Respond</h4>
+              <div class="u-text-xs u-text-muted">
+                ${state.testEndpoint.trim() ? `Showing result for new namespace: ${state.testName.trim() || 'sandbox_test'}` : 'Showing complete cumulative context'}
+              </div>
+            </div>
+            
+            <!-- JSON Path Evaluator -->
+            ${state.testResponse ? html`
+              <div class="u-flex u-gap-2 u-items-center u-mb-2" style="background: var(--color-bg-surface); padding: var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-sm);">
+                <span style="color: var(--color-text-muted); font-size: 0.85rem;">Test Path:</span>
+                <input type="text" class="form-input font-mono u-text-sm" placeholder="e.g. file.List.0.ID" .value=${state.testVariable} @input=${e => store.set(s => ({...s, testVariable: e.target.value}))} style="flex: 1; border: 1px solid var(--color-border); padding: 4px 8px; background: transparent;">
+                <div style="flex: 1; padding: 4px 8px; background: #000; color: ${evaluatedVar !== undefined ? 'var(--color-success)' : 'var(--color-error)'}; font-family: monospace; font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                  ${state.testVariable.trim() ? (evaluatedVar !== undefined ? JSON.stringify(evaluatedVar) : 'undefined') : 'Enter path to test...'}
+                </div>
+              </div>
+            ` : nothing}
+            
+            <div style="flex: 2; border: 1px solid var(--color-text); background: #000; overflow: auto; padding: var(--space-3); color: #FFFFFF; font-family: monospace; font-size: 0.85rem;">
+              ${state.isLoading ? 'Running test...' : nothing}
+              ${state.error ? html`<div style="color: var(--color-error);">${state.error}</div>` : nothing}
+              ${!state.isLoading && !state.error && state.testResponse ? html`<pre style="margin: 0; white-space: pre-wrap;">${JSON.stringify(state.testResponse, null, 2)}</pre>` : nothing}
+              ${!state.isLoading && !state.error && !state.testResponse && state.logs.length > 0 ? html`<div style="color: var(--color-warning);">Endpoint returned empty or failed.\n\nCheck logs:\n${state.logs.join('\n')}</div>` : nothing}
+              ${!state.isLoading && !state.error && !state.testResponse && state.logs.length === 0 && !state.testEndpoint.trim() ? html`<div style="color: var(--color-text-muted);">Click RUN with an empty input to fetch the full context, or type an endpoint to test a new request.</div>` : nothing}
+            </div>
+            
+          </div>
+          
+          <!-- Right Column (Saved Enrichment Points) -->
+          <div style="flex: 1; border: 1px solid var(--color-text); padding: var(--space-4); overflow-y: auto;">
+            <h3 style="margin-top: 0; text-align: center; color: var(--color-text); font-weight: 500; font-size: 1.1rem; margin-bottom: var(--space-4);">Enrichment Points</h3>
+            
+            <div class="u-flex u-flex-col u-gap-3">
+              ${Object.keys(currentService?.enrichment_endpoints || {}).length === 0 ? html`<div class="u-text-muted u-text-center">No saved endpoints.</div>` : nothing}
+              
+              ${Object.entries(currentService?.enrichment_endpoints || {}).map(([name, ep]) => html`
+                <div style="padding: var(--space-2) 0; cursor: pointer;" @click=${() => store.set(s => ({...s, testName: name, testEndpoint: ep}))}>
+                  <strong style="color: var(--color-text); display: block; margin-bottom: 2px;">${name}</strong>
+                  <div style="color: var(--color-text-muted); font-size: 0.75rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title=${ep}>${ep}</div>
+                </div>
+              `)}
             </div>
           </div>
-        </div>
-
-        <div style="background: var(--color-bg-card); border-radius: var(--radius-md); border: 1px solid var(--color-border); padding: var(--space-4);" class="u-mb-5">
-          <div class="u-flex u-items-center u-justify-between u-mb-4">
-            <h3 style="margin: 0; font-size: 1.1rem; color: var(--color-text);">2. Enrichment Chain</h3>
-            ${Button({ label: 'Test Chain', variant: 'test', onClick: handleTest, disabled: state.isLoading })}
-          </div>
           
-          ${renderNamespaces(state)}
-        </div>
-
-        <div style="background: var(--color-bg-card); border-radius: var(--radius-md); border: 1px solid var(--color-border); padding: var(--space-4);">
-          <h3 style="margin-top: 0; font-size: 1.1rem; color: var(--color-text); margin-bottom: var(--space-4);">3. Results & Mapping Context</h3>
-          
-          ${renderResults(state)}
         </div>
       </div>
     `;
   };
 
+  let unsub;
   return {
     view,
-    mount: () => {
+    mount: (render) => {
+      unsub = store.subscribe(render);
       // Preload settings if not available
       const snapshot = queryCache.read(settingsKeys.all);
       if (!snapshot?.data) {
@@ -294,6 +247,9 @@ export function createSandboxPage() {
           store.set(s => ({...s}));
         }).catch(console.error);
       }
+    },
+    unmount: () => {
+      if (unsub) unsub();
     }
   };
 }
