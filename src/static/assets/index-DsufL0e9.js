@@ -904,7 +904,7 @@ ERROR: `+o.message}))}};return{mount(s){t=$.subscribe(ge.all,()=>s()),a=e.subscr
               </div>
             </div>
             
-            <div style="flex: 2; border: 1px solid var(--color-text); background: #000; overflow: auto; padding: var(--space-3); color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem;">
+            <div style="flex: 2; border: 1px solid var(--color-text); background: #000; overflow: auto; padding: var(--space-3); color: #FFFFFF; font-family: monospace; font-size: 0.85rem;">
               ${o.isLoading?"Running test...":y}
               ${o.error?c`<div style="color: var(--color-error);">${o.error}</div>`:y}
               ${!o.isLoading&&!o.error&&o.testResponse?c`<pre style="margin: 0; white-space: pre-wrap;">${JSON.stringify(o.testResponse,null,2)}</pre>`:y}
