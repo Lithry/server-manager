@@ -98,7 +98,11 @@ export function createMappingModal(store) {
                 reqBody.context_dict = val;
               }
               const res = await http.post('/api/v1/settings/test-transformer', reqBody);
-              alert('Result: ' + JSON.stringify(res.result));
+              if (res.valid) {
+                alert('Result: ' + JSON.stringify(res.result));
+              } else {
+                alert('Error: ' + res.message);
+              }
             } catch (err) {
               alert('Error: ' + err.message);
             }

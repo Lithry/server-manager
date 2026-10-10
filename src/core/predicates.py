@@ -175,7 +175,7 @@ class TransformerEvaluator:
             return False, f"Invalid transformer: {str(e)}"
 
     @classmethod
-    def evaluate(cls, expr: Optional[str], value: Any, context: Optional[Dict[str, Any]] = None) -> Any:
+    def evaluate(cls, expr: Optional[str], value: Any, context: Optional[Dict[str, Any]] = None, raise_errors: bool = False) -> Any:
         if not expr or not expr.strip():
             return value
         cleaned = expr.strip()
@@ -200,5 +200,7 @@ class TransformerEvaluator:
             safe_locals.update(context)
         try:
             return eval(py_expr, safe_globals, safe_locals)
-        except Exception:
+        except Exception as e:
+            if raise_errors:
+                raise e
             return value

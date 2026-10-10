@@ -17,8 +17,10 @@ import { createSampleApiModal } from '../features/settings/ui/SampleApiModal.js'
 import { createNotificationsPanel } from '../features/settings/ui/NotificationsPanel.js';
 import { createNotificationTriggerModal } from '../features/settings/ui/NotificationTriggerModal.js';
 import { createEnginePanel } from '../features/settings/ui/EnginePanel.js';
+import { createSandboxPage } from './SandboxPage.js';
 
 export function createSettingsPage(router) {
+  const sandboxPanel = createSandboxPage();
   const store = createStore({ 
     activeTab: 'services', 
     saving: false,
@@ -44,6 +46,7 @@ export function createSettingsPage(router) {
       unsubState = store.subscribe(() => onUpdate());
       unsubData = queryCache.subscribe(settingsKeys.all, () => onUpdate());
       settingsApi.getSettings();
+      sandboxPanel.mount(onUpdate);
       
       window.addEventListener('beforeunload', handleBeforeUnload);
       if (router) {
@@ -63,6 +66,7 @@ export function createSettingsPage(router) {
     unmount() {
       if (unsubState) unsubState();
       if (unsubData) unsubData();
+      sandboxPanel.unmount();
       window.removeEventListener('beforeunload', handleBeforeUnload);
       if (router) router.setBeforeNavigateHook(null);
     },
@@ -106,8 +110,9 @@ export function createSettingsPage(router) {
           <div class="u-flex u-items-center u-justify-between u-mb-2">
             <div class="u-flex u-gap-2">
               ${renderTabButton('services', 'database', 'Services')}
-              ${renderTabButton('stages', 'activity', 'Stages & Predicates')}
+              ${renderTabButton('sandbox', 'code', 'API Sandbox')}
               ${renderTabButton('mappings', 'code', 'Field Mappings')}
+              ${renderTabButton('stages', 'activity', 'Stages & Predicates')}
               ${renderTabButton('notifications', 'bell', 'Notification Triggers')}
               ${renderTabButton('engine', 'settings', 'Engine & Retention')}
             </div>
@@ -138,8 +143,9 @@ export function createSettingsPage(router) {
           </div>
           
           ${activeTab === 'services' ? createServicesPanel(store, servicesData, globalPoll) : nothing}
-          ${activeTab === 'stages' ? createStagesPanel(store, stagesData) : nothing}
+          ${activeTab === 'sandbox' ? sandboxPanel.view() : nothing}
           ${activeTab === 'mappings' ? createMappingsPanel(store, servicesData) : nothing}
+          ${activeTab === 'stages' ? createStagesPanel(store, stagesData) : nothing}
           ${activeTab === 'notifications' ? createNotificationsPanel(store, data) : nothing}
           ${activeTab === 'engine' ? createEnginePanel(store, config) : nothing}
           

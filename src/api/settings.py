@@ -29,6 +29,7 @@ class TestPredicateRequest(BaseModel):
 class TestTransformerRequest(BaseModel):
     expression: str | None = None
     sample_value: Any = None
+    context_dict: Dict[str, Any] | None = None
 
 
 @router.get("")
@@ -115,7 +116,7 @@ async def test_transformer(req: TestTransformerRequest) -> Dict[str, Any]:
     result = None
     if valid and req.expression:
         try:
-            result = TransformerEvaluator.evaluate(req.expression, req.sample_value)
+            result = TransformerEvaluator.evaluate(req.expression, req.sample_value, req.context_dict, raise_errors=True)
         except Exception as e:
             valid = False
             message = str(e)

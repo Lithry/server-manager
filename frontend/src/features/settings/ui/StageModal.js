@@ -38,7 +38,8 @@ export function createStageModal(store) {
         complete_condition: isSink ? null : (document.getElementById('stage-complete')?.value.trim() || null),
         grace_period_minutes: parseInt(document.getElementById('stage-grace').value) || 0,
         watchdog_timeout_minutes: parseInt(document.getElementById('stage-watchdog').value) || 0,
-        enabled: document.getElementById('chk-stage-enabled').checked
+        enabled: document.getElementById('chk-stage-enabled').checked,
+        order: editingStage ? editingStage.order : stages.length + 1
       };
       
       let newStages = [...stages];

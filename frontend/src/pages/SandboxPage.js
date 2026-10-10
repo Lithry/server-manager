@@ -144,14 +144,7 @@ export function createSandboxPage() {
     const evaluatedVar = state.testVariable.trim() ? resolvePath(state.testResponse, state.testVariable.trim()) : undefined;
 
     return html`
-      <div class="page-container" style="max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; height: 100vh;">
-        <header class="page-header u-mb-4" style="flex-shrink: 0;">
-          <div class="u-flex u-items-center u-gap-3 u-mb-2">
-            <h1 class="page-title u-m-0">API Enrichment Sandbox</h1>
-            <span class="badge" style="background: var(--color-accent); color: white; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 0.75rem;">BETA</span>
-          </div>
-        </header>
-
+      <div class="page-container" style="display: flex; flex-direction: column; height: 100%; min-height: 500px;">
         <!-- Top Controls -->
         <div class="u-flex u-gap-4 u-items-center u-mb-4" style="flex-shrink: 0;">
           <div style="flex: 1; max-width: 300px;">
