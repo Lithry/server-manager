@@ -62,6 +62,12 @@ class AddColumnRequest(BaseModel):
     column_type: str = "TEXT"
 
 
+class SandboxEnrichmentRequest(BaseModel):
+    service_id: str
+    record_id: int
+    enrichment_endpoints: Dict[str, str]
+
+
 class ReorderColumnsRequest(BaseModel):
     column_order: List[str]
 
@@ -370,6 +376,85 @@ async def sample_app_api(req: SampleApiRequest) -> Dict[str, Any]:
             "error": str(e),
             "fields": [],
         }
+
+
+@router.post("/sandbox/enrichment")
+async def sandbox_enrichment(req: SandboxEnrichmentRequest) -> Dict[str, Any]:
+    """Test a chain of enrichment endpoints sequentially against an existing pipeline record."""
+    settings = await config_manager.get_settings()
+    services_dict = getattr(settings, "services", {}) or getattr(settings, "apps", {})
+    if req.service_id not in services_dict:
+        raise HTTPException(status_code=404, detail=f"Service '{req.service_id}' not configured")
+
+    service_cfg = services_dict[req.service_id]
+    if not service_cfg.base_url:
+        raise HTTPException(status_code=400, detail=f"Service '{req.service_id}' has no base_url configured")
+
+    # Fetch the base record
+    rows = await db_manager.query("SELECT * FROM SERVICES_PIPELINE WHERE ID = ?", (req.record_id,))
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"Pipeline record with ID {req.record_id} not found")
+    row_dict = dict(rows[0])
+
+    enrichment_data: Dict[str, Any] = {}
+    from src.core.scheduler import extract_dotted_value
+
+    logs = []
+
+    for namespace, ep_template in req.enrichment_endpoints.items():
+        if not ep_template or not ep_template.strip():
+            continue
+
+        context_dict = {**row_dict, **enrichment_data}
+        resolved_ep = ep_template.strip()
+
+        missing_ph = False
+        for ph in re.findall(r"\{([^}]+)\}", ep_template):
+            val = extract_dotted_value(context_dict, ph)
+            if val is None:
+                val = context_dict.get(ph)
+            if val is None:
+                val = context_dict.get(ph.upper())
+            if val is None:
+                val = context_dict.get(ph.lower())
+
+            if val is not None:
+                resolved_ep = resolved_ep.replace(f"{{{ph}}}", urllib.parse.quote(str(val)))
+            else:
+                missing_ph = True
+                logs.append(f"[{namespace}] Skipped: Missing placeholder {{{ph}}} in current context.")
+                break
+
+        if missing_ph or "{" in resolved_ep:
+            if not missing_ph:
+                logs.append(f"[{namespace}] Skipped: Unresolved placeholders remain in {resolved_ep}")
+            continue
+
+        logs.append(f"[{namespace}] GET {resolved_ep}")
+        enrich_url, enrich_headers = prepare_service_request(service_cfg.base_url, resolved_ep, service_cfg.api_key or "")
+
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                e_resp = await client.get(enrich_url, headers=enrich_headers)
+                logs.append(f"[{namespace}] HTTP {e_resp.status_code}")
+                if e_resp.status_code == 200:
+                    e_json = e_resp.json()
+                    if isinstance(e_json, dict):
+                        enrichment_data[namespace.strip()] = e_json
+                    elif isinstance(e_json, list):
+                        enrichment_data[namespace.strip()] = {"List": e_json}
+                else:
+                    logs.append(f"[{namespace}] Error: {e_resp.text[:100]}")
+        except Exception as e:
+            logs.append(f"[{namespace}] Exception: {str(e)}")
+
+    final_context = {**row_dict, **enrichment_data}
+    return {
+        "success": True,
+        "logs": logs,
+        "context_data": final_context,
+        "flattened_keys": flatten_json_keys(final_context)
+    }
 
 
 @router.get("/services/{service_id}/events")

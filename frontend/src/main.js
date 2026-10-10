@@ -14,6 +14,7 @@ import { createViewsPage } from './pages/ViewsPage.js';
 import { createIncidentsPage } from './pages/IncidentsPage.js';
 import { createGitOpsPage } from './pages/GitOpsPage.js';
 import { createSettingsPage } from './pages/SettingsPage.js';
+import { createSandboxPage } from './pages/SandboxPage.js';
 import { modalManager } from './shared/ui/organisms/Modal/modalManager.js';
 const router = createRouter(ROUTES);
 
@@ -23,6 +24,7 @@ const pages = {
   'tools': createToolsPage(),
   'views': createViewsPage(),
   'incidents': createIncidentsPage(),
+  'sandbox': createSandboxPage(),
   'gitops': createGitOpsPage(),
   'settings': createSettingsPage(router)
 };
