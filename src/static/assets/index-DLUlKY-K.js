@@ -948,8 +948,8 @@ ERROR: `+r.message}))}};return{mount(a){t=$.subscribe(fe.all,()=>a()),s=e.subscr
           <!-- Left Column (Inputs and Response) -->
           <div class="u-flex u-flex-col u-gap-4" style="flex: 3; min-height: 0;">
             
-            <div style="flex: 1; border: 1px solid var(--color-text); display: flex; flex-direction: column;">
-              <textarea class="font-mono" placeholder="/api/v3/Endpoint/{ID}?query=..." style="flex: 1; background: transparent; border: none; padding: var(--space-3); color: var(--color-text); resize: none; outline: none;" .value=${r.testEndpoint} @input=${b=>e.set(p=>({...p,testEndpoint:b.target.value}))}></textarea>
+            <div style="border: 1px solid var(--color-text); display: flex; flex-direction: column;">
+              <textarea class="font-mono" placeholder="/api/v3/Endpoint/{ID}?query=..." style="height: 60px; background: transparent; border: none; padding: var(--space-3); color: var(--color-text); resize: none; outline: none;" .value=${r.testEndpoint} @input=${b=>e.set(p=>({...p,testEndpoint:b.target.value}))}></textarea>
             </div>
             
             <div class="u-flex u-items-center u-justify-between u-mb-2">
