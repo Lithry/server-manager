@@ -38,20 +38,20 @@ export function createStagesPanel(store, stagesData = []) {
                     <span class="u-font-mono u-text-xs" style="background: ${type.bg}; color: ${type.color}; padding: 2px 6px; border-radius: 4px; font-weight: bold;">${type.label}</span>
                   </div>
                   <div class="u-flex u-items-center u-gap-3">
-                    <label class="u-flex u-items-center u-gap-2" style="cursor: pointer; background: var(--color-bg-surface); padding: 4px 8px; border-radius: var(--radius-sm); border: 1px solid var(--color-border);">
-                      <input type="checkbox" .checked=${stage.enabled} @change=${(e) => {
+                    ${Button({ 
+                      label: stage.enabled ? 'ACTIVE' : 'INACTIVE', 
+                      variant: stage.enabled ? 'save' : 'secondary', 
+                      size: 'sm', 
+                      onClick: () => {
                         const newSettings = { ...queryCache.read(settingsKeys.all).data };
                         const stg = newSettings.stages.find(x => x.id === stage.id);
                         if (stg) {
-                          stg.enabled = e.target.checked;
+                          stg.enabled = !stg.enabled;
                           queryCache.setData(settingsKeys.all, () => newSettings);
                           store.set(s => ({ ...s, isDirty: true }));
                         }
-                      }}>
-                      <span class="u-text-xs" style="color: ${stage.enabled ? 'var(--color-success)' : 'var(--color-text-muted)'}; font-weight: 500;">
-                        ${stage.enabled ? 'ACTIVE' : 'INACTIVE'}
-                      </span>
-                    </label>
+                      } 
+                    })}
                     ${Button({ label: 'Edit', variant: 'ghost', size: 'sm', onClick: () => store.set(s => ({ ...s, isStageModalOpen: true, editingStageId: stage.id })) })}
                     ${Button({ label: 'Delete', variant: 'delete', size: 'sm', onClick: () => confirm('Delete stage?') })}
                   </div>

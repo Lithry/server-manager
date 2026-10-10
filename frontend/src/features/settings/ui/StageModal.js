@@ -12,6 +12,8 @@ export function createStageModal(store) {
   const state = store.get();
   const snapshot = queryCache.read(settingsKeys.all);
   const stages = snapshot?.data?.stages || [];
+  const servicesData = snapshot?.data?.services || snapshot?.data?.apps || {};
+  const allServiceIds = Object.keys(servicesData);
   const editingStage = state.editingStageId ? stages.find(s => s.id === state.editingStageId) : null;
   
   // Initialize local toggles only once when opening
@@ -31,7 +33,7 @@ export function createStageModal(store) {
         id: stageId,
         name: document.getElementById('stage-name').value.trim() || stageId,
         description: document.getElementById('stage-desc').value.trim(),
-        services: [], // Mocked for now
+        service_ids: Array.from(document.querySelectorAll('input[name="stage-service"]:checked')).map(el => el.value),
         start_condition: isRoot ? null : (document.getElementById('stage-start')?.value.trim() || null),
         complete_condition: isSink ? null : (document.getElementById('stage-complete')?.value.trim() || null),
         grace_period_minutes: parseInt(document.getElementById('stage-grace').value) || 0,
@@ -73,7 +75,12 @@ export function createStageModal(store) {
     <div class="form-group u-mb-3">
       <label>Assigned Services</label>
       <div class="services-checkbox-grid" style="display: flex; gap: var(--space-3); flex-wrap: wrap; background: var(--color-bg-subtle); padding: var(--space-3); border-radius: var(--radius-sm); border: 1px solid var(--color-border);">
-        <span class="u-text-muted u-text-sm">Mock services selection...</span>
+        ${allServiceIds.length === 0 ? html`<span class="u-text-muted u-text-sm">No services configured.</span>` : allServiceIds.map(sid => html`
+          <label class="form-checkbox" style="cursor: pointer; padding: 4px 8px; background: var(--color-bg-card); border-radius: var(--radius-sm); border: 1px solid var(--color-border);">
+            <input type="checkbox" name="stage-service" value=${sid} ?checked=${editingStage?.service_ids?.includes(sid)}>
+            <span class="u-text-sm font-mono">${sid}</span>
+          </label>
+        `)}
       </div>
       <small class="u-text-muted">Select services operating within this pipeline stage.</small>
     </div>
