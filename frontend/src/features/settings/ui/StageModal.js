@@ -37,7 +37,8 @@ export function createStageModal(store) {
         start_condition: isRoot ? null : (document.getElementById('stage-start')?.value.trim() || null),
         complete_condition: isSink ? null : (document.getElementById('stage-complete')?.value.trim() || null),
         grace_period_minutes: parseInt(document.getElementById('stage-grace').value) || 0,
-        watchdog_timeout_minutes: parseInt(document.getElementById('stage-watchdog').value) || 0
+        watchdog_timeout_minutes: parseInt(document.getElementById('stage-watchdog').value) || 0,
+        enabled: document.getElementById('chk-stage-enabled').checked
       };
       
       let newStages = [...stages];
@@ -148,7 +149,7 @@ export function createStageModal(store) {
     </div>
 
     <div class="form-checkbox u-mt-3">
-      <input type="checkbox" id="chk-stage-enabled">
+      <input type="checkbox" id="chk-stage-enabled" ?checked=${editingStage ? editingStage.enabled : false}>
       <label for="chk-stage-enabled"><strong>Enable this stage</strong> (Active in execution pipeline)</label>
     </div>
   `;

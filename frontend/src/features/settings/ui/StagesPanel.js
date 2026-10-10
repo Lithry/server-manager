@@ -1,5 +1,6 @@
 import { html, nothing } from 'lit-html';
 import { Button } from '../../../shared/ui/atoms/Button/Button.js';
+import { Toggle } from '../../../shared/ui/atoms/Toggle/Toggle.js';
 import { queryCache } from '../../../shared/api/index.js';
 import { settingsKeys } from '../api.js';
 
@@ -38,22 +39,23 @@ export function createStagesPanel(store, stagesData = []) {
                     <span class="u-font-mono u-text-xs" style="background: ${type.bg}; color: ${type.color}; padding: 2px 6px; border-radius: 4px; font-weight: bold;">${type.label}</span>
                   </div>
                   <div class="u-flex u-items-center u-gap-3">
-                    ${Button({ 
-                      label: stage.enabled ? 'ACTIVE' : 'INACTIVE', 
-                      variant: stage.enabled ? 'save' : 'secondary', 
-                      size: 'sm', 
-                      onClick: () => {
+                    ${Toggle({
+                      checked: stage.enabled,
+                      label: stage.enabled ? 'ACTIVE' : 'INACTIVE',
+                      onChange: (newVal) => {
                         const newSettings = { ...queryCache.read(settingsKeys.all).data };
                         const stg = newSettings.stages.find(x => x.id === stage.id);
                         if (stg) {
-                          stg.enabled = !stg.enabled;
+                          stg.enabled = newVal;
                           queryCache.setData(settingsKeys.all, () => newSettings);
                           store.set(s => ({ ...s, isDirty: true }));
                         }
-                      } 
+                      }
                     })}
-                    ${Button({ label: 'Edit', variant: 'ghost', size: 'sm', onClick: () => store.set(s => ({ ...s, isStageModalOpen: true, editingStageId: stage.id })) })}
-                    ${Button({ label: 'Delete', variant: 'delete', size: 'sm', onClick: () => confirm('Delete stage?') })}
+                    <div class="u-flex u-gap-1 u-ml-2">
+                      ${Button({ label: 'Edit', variant: 'ghost', size: 'sm', onClick: () => store.set(s => ({ ...s, isStageModalOpen: true, editingStageId: stage.id })) })}
+                      ${Button({ label: 'Delete', variant: 'delete', size: 'sm', onClick: () => confirm('Delete stage?') })}
+                    </div>
                   </div>
                 </div>
                 <div class="u-text-sm u-text-muted u-mt-1">${stage.description || 'No description provided.'}</div>
