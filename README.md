@@ -14,7 +14,8 @@
    - **Namespaced Multi-Enrichment**: Configure multiple secondary API endpoints per service without key collisions (e.g., `series: /api/v3/series/{seriesId}`, `episode: /api/v3/episode/{episodeId}`, `movie: /api/v3/movie/{movieId}`).
    - **Generic Dotted-Path List Projection**: Extract attributes across arrays of nested objects (e.g. `movie.alternateTitles.title` or `[*]`) into clean string lists without hardcoded schemas.
    - **Field Transformers & Tag Resolution**: Map incoming attributes using conditional expressions (e.g. `if 'anime' in tags then 1 else 0 -> IS_ANIME`). Automatically resolves numeric tag IDs to human-readable labels via in-memory cached `/api/v3/tag` queries.
-   - **Clean Database Principle & Cross-Stage Merging**: Empty lists, empty objects, and blank strings normalize to SQL `NULL` (preventing `"[]"` noise). Multi-stage updates merge list elements deduplicating entries while preserving earlier stage data. Ignored files route to a volatile ring-buffer.
+   - **Clean Database Principle & Cross-Service Merging**: Empty lists, empty objects, and blank strings normalize to SQL `NULL` (preventing `"[]"` noise). Multi-stage updates seamlessly accumulate and deduplicate array elements natively across different downstream services (e.g. merging English names from Sonarr with Japanese names from Shoko into a unified list). Ignored files route to a volatile ring-buffer.
+   - **API Sandbox**: Integrated playground to simulate full enrichment pipelines in isolation, allowing administrators to visually extract dot-notation mapping paths and execute new nested API endpoints against real database contexts.
 
 2. **Tri-State Unidirectional Stage Progression Engine (`SERVICES_PIPELINE`)**:
    - **Tri-State Stage Taxonomy**:
@@ -57,6 +58,11 @@
      - `POST /api/v1/remedies/{remedy_id}/execute`: Triggers pre-approved operational runbook remedies with audit logging.
    - Purely decoupled telemetry; zero raw database connections, log scraping, or unconstrained shell execution.
 
+8. **Modern Modular Frontend & Vite Build Pipeline**:
+   - WebUI architecture decoupled into strict ES Modules (Core, Components, Views, Styles).
+   - Multi-stage containerized build pipeline leveraging Vite to minify, obfuscate, and bundle assets.
+   - Final production image delivers static content through FastAPI with zero Node.js runtime overhead.
+
 ---
 
 ## 🧭 WebUI Navigation Structure
@@ -67,10 +73,11 @@
 - **Incidents & Errors**: Unified anomaly logs (`SYSTEM_INCIDENTS`) and catalog (`ERROR_INDEX`).
 - **Custom Tools**: Host telemetry script runner with live log console.
 - **GitOps State**: Deployment tracking and commit synchronization with `cubi-server`.
-- **Settings**: Modular configuration hub featuring 5 specialized sub-tabs:
+- **Settings**: Modular configuration hub featuring 6 specialized sub-tabs:
   - *Services*: Dynamic API endpoints, credentials, and polling intervals (zero pre-baked templates).
-  - *Stages & Predicates*: DAG stage graph, root producers, predicates, grace periods, and watchdogs.
+  - *API Sandbox*: Interactive playground to simulate and register enrichment endpoints or extract data paths.
   - *Field Mappings & Transformers*: Field extractor, column sanitizer, and conditional transformers.
+  - *Stages & Predicates*: DAG stage graph, root producers, predicates, grace periods, and watchdogs.
   - *Notification Triggers*: Event bus to NTFY and Webhooks.
   - *Engine & Retention*: Database maintenance, WAL checkpoints, and retention pruning.
 
