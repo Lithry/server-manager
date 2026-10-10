@@ -507,7 +507,8 @@ class TaskScheduler:
                 except Exception:
                     pass
 
-            mapped_fields[col_name] = sanitize_and_serialize(val)
+            existing_val = row_dict.get(col_name)
+            mapped_fields[col_name] = merge_field_value(existing_val, val)
 
         if mapped_fields:
             set_clauses = [f"{k} = ?" for k in mapped_fields.keys()]
