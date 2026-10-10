@@ -961,12 +961,16 @@ ERROR: `+r.message}))}};return{mount(a){t=$.subscribe(fe.all,()=>a()),s=e.subscr
             
             <!-- JSON Path Evaluator -->
             ${r.testResponse?u`
-              <div class="u-flex u-gap-2 u-items-center u-mb-2" style="background: var(--color-bg-surface); padding: var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-sm);">
-                <span style="color: var(--color-text-muted); font-size: 0.85rem;">Test Path:</span>
-                <input type="text" class="form-input font-mono u-text-sm" placeholder="e.g. file.List.0.ID" .value=${r.testVariable} @input=${b=>e.set(p=>({...p,testVariable:b.target.value}))} style="flex: 1; border: 1px solid var(--color-border); padding: 4px 8px; background: transparent;">
-                <div style="flex: 1; padding: 4px 8px; background: #000; color: ${v!==void 0?"var(--color-success)":"var(--color-error)"}; font-family: monospace; font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                  ${r.testVariable.trim()?v!==void 0?JSON.stringify(v):"undefined":"Enter path to test..."}
+              <div class="u-flex u-flex-col u-gap-2 u-mb-2" style="background: var(--color-bg-surface); padding: var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-sm); min-width: 0;">
+                <div class="u-flex u-gap-2 u-items-center">
+                  <span style="color: var(--color-text-muted); font-size: 0.85rem;">Test Path:</span>
+                  <input type="text" class="form-input font-mono u-text-sm" placeholder="e.g. file.List.0.ID" .value=${r.testVariable} @input=${b=>e.set(p=>({...p,testVariable:b.target.value}))} style="flex: 1; min-width: 0; border: 1px solid var(--color-border); padding: 4px 8px; background: transparent;">
                 </div>
+                ${r.testVariable.trim()?u`
+                  <div style="padding: 8px; background: #000; color: ${v!==void 0?"var(--color-success)":"var(--color-error)"}; font-family: monospace; font-size: 0.85rem; max-height: 200px; overflow: auto; border-radius: var(--radius-sm);">
+                    <pre style="margin: 0; white-space: pre-wrap;">${v!==void 0?JSON.stringify(v,null,2):"undefined"}</pre>
+                  </div>
+                `:y}
               </div>
             `:y}
             
