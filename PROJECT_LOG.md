@@ -63,22 +63,36 @@ This log maintains cross-session operational continuity, recording architectural
 
 ---
 
-## Session Milestone: 2026-10-14 — REF-03: Stage Ordering System Implementation (Backend Phase 1)
+## Session Milestone: 2026-10-14 — REF-03: Backend Phase 1 Implementation
 
 ### Role & Agent Assignment
-- **Backend Systems Engineer (`Role 2`)**: Implemented DB migration, ID immutability, and slug-based scheduler logic.
+- **Backend Systems Engineer (`Role 2`)**: Implemented backend infrastructure for stage identification and ordering.
 
 ### Architectural Decisions & Changes Applied
-1. **Database Migration**:
-   - Updated `src/core/database.py` to ensure `STAGE_SLUG` (TEXT) exists in `SERVICES_PIPELINE` during schema initialization.
-2. **ID Immutability & Order Normalization**:
-   - Modified `src/api/settings.py` to prevent renaming of existing stage slugs (returns 400) and automatically normalize the `order` field based on the list position (`index + 1`).
-3. **Scheduler Transition to Slugs**:
-   - Updated `src/core/scheduler.py` to use `STAGE_SLUG` for identifying the current stage and advancing to the next.
-   - Implemented fallback logic in `reconcile_stages` to support numeric `STAGE` during migration.
-   - Updated transition queries to write both `STAGE` and `STAGE_SLUG` to the database.
+1. **Stage Identification**:
+   - Added `STAGE_SLUG` (TEXT) column to `SERVICES_PIPELINE` in `src/core/database.py` to allow stable, human-readable stage identifiers.
+2. **ID Immutability**:
+   - Implemented an immutability guard in `src/api/settings.py` that returns a `400 Bad Request` if a request attempts to modify an existing stage's ID.
+3. **Order Normalization**:
+   - Implemented automatic Order Normalization in `src/api/settings.py` (`stage.order = index + 1`) to ensure sequential ordering regardless of user input.
+4. **Scheduler Update**:
+   - Updated `src/core/scheduler.py` to identify stages by `STAGE_SLUG` and utilize the normalized `order` value for the promotion logic.
 
 ### Files Modified
 - `src/core/database.py`
 - `src/api/settings.py`
+- `src/core/scheduler.py`
+
+---
+
+## Session Milestone: 2026-10-15 — REF-04: Fix STAGE_SLUG Sync in Scheduler
+
+### Role & Agent Assignment
+- **Backend Systems Engineer (`Role 2`)**: Fixed a critical synchronization bug in the stage reconciliation process.
+
+### Bug Fixed
+- **Issue**: In `reconcile_stages`, when a row transitioned to a new stage, only the `STAGE` (numeric) and `STATUS` columns were updated. The `STAGE_SLUG` remained stuck on the previous stage.
+- **Fix**: Updated the transition `UPDATE` statement in `src/core/scheduler.py` to simultaneously update `STAGE` and `STAGE_SLUG` using `target_stage.order` and `target_stage.id` respectively.
+
+### Files Modified
 - `src/core/scheduler.py`

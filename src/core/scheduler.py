@@ -557,8 +557,8 @@ class TaskScheduler:
                             is_sink = not target_stage.complete_condition or not target_stage.complete_condition.strip()
                             new_status = "SINK" if is_sink else "PENDING"
                             await db_manager.execute(
-                                "UPDATE SERVICES_PIPELINE SET STAGE = ?, STATUS = ?, LAST_UPDATED = CURRENT_TIMESTAMP WHERE ID = ?;",
-                                (target_stage.order, new_status, row_dict["ID"])
+                                "UPDATE SERVICES_PIPELINE SET STAGE = ?, STAGE_SLUG = ?, STATUS = ?, LAST_UPDATED = CURRENT_TIMESTAMP WHERE ID = ?;",
+                                (target_stage.order, target_stage.id, new_status, row_dict["ID"])
                             )
                             print(f"[i] Row {row_dict['ID']} ({row_dict.get('PIPELINE_KEY')}) transitioned: Stage {current_stage_order} -> Stage {target_stage.order} ('{target_stage.id}', STATUS = '{new_status}').")
                             break
