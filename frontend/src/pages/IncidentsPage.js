@@ -1,6 +1,8 @@
 import { html, nothing } from 'lit-html';
 import { createIncidentTable } from '../features/incidents/IncidentTable.js';
 import { createCatalogTable } from '../features/incidents/CatalogTable.js';
+import { createReportIncidentModal } from '../features/incidents/ReportIncidentModal.js';
+import { createAddErrorModal } from '../features/incidents/AddErrorModal.js';
 import { incidentsApi, incidentsKeys } from '../features/incidents/api.js';
 import { queryCache } from '../shared/api/index.js';
 import { createStore } from '../shared/lib/lib.js';
@@ -8,10 +10,18 @@ import { Button } from '../shared/ui/atoms/Button/Button.js';
 import { Icon } from '../shared/ui/atoms/Icon/Icon.js';
 
 export function createIncidentsPage() {
+  const store = createStore({ 
+    activeTab: 'active',
+    isReportModalOpen: false,
+    isAddErrorModalOpen: false,
+    editingError: null
+  });
+
   const activeTable = createIncidentTable({ resolved: false });
   const resolvedTable = createIncidentTable({ resolved: true });
-  const catalogTable = createCatalogTable();
-  const store = createStore({ activeTab: 'active' }); // 'active', 'resolved', 'catalog'
+  const catalogTable = createCatalogTable({
+    onEditError: (error) => store.set(s => ({ ...s, isAddErrorModalOpen: true, editingError: error }))
+  });
   
   let unsubActive, unsubResolved, unsubCatalog, unsubState;
 
@@ -33,7 +43,7 @@ export function createIncidentsPage() {
       if (unsubState) unsubState();
     },
     view() {
-      const { activeTab } = store.get();
+      const { activeTab, isReportModalOpen, isAddErrorModalOpen, editingError } = store.get();
 
       const renderTabButton = (id, icon, label) => {
         const isActive = activeTab === id;
@@ -63,13 +73,39 @@ export function createIncidentsPage() {
             </div>
             
             ${activeTab === 'catalog' 
-              ? Button({ label: '+ Add Error', variant: 'add', size: 'sm', onClick: () => alert('Add Error') }) 
-              : Button({ label: '+ Report Incident', variant: 'delete', size: 'sm', onClick: () => alert('Report Incident') })}
+              ? Button({ 
+                  label: '+ Add Error', 
+                  variant: 'add', 
+                  size: 'sm', 
+                  onClick: () => store.set(s => ({ ...s, isAddErrorModalOpen: true, editingError: null })) 
+                }) 
+              : Button({ 
+                  label: '+ Report Incident', 
+                  variant: 'delete', 
+                  size: 'sm', 
+                  onClick: () => store.set(s => ({ ...s, isReportModalOpen: true })) 
+                })}
           </div>
           
           ${activeTab === 'active' ? activeTable.view() : nothing}
           ${activeTab === 'resolved' ? resolvedTable.view() : nothing}
           ${activeTab === 'catalog' ? catalogTable.view() : nothing}
+
+          <!-- Modals -->
+          ${isReportModalOpen 
+            ? createReportIncidentModal({ 
+                onClose: () => store.set(s => ({ ...s, isReportModalOpen: false })),
+                onIncidentCreated: () => {}
+              }) 
+            : nothing}
+
+          ${isAddErrorModalOpen 
+            ? createAddErrorModal({ 
+                onClose: () => store.set(s => ({ ...s, isAddErrorModalOpen: false, editingError: null })),
+                onErrorCreated: () => {},
+                initialData: editingError
+              }) 
+            : nothing}
         </div>
       `;
     }

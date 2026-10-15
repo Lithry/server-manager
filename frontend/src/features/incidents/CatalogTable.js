@@ -2,8 +2,9 @@ import { html } from 'lit-html';
 import { queryCache } from '../../shared/api/index.js';
 import { incidentsApi, incidentsKeys } from './api.js';
 import { DataTable } from '../../shared/ui/organisms/DataTable/DataTable.js';
+import { Button } from '../../shared/ui/atoms/Button/Button.js';
 
-export function createCatalogTable() {
+export function createCatalogTable({ onEditError } = {}) {
   const columns = [
     { key: 'ERROR_CODE', header: 'Code', render: (row) => html`<strong class="u-text-sm u-font-mono">${row.ERROR_CODE}</strong>` },
     { key: 'CATEGORY', header: 'Category', render: (row) => html`<span class="u-font-mono u-text-xs" style="background: color-mix(in srgb, var(--color-accent) 20%, transparent); color: var(--color-accent); padding: 2px 6px; border-radius: 4px;">${row.CATEGORY}</span>` },
@@ -17,7 +18,18 @@ export function createCatalogTable() {
     },
     { key: 'DESCRIPTION', header: 'Description', render: (row) => html`<span class="u-text-sm">${row.DESCRIPTION}</span>` },
     { key: 'TRIGGER_CONDITION', header: 'Trigger Condition', render: (row) => html`<span class="u-text-sm u-text-muted">${row.TRIGGER_CONDITION || 'None'}</span>` },
-    { key: 'REMEDY', header: 'Remedy Script/Action', render: (row) => html`<span class="u-text-sm">${row.REMEDY}</span>` }
+    { key: 'REMEDY', header: 'Remedy Script/Action', render: (row) => html`<span class="u-text-sm">${row.REMEDY || '-'}</span>` },
+    { 
+      key: 'ACTIONS', 
+      header: '', 
+      align: 'end', 
+      render: (row) => Button({
+        label: 'Edit',
+        size: 'sm',
+        variant: 'secondary',
+        onClick: () => onEditError?.(row)
+      })
+    }
   ];
 
   return {

@@ -4,7 +4,7 @@ import { cx, formatCell } from '../../../lib/dom.js';
 import { Button } from '../../atoms/Button/Button.js';
 import styles from './DataTable.module.css';
 
-export function DataTable({ id, caption, columns, snapshot, getRows = (d) => d?.items ?? [], rowKey = (_r, i) => i, emptyMessage = 'No records found.', onRetry, footer = nothing, fallbackColumns = [] }) {
+export function DataTable({ id, caption, columns, snapshot, getRows = (d) => Array.isArray(d) ? d : (d?.items ?? []), rowKey = (_r, i) => i, emptyMessage = 'No records found.', onRetry, footer = nothing, fallbackColumns = [] }) {
   const { status, data, error, isFetching } = snapshot;
   const hasData = data !== undefined;
   const cols = typeof columns === 'function' ? (hasData ? columns(data) : fallbackColumns) : columns;

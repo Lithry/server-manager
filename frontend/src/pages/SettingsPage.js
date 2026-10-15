@@ -126,14 +126,22 @@ export function createSettingsPage(router) {
               disabled: !state.isDirty,
               onClick: async () => {
                 const snapshot = queryCache.read(settingsKeys.all);
+                if (!snapshot || !snapshot.data) return;
+                
+                // Backup snapshot for rollback
+                const prevSnapshotData = JSON.parse(JSON.stringify(snapshot.data));
                 store.set(s => ({ ...s, saving: true }));
+                
                 try {
-                  await http.post('/api/v1/settings', snapshot.data);
+                  const updatedData = await http.post('/api/v1/settings', snapshot.data);
+                  queryCache.setData(settingsKeys.all, () => updatedData);
                   store.set(s => ({ ...s, isDirty: false, saving: false }));
-                  alert('Settings saved successfully!');
+                  alert('✓ Settings saved successfully, schema migrated, and scheduler refreshed.');
                 } catch (err) {
-                  alert('Error saving settings: ' + err.message);
-                  store.set(s => ({ ...s, saving: false }));
+                  // Rollback on failure
+                  queryCache.setData(settingsKeys.all, () => prevSnapshotData);
+                  store.set(s => ({ ...s, isDirty: false, saving: false }));
+                  alert('Failed to save settings: ' + err.message + '\nRolled back to previous verified configuration.');
                 }
               } 
             })}

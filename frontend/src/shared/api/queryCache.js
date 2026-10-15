@@ -80,13 +80,16 @@ export function createQueryCache({ now = () => Date.now(), gcMs = 5 * 60_000 } =
     setData(keyParts, updater) {
       const entry = entryFor(keyParts);
       const previous = { data: entry.data, status: entry.status, updatedAt: entry.updatedAt };
-      const optimistic = updater(entry.data);
+      const optimistic = typeof updater === 'function' ? updater(entry.data) : updater;
       Object.assign(entry, { data: optimistic, status: 'success', updatedAt: now() });
       publish(entry);
       return function rollback() {
         if (entry.data !== optimistic) return;
         Object.assign(entry, previous); publish(entry);
       };
+    },
+    set(keyParts, data) {
+      return this.setData(keyParts, typeof data === 'function' ? data : () => data);
     },
   };
 }
