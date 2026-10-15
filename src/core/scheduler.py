@@ -254,7 +254,10 @@ class TaskScheduler:
             new_ingested = 0
             records = []
 
-            # 1. Fetch recent items from service for active ROOT stages
+            # 1. FIRST: Reconcile stages for existing pipeline records at the start of the interval
+            reconcile_updates = await self.reconcile_stages()
+
+            # 2. SECOND: Root stage ingestion for new incoming records (NEW_ENTRY)
             if active_root_stages:
                 poll_ep = getattr(service_cfg, "poll_endpoint", None) or "/api/v3/history?pageSize=50&sortKey=date&sortDirection=descending"
                 history_url, headers = prepare_service_request(
@@ -394,8 +397,6 @@ class TaskScheduler:
                     new_ingested += 1
                     print(f"[i] New entry ingested: '{pipeline_key}' into stage '{active_stage.id}' with STATUS = '{initial_status}' (END_OF_CICLE).")
 
-            # 2. Reconciliation cycle for existing pipeline items per Mermaid lifecycle state machine
-            reconcile_updates = await self.reconcile_stages()
 
             self._status[service_id] = {
                 "last_run": now_str,
@@ -574,16 +575,17 @@ class TaskScheduler:
                     continue
 
                 status = str(row_dict.get("STATUS") or "").upper()
+                is_sink = (status == "SINK") or (not current_stage.complete_condition or not current_stage.complete_condition.strip())
 
                 # Node: IS_SINK
-                if status == "SINK":
-                    # IS_SINK -> YES -> UPDATE_VALUES (enrichment for services in row.STAGE) -> END_OF_CICLE
+                if is_sink:
+                    # IS_SINK == YES -> UPDATE_VALUES -> continue (END_OF_CICLE)
                     enriched = await self._update_mapped_values_for_stage(current_stage, row_id, table_cols, settings)
                     if enriched:
                         updates_count += 1
                     continue
 
-                # Node: IS_SINK -> NO -> CHECK_STATUS
+                # Node: IS_SINK == NO -> CHECK_STATUS
                 if status == "PENDING":
                     cond = current_stage.complete_condition
                     is_completed = False
@@ -598,8 +600,14 @@ class TaskScheduler:
                         except Exception as eval_err:
                             print(f"[!] Error evaluating complete_condition for row {row_id} in stage '{current_stage.id}': {eval_err}")
 
-                    if is_completed:
-                        # CHECK_STATUS -> TRUE STATUS = COMPLETED -> IS_NEXT_STAGE
+                    if not is_completed:
+                        # CHECK_STATUS -> FALSE: STATUS = STATUS -> UPDATE_VALUES -> continue (END_OF_CICLE)
+                        enriched = await self._update_mapped_values_for_stage(current_stage, row_id, table_cols, settings)
+                        if enriched:
+                            updates_count += 1
+                        continue
+                    else:
+                        # CHECK_STATUS -> TRUE: Update DB STATUS = 'COMPLETED', status = 'COMPLETED', proceed immediately to IS_NEXT_STAGE
                         await db_manager.execute(
                             "UPDATE SERVICES_PIPELINE SET STATUS = 'COMPLETED', LAST_UPDATED = CURRENT_TIMESTAMP WHERE ID = ?;",
                             (row_id,)
@@ -608,15 +616,9 @@ class TaskScheduler:
                         status = "COMPLETED"
                         row_dict["STATUS"] = "COMPLETED"
                         updates_count += 1
-                        # Proceeds to IS_NEXT_STAGE below
-                    else:
-                        # CHECK_STATUS -> FALSE STATUS = STATUS -> UPDATE_VALUES -> END_OF_CICLE
-                        enriched = await self._update_mapped_values_for_stage(current_stage, row_id, table_cols, settings)
-                        if enriched:
-                            updates_count += 1
-                        continue
+                        # Proceeds immediately to IS_NEXT_STAGE below
 
-                # Node: IS_NEXT_STAGE (for STATUS == 'COMPLETED', already completed or just set to COMPLETED)
+                # Node: IS_NEXT_STAGE (for STATUS == 'COMPLETED', already completed or freshly promoted in this cycle)
                 if status == "COMPLETED":
                     candidate_stages = sorted(
                         [
@@ -653,14 +655,14 @@ class TaskScheduler:
                         updates_count += 1
                         # Run UPDATE_VALUES for target_stage.service_ids
                         await self._update_mapped_values_for_stage(transitioned_stage, row_id, table_cols, settings)
-                        # END_OF_CICLE
+                        continue  # END_OF_CICLE
                     else:
                         # IS_NEXT_STAGE -> NO -> UPDATE_VALUES -> END_OF_CICLE
                         # Remains in current stage with STATUS = 'COMPLETED'
                         enriched = await self._update_mapped_values_for_stage(current_stage, row_id, table_cols, settings)
                         if enriched:
                             updates_count += 1
-                        # END_OF_CICLE
+                        continue  # END_OF_CICLE
 
         except Exception as err:
             print(f"[!] Error in reconcile_stages: {err}")

@@ -301,4 +301,32 @@ This log maintains cross-session operational continuity, recording architectural
 - `src/core/scheduler.py`
 - `PROJECT_LOG.md`
 
+---
+
+## Session Milestone: 2026-10-15 — REF-10: Invert trigger_now Execution Order and Finalize Mermaid State Machine
+
+### Role & Agent Assignment
+- **Backend Systems Engineer (`Role 2`)**: Refactored `src/core/scheduler.py` to invert the execution sequence in `trigger_now(service_id)` and strictly enforce the Mermaid state machine with explicit cycle termination.
+
+### Architectural Decisions & Changes Applied
+1. **Inverted Execution Sequence in `trigger_now`**:
+   - **Step 1 (Existing Pipeline Reconciliation)**: Executes `reconcile_updates = await self.reconcile_stages()` FIRST to evaluate and progress existing records already residing in `SERVICES_PIPELINE` at the start of the interval.
+   - **Step 2 (Root Stage Ingestion for New Incoming Records)**: Executes root stage ingestion SECOND (`NEW_ENTRY`). Newly discovered records are evaluated for initial field mappings (`UPDATE_VALUES`), assigned `initial_status = "SINK"` (if no completion condition) or `"PENDING"`, and inserted into `SERVICES_PIPELINE`.
+   - **Purged Trailing Reconciliation**: Purged the second `reconcile_stages()` invocation from the end of `trigger_now`. Newly ingested items strictly remain in the root stage for at least one full polling interval before evaluating progression.
+2. **Strict Mermaid State Machine Enforcement (`reconcile_stages`)**:
+   - `IS_SINK == YES`: Triggers `_update_mapped_values_for_stage(current_stage)` and explicitly issues `continue` (`END_OF_CICLE`).
+   - `IS_SINK == NO` -> `CHECK_STATUS`:
+     * If `status == "PENDING"`: Evaluates `current_stage.complete_condition`.
+       - If False: Runs `_update_mapped_values_for_stage(current_stage)` and explicitly issues `continue` (`END_OF_CICLE`).
+       - If True: Updates DB `STATUS = 'COMPLETED'`, promotes local status to `"COMPLETED"`, and proceeds immediately to `IS_NEXT_STAGE`.
+     * If `status == "COMPLETED"` (already completed or freshly promoted in this cycle) -> `IS_NEXT_STAGE`:
+       - Evaluates candidate stages (`order > current_stage.order` and `start_condition == True`).
+       - If matched: Transitions row (`NEXT_STAGE`), computes `is_sink`, sets `new_status = "SINK" if is_sink else "PENDING"`, updates DB, triggers target stage enrichment `_update_mapped_values_for_stage(target_stage)`, and explicitly issues `continue` (`END_OF_CICLE`).
+       - If not matched: Row remains in current stage with `STATUS = 'COMPLETED'`, triggers current stage enrichment `_update_mapped_values_for_stage(current_stage)`, and explicitly issues `continue` (`END_OF_CICLE`).
+
+### Files Modified
+- `src/core/scheduler.py`
+- `PROJECT_LOG.md`
+
+
 
