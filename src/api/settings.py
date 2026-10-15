@@ -56,9 +56,24 @@ async def update_settings(settings: Settings) -> Settings:
                     )
                 all_new_targets.add(col_upper)
 
-    # 2. Detect renames and auto-migrate data
+    # 2. Validate Stage ID Immutability and Normalize Order
     old_settings = await config_manager.get_settings()
-    old_services = getattr(old_settings, "services", {}) or getattr(old_settings, "apps", {})
+    old_stages = old_settings.stages
+
+    # Match by index to detect renames/swaps of existing slugs
+    for idx, stage in enumerate(settings.stages):
+        # Normalize order based on position
+        stage.order = idx + 1
+
+        if idx < len(old_stages):
+            old_stage = old_stages[idx]
+            if old_stage.id != stage.id:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Stage ID at index {idx} cannot be changed from '{old_stage.id}' to '{stage.id}'."
+                )
+
+    # 3. Detect renames and auto-migrate data
 
     existing_table_cols = {c["name"].upper() for c in await db_manager.get_table_columns("SERVICES_PIPELINE")}
 

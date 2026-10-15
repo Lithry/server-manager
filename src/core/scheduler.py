@@ -396,9 +396,9 @@ class TaskScheduler:
                             print(f"[!] Warning evaluating complete_condition for {pipeline_key}: {cond_err}")
                             initial_status = "PENDING"
 
-                    col_names = ["PIPELINE_KEY", "STAGE", "STATUS"] + list(mapped_fields.keys())
+                    col_names = ["PIPELINE_KEY", "STAGE", "STAGE_SLUG", "STATUS"] + list(mapped_fields.keys())
                     placeholders = ["?"] * len(col_names)
-                    values = [pipeline_key, active_stage.order, initial_status] + list(mapped_fields.values())
+                    values = [pipeline_key, active_stage.order, active_stage.id, initial_status] + list(mapped_fields.values())
 
                     insert_sql = f'INSERT INTO SERVICES_PIPELINE ({", ".join(col_names)}) VALUES ({", ".join(placeholders)});'
                     await db_manager.execute(insert_sql, tuple(values))

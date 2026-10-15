@@ -78,6 +78,9 @@ class DatabaseManager:
                 );
             """)
 
+            # Migration: Ensure STAGE_SLUG exists in SERVICES_PIPELINE
+            await self.ensure_column("SERVICES_PIPELINE", "STAGE_SLUG", "TEXT")
+
             # Baseline Seed for ERROR_INDEX
             baseline_errors = [
                 ("ERR_DISK_UNMOUNTED", "STORAGE", "CRITICAL", "Storage disk unmounted or unavailable", "mounted == false", "Run 'sudo mount -a' and verify /etc/fstab"),

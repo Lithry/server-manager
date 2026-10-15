@@ -44,52 +44,41 @@ This log maintains cross-session operational continuity, recording architectural
 
 ---
 
-## Session Milestone: 2026-10-14 — REF-01: Modular Frontend Stabilization & Defect Remediation (`v0.1.7`)
+## Session Milestone: 2026-10-14 — REF-02: Stage Ordering System Implementation (Frontend Phase 1)
 
 ### Role & Agent Assignment
-- **Frontend & WebUI Specialist (`Role 3`)** (Assumed under user authorization): Executed component stabilization, modal implementations, defect fixes (D3, D4, D13), and legacy cleanup.
+- **Frontend & WebUI Specialist (`Role 3`)**: Implemented stage reordering UI and edit protections.
 
 ### Architectural Decisions & Changes Applied
-1. **Notification Triggers Component (`NotificationsPanel.js` & `NotificationTriggerModal.js`) [Fix D3]**:
-   - Implemented dynamic trigger cards rendering each configured rule from `notification_triggers` with Event, Channel, Target URL, Topic, Priority, and Tags.
-   - Added interactive actions per trigger: Enable/Disable toggle, Delete trigger with `ConfirmDialog`, and Test Alert calling `POST /api/v1/settings/test-notification`.
-   - Built full `NotificationTriggerModal` form with reactive persistence into the settings state.
-2. **Incident Management & Modals (`IncidentTable.js`, `ReportIncidentModal.js`, `AddErrorModal.js`, `IncidentsPage.js`) [Fix D4]**:
-   - Corrected database column mapping in `IncidentTable.js` (`SEVERITY` with semantic `Badge`, `COMPONENT`, `INCIDENT_CODE`, `DETAILS`, formatted `CREATED_AT`, `REMEDY`).
-   - Fixed `incidentsApi.resolveIncident` to call `POST /api/v1/incidents/{id}/resolve` with `{ resolution_note: note }`.
-   - Created `ReportIncidentModal.js` wired to `POST /api/v1/incidents`.
-   - Created `AddErrorModal.js` wired to `POST /api/v1/incidents/catalog/errors`.
-   - Connected `IncidentsPage.js` action buttons to open modals.
-3. **Settings Optimistic Mutation Rollback [Fix D13]**:
-   - In `SettingsPage.js`, added immutable snapshot capture prior to `POST /api/v1/settings`.
-   - On request failure or network error, queryCache automatically rolls back to the prior verified configuration.
-4. **Universal Array & Items Support in `DataTable.js`**:
-   - Adjusted default `getRows` extractor: `(d) => Array.isArray(d) ? d : (d?.items ?? [])`.
-5. **Legacy Monolith Cleanup**:
-   - Safely deleted `frontend/old_app.js` and `frontend/old_index.html`, eliminating >320 KB of dead legacy assets.
-6. **Version Bump**:
-   - Bumped `__version__ = "0.1.7"` in `src/__init__.py`.
-7. **Production Build Verification**:
-   - Executed `npm run build`: 78 modules transformed, zero compile errors, bundle built into `src/static/` in 1.39s.
+1. **Stage Reordering UI (`StagesPanel.js`)**:
+   - Added "Move Up" (↑) and "Move Down" (↓) buttons to each stage card.
+   - Implemented `handleMoveStage` logic to swap elements in the local state via `queryCache` and mark settings as `isDirty`.
+   - Enforced boundary protections: "Move Up" is disabled for the first item, "Move Down" for the last.
+2. **Stage ID Edit Protection (`StageModal.js`)**:
+   - Verified that the `id` input field is `disabled` when `editingStage` is present, preventing modifications to existing stage identifiers.
 
-### Files Modified & Created
-- Created: `frontend/src/features/incidents/ReportIncidentModal.js`
-- Created: `frontend/src/features/incidents/AddErrorModal.js`
-- Modified: `frontend/src/features/settings/ui/NotificationsPanel.js`
-- Modified: `frontend/src/features/settings/ui/NotificationTriggerModal.js`
-- Modified: `frontend/src/features/incidents/IncidentTable.js`
-- Modified: `frontend/src/features/incidents/api.js`
-- Modified: `frontend/src/pages/IncidentsPage.js`
-- Modified: `frontend/src/pages/SettingsPage.js`
-- Modified: `frontend/src/shared/ui/organisms/DataTable/DataTable.js`
-### Manual Verification & Edge Defect Remediation (2026-10-14)
-- **Defects Addressed from Live Edge Testing**:
-  1. **Dynamic Version Display**: Replaced hardcoded `v0.1.6` in `Sidebar.js` with dynamic `meta?.data?.version` readout (with `v0.1.7` fallback).
-  2. **Duplicate Error Catalog Handling**: Enhanced `AddErrorModal.js` to detect duplicate `error_code`, prompt user with `ConfirmDialog` before overwriting existing catalog entry, and added an `Edit` action button directly in `CatalogTable.js` wired to `IncidentsPage.js`.
-  3. **NTFY Test Endpoint Diagnosis**: Updated `NotificationsPanel.js` to parse and display real HTTP status codes and response bodies from `POST /api/v1/settings/test-notification` instead of generic `Unknown response`.
-  4. **Notification Trigger Modal Persistence & Dismissal**: Resolved modal freeze by fixing `queryCache.js` (added `set()` alias and enhanced `setData()`), updating `NotificationTriggerModal.js` to read form inputs directly and call `setData()`, and fixing `queryCache.setData()` usage in `NotificationsPanel.js` and `SettingsPage.js`.
-- **Build Status**:
-  - `npm run build` executed cleanly (code 0, 78 modules, 1.29s).
-  - Dev server active on `http://localhost:5173/static/` proxying to `cubi-server`.
+### Files Modified
+- `frontend/src/features/settings/ui/StagesPanel.js`
+- `frontend/src/features/settings/ui/StageModal.js` (Verified existing logic)
 
+---
 
+## Session Milestone: 2026-10-14 — REF-03: Stage Ordering System Implementation (Backend Phase 1)
+
+### Role & Agent Assignment
+- **Backend Systems Engineer (`Role 2`)**: Implemented DB migration, ID immutability, and slug-based scheduler logic.
+
+### Architectural Decisions & Changes Applied
+1. **Database Migration**:
+   - Updated `src/core/database.py` to ensure `STAGE_SLUG` (TEXT) exists in `SERVICES_PIPELINE` during schema initialization.
+2. **ID Immutability & Order Normalization**:
+   - Modified `src/api/settings.py` to prevent renaming of existing stage slugs (returns 400) and automatically normalize the `order` field based on the list position (`index + 1`).
+3. **Scheduler Transition to Slugs**:
+   - Updated `src/core/scheduler.py` to use `STAGE_SLUG` for identifying the current stage and advancing to the next.
+   - Implemented fallback logic in `reconcile_stages` to support numeric `STAGE` during migration.
+   - Updated transition queries to write both `STAGE` and `STAGE_SLUG` to the database.
+
+### Files Modified
+- `src/core/database.py`
+- `src/api/settings.py`
+- `src/core/scheduler.py`

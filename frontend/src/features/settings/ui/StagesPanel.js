@@ -9,6 +9,25 @@ export function createStagesPanel(store, stagesData = []) {
     store.set(s => ({ ...s, isStageModalOpen: true, editingStageId: null }));
   };
 
+  const handleMoveStage = (index, direction) => {
+    const currentSettings = queryCache.read(settingsKeys.all);
+    if (!currentSettings || !currentSettings.data) return;
+
+    const stages = [...currentSettings.data.stages];
+    const newIndex = index + direction;
+
+    if (newIndex < 0 || newIndex >= stages.length) return;
+
+    // Swap elements
+    [stages[index], stages[newIndex]] = [stages[newIndex], stages[index]];
+
+    queryCache.setData(settingsKeys.all, () => ({
+      ...currentSettings.data,
+      stages: stages
+    }));
+    store.set(s => ({ ...s, isDirty: true }));
+  };
+
   const getStageType = (stage) => {
     if (!stage.start_condition) return { label: 'ROOT', color: 'var(--color-success)', bg: 'color-mix(in srgb, var(--color-success) 20%, transparent)' };
     if (!stage.complete_condition) return { label: 'SINK', color: 'var(--color-warning)', bg: 'color-mix(in srgb, var(--color-warning) 20%, transparent)' };
@@ -53,6 +72,20 @@ export function createStagesPanel(store, stagesData = []) {
                       }
                     })}
                     <div class="u-flex u-gap-1 u-ml-2">
+                      ${Button({
+                        label: '↑',
+                        variant: 'ghost',
+                        size: 'sm',
+                        disabled: i === 0,
+                        onClick: () => handleMoveStage(i, -1)
+                      })}
+                      ${Button({
+                        label: '↓',
+                        variant: 'ghost',
+                        size: 'sm',
+                        disabled: i === stagesData.length - 1,
+                        onClick: () => handleMoveStage(i, 1)
+                      })}
                       ${Button({ label: 'Edit', variant: 'ghost', size: 'sm', onClick: () => store.set(s => ({ ...s, isStageModalOpen: true, editingStageId: stage.id })) })}
                       ${Button({ label: 'Delete', variant: 'delete', size: 'sm', onClick: () => confirm('Delete stage?') })}
                     </div>
