@@ -1,6 +1,18 @@
-# server-manager — Universal Pipeline, Monitoring & Telemetry Appliance (`v0.1.6`)
+# server-manager — Universal Pipeline, Monitoring & Telemetry Appliance (`v0.1.7`)
 
 `server-manager` is an autonomous, containerized administration and telemetry platform designed for homelab and media server environments (`cubi-server`). It operates on port **8099** with a native FastAPI backend, SQLite in WAL mode, and a responsive vanilla WebUI.
+
+---
+
+## 📚 Technical Documentation
+
+Complete architectural specifications, backend contracts, and technical roadmaps are maintained in the [`docs/`](docs/) directory:
+
+- [System Architecture & Platform Blueprint](docs/ARCHITECTURE.md): Container boundaries, dynamic schema mapper, tri-state DAG stages, and Tier 3 LLM meta-tools.
+- [Backend Technical Specification (v0.1.7)](docs/BACKEND_SPEC.md): Module inventory, SQLite WAL schema, scheduler loops, and REST API contract.
+- [Modular Frontend Architecture & Audit](docs/FRONTEND_SPEC.md): Feature-Sliced design, `lit-html` rendering, Vite pipeline, and legacy defect remediation matrix.
+- [Technical Backlog & Phased Roadmap](docs/BACKLOG.md): Priority matrix, work packages, and semantic versioning gates from `v0.1.7` through `v1.0.0`.
+- [Project Engineering Log](PROJECT_LOG.md): Activity log and cross-session continuity ledger.
 
 ---
 

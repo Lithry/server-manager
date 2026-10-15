@@ -31,3 +31,7 @@ settings.json
 # Logs
 *.log
 logs/
+
+# AI
+ROLES.md
+.claude/
