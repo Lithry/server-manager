@@ -703,7 +703,7 @@ ERROR: `+o.message}))}};return{mount(a){s=h.subscribe(ye.all,()=>a()),t=e.subscr
       <span class="slider"></span>
       ${t?u`<span class="u-text-sm u-font-mono" style="color: ${e?"var(--color-success)":"var(--color-text-muted)"}; font-weight: bold;">${t}</span>`:""}
     </label>
-  `}function Is(e,s=[]){const t=()=>{e.set(a=>({...a,isStageModalOpen:!0,editingStageId:null}))},l=a=>a.start_condition?a.complete_condition?{label:"CONSUMER",color:"var(--color-accent)",bg:"color-mix(in srgb, var(--color-accent) 20%, transparent)"}:{label:"SINK",color:"var(--color-warning)",bg:"color-mix(in srgb, var(--color-warning) 20%, transparent)"}:{label:"ROOT",color:"var(--color-success)",bg:"color-mix(in srgb, var(--color-success) 20%, transparent)"};return u`
+  `}function Is(e,s=[]){const t=()=>{e.set(o=>({...o,isStageModalOpen:!0,editingStageId:null}))},l=(o,n)=>{const d=h.read(S.all);if(!d||!d.data)return;const r=[...d.data.stages],i=o+n;i<0||i>=r.length||([r[o],r[i]]=[r[i],r[o]],h.setData(S.all,()=>({...d.data,stages:r})),e.set(c=>({...c,isDirty:!0})))},a=o=>o.start_condition?o.complete_condition?{label:"CONSUMER",color:"var(--color-accent)",bg:"color-mix(in srgb, var(--color-accent) 20%, transparent)"}:{label:"SINK",color:"var(--color-warning)",bg:"color-mix(in srgb, var(--color-warning) 20%, transparent)"}:{label:"ROOT",color:"var(--color-success)",bg:"color-mix(in srgb, var(--color-success) 20%, transparent)"};return u`
     <div style="background: var(--color-bg-card); border-radius: var(--radius-md); border: 1px solid var(--color-border);">
       <div class="u-flex u-items-center u-justify-between" style="padding: var(--space-4); border-bottom: 1px solid var(--color-border);">
         <div>
@@ -714,29 +714,31 @@ ERROR: `+o.message}))}};return{mount(a){s=h.subscribe(ye.all,()=>a()),t=e.subscr
       </div>
       
       <div class="u-flex u-flex-col u-gap-3" style="padding: var(--space-4);">
-        ${s.length===0?u`<div class="u-text-muted u-text-sm">No execution stages defined yet. Click <strong>+ Add Stage</strong> to create your first pipeline stage.</div>`:s.map((a,o)=>{const n=l(a);return u`
-              <div style="padding: var(--space-4); border: 1px solid var(--color-border); border-left: 4px solid ${n.color}; border-radius: var(--radius-md); background: color-mix(in srgb, ${n.color} 5%, var(--color-bg-card)); transition: background 0.2s;">
+        ${s.length===0?u`<div class="u-text-muted u-text-sm">No execution stages defined yet. Click <strong>+ Add Stage</strong> to create your first pipeline stage.</div>`:s.map((o,n)=>{const d=a(o);return u`
+              <div style="padding: var(--space-4); border: 1px solid var(--color-border); border-left: 4px solid ${d.color}; border-radius: var(--radius-md); background: color-mix(in srgb, ${d.color} 5%, var(--color-bg-card)); transition: background 0.2s;">
                 <div class="u-flex u-items-center u-justify-between">
                   <div class="u-flex u-items-center u-gap-3">
-                    <strong style="color: var(--color-text); font-size: 1.1rem;">${a.name}</strong>
-                    <span class="u-font-mono u-text-xs" style="color: var(--color-text-muted);">${a.id}</span>
-                    <span class="u-font-mono u-text-xs" style="background: ${n.bg}; color: ${n.color}; padding: 2px 6px; border-radius: 4px; font-weight: bold;">${n.label}</span>
+                    <strong style="color: var(--color-text); font-size: 1.1rem;">${o.name}</strong>
+                    <span class="u-font-mono u-text-xs" style="color: var(--color-text-muted);">${o.id}</span>
+                    <span class="u-font-mono u-text-xs" style="background: ${d.bg}; color: ${d.color}; padding: 2px 6px; border-radius: 4px; font-weight: bold;">${d.label}</span>
                   </div>
                   <div class="u-flex u-items-center u-gap-3">
-                    ${ks({checked:a.enabled,label:a.enabled?"ACTIVE":"INACTIVE",onChange:d=>{const r={...h.read(S.all).data},i=r.stages.find(c=>c.id===a.id);i&&(i.enabled=d,h.setData(S.all,()=>r),e.set(c=>({...c,isDirty:!0})))}})}
+                    ${ks({checked:o.enabled,label:o.enabled?"ACTIVE":"INACTIVE",onChange:r=>{const i={...h.read(S.all).data},c=i.stages.find(p=>p.id===o.id);c&&(c.enabled=r,h.setData(S.all,()=>i),e.set(p=>({...p,isDirty:!0})))}})}
                     <div class="u-flex u-gap-1 u-ml-2">
-                      ${y({label:"Edit",variant:"ghost",size:"sm",onClick:()=>e.set(d=>({...d,isStageModalOpen:!0,editingStageId:a.id}))})}
+                      ${y({label:"↑",variant:"ghost",size:"sm",disabled:n===0,onClick:()=>l(n,-1)})}
+                      ${y({label:"↓",variant:"ghost",size:"sm",disabled:n===s.length-1,onClick:()=>l(n,1)})}
+                      ${y({label:"Edit",variant:"ghost",size:"sm",onClick:()=>e.set(r=>({...r,isStageModalOpen:!0,editingStageId:o.id}))})}
                       ${y({label:"Delete",variant:"delete",size:"sm",onClick:()=>confirm("Delete stage?")})}
                     </div>
                   </div>
                 </div>
-                <div class="u-text-sm u-text-muted u-mt-1">${a.description||"No description provided."}</div>
+                <div class="u-text-sm u-text-muted u-mt-1">${o.description||"No description provided."}</div>
                 <div class="u-text-xs u-font-mono u-mt-3" style="background: color-mix(in srgb, var(--color-bg-card) 50%, transparent); padding: 8px; border-radius: 4px; border: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent);">
                   <div style="margin-bottom: 4px; color: var(--color-success);">
-                    ${a.start_condition?"":"✓ "}<strong>START CONDITION:</strong> ${a.start_condition?a.start_condition:"NULL (ROOT STAGE - Immediate Execution)"}
+                    ${o.start_condition?"":"✓ "}<strong>START CONDITION:</strong> ${o.start_condition?o.start_condition:"NULL (ROOT STAGE - Immediate Execution)"}
                   </div>
                   <div style="color: var(--color-warning);">
-                    ${a.complete_condition?"":"✗ "}<strong>COMPLETE CONDITION:</strong> ${a.complete_condition?a.complete_condition:"NULL (SINK STAGE - Ends on Start)"}
+                    ${o.complete_condition?"":"✗ "}<strong>COMPLETE CONDITION:</strong> ${o.complete_condition?o.complete_condition:"NULL (SINK STAGE - Ends on Start)"}
                   </div>
                 </div>
               </div>
