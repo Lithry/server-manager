@@ -142,6 +142,7 @@ async def get_pipeline_items(
 
     columns = await db_manager.get_table_columns("SERVICES_PIPELINE")
     all_col_names = [col["name"] for col in columns]
+    col_types = {col["name"]: col["type"] for col in columns}
 
     settings = await config_manager.get_settings()
     pref_order = getattr(settings, "pipeline_column_order", []) or []
@@ -152,6 +153,7 @@ async def get_pipeline_items(
         "limit": limit,
         "offset": offset,
         "columns": ordered_cols,
+        "column_types": col_types,
         "items": items,
     }
 

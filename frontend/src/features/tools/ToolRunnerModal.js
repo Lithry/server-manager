@@ -6,7 +6,7 @@ import { http } from '../../shared/api/index.js';
 import { Button } from '../../shared/ui/atoms/Button/Button.js';
 
 export function runToolModal(tool) {
-  let output = 'Iniciando ejecución...\n';
+  let output = 'Starting execution...\n';
   let status = 'running';
 
   let modalCloseFn;
@@ -17,7 +17,7 @@ export function runToolModal(tool) {
     body: html`${ConsoleOutput({ text: output, status })}`,
     footer: html`
       <div class="u-flex u-justify-end" style="width: 100%;">
-        ${Button({ label: 'Cerrar', onClick: () => modalCloseFn() })}
+        ${Button({ label: 'Close', onClick: () => modalCloseFn() })}
       </div>
     `,
     onClose: () => modalCloseFn()
@@ -29,8 +29,8 @@ export function runToolModal(tool) {
   });
 
   const update = () => {
-    // Truco para forzar re-render sin usar estado reactivo complejo por ahora:
-    // Sustituimos la función view() original en el store por la misma que devuelve el contenido actualizado.
+    // Force re-render without complex reactive state for now:
+    // Replace original view() function in store with one returning updated content.
     const state = modalManager.store.get();
     const active = state.stack[state.stack.length - 1];
     if (active) {

@@ -11,7 +11,11 @@ export function DataTable({ id, caption, columns, snapshot, getRows = (d) => Arr
   const colSpan = Math.max(cols.length, 1);
   const rows = hasData ? getRows(data) : [];
 
-  const cell = (col, row) => html`<td class=${cx(col.align === 'end' && styles['table__cell--end'], col.mono && styles['table__cell--mono'])}>
+  const cell = (col, row) => html`<td class=${cx(
+    col.align === 'end' && styles['table__cell--end'],
+    col.align === 'center' && styles['table__cell--center'],
+    col.mono && styles['table__cell--mono']
+  )}>
     ${col.render ? col.render(row) : formatCell(row[col.key])}</td>`;
 
   let body;
@@ -32,7 +36,7 @@ export function DataTable({ id, caption, columns, snapshot, getRows = (d) => Arr
     <div class=${styles['table__scroll']} aria-busy=${isFetching ? 'true' : 'false'}>
       <table id=${id ?? nothing} class=${styles['table__grid']}>
         ${caption ? html`<caption class="u-sr-only">${caption}</caption>` : nothing}
-        <thead><tr>${cols.map((c) => html`<th scope="col" class=${cx(c.align === 'end' && styles['table__cell--end'])}>${c.header}</th>`)}</tr></thead>
+        <thead><tr>${cols.map((c) => html`<th scope="col" class=${cx(c.align === 'end' && styles['table__cell--end'], c.align === 'center' && styles['table__cell--center'])}>${c.header}</th>`)}</tr></thead>
         <tbody>${body}</tbody>
       </table>
     </div>

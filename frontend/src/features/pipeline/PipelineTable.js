@@ -5,14 +5,25 @@ import { queryCache } from '../../shared/api/index.js';
 
 import { Button } from '../../shared/ui/atoms/Button/Button.js';
 
-// Utiliza el orden y las columnas devueltas por la API
+const SYSTEM_COLUMNS = new Set(['ID', 'PIPELINE_KEY', 'STAGE', 'STATUS', 'LAST_UPDATED']);
+
+// Uses the order and columns returned by the API
 function getColumns(data) {
   if (!data || !data.columns) return [];
-  return data.columns.map(key => ({
-    key, 
-    header: key.toUpperCase(),
-    render: (row) => html`<span class="u-truncate" style="max-width: 250px; display: inline-block;" title=${row[key]}>${row[key]}</span>`
-  }));
+  const colTypes = data?.column_types || {};
+  return data.columns.map(key => {
+    const upperKey = key.toUpperCase();
+    const colType = (colTypes[key] || colTypes[upperKey] || '').toUpperCase();
+    const isSystem = SYSTEM_COLUMNS.has(upperKey);
+    const isInt = colType.includes('INT');
+    const align = (isSystem || isInt) ? 'center' : undefined;
+    return {
+      key,
+      header: upperKey,
+      align,
+      render: (row) => html`<span class="u-truncate" style="max-width: 250px; display: inline-block; ${align === 'center' ? 'text-align: center;' : ''}" title=${row[key] ?? ''}>${row[key] ?? ''}</span>`
+    };
+  });
 }
 
 export function createPipelineTable() {

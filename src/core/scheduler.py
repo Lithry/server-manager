@@ -129,6 +129,76 @@ def merge_field_value(existing_val: Any, new_val: Any) -> Any:
     return sanitized_new
 
 
+def coerce_value_to_type(val: Any, data_type: str, col_name: str = "", item_identifier: str = "") -> tuple[bool, Any]:
+    """Coerce and validate a field value against the target column SQL data type.
+    Returns (True, coerced_val) on success, or (False, None) if incompatible with a warning logged.
+    """
+    dtype = (data_type or "TEXT").strip().upper()
+
+    if dtype in ("INTEGER", "INT"):
+        if val is None:
+            return (True, None)
+        if isinstance(val, bool):
+            print(f"[!] Warning: Field '{col_name}' for item '{item_identifier}' was not loaded: value '{val}' (bool) is incompatible with INT.")
+            return (False, None)
+        if isinstance(val, int):
+            return (True, val)
+        if isinstance(val, float) and val.is_integer():
+            return (True, int(val))
+        if isinstance(val, str):
+            stripped = val.strip()
+            if re.match(r"^[-+]?\d+$", stripped):
+                return (True, int(stripped))
+            else:
+                print(f"[!] Warning: Field '{col_name}' for item '{item_identifier}' was not loaded because value is incompatible: Field requires INT (value: '{val}')")
+                return (False, None)
+        print(f"[!] Warning: Field '{col_name}' for item '{item_identifier}' was not loaded because value is incompatible: Field requires INT (value: '{val}')")
+        return (False, None)
+
+    elif dtype in ("BOOLEAN", "BOOL"):
+        if val is None:
+            return (True, None)
+        if isinstance(val, bool):
+            return (True, 1 if val else 0)
+        if isinstance(val, int) and not isinstance(val, bool):
+            if val in (0, 1):
+                return (True, val)
+            else:
+                print(f"[!] Warning: Field '{col_name}' for item '{item_identifier}' was not loaded: value '{val}' is not a valid boolean.")
+                return (False, None)
+        if isinstance(val, str):
+            s = val.strip().lower()
+            if s in ("true", "1", "yes", "t"):
+                return (True, 1)
+            elif s in ("false", "0", "no", "f"):
+                return (True, 0)
+            else:
+                print(f"[!] Warning: Field '{col_name}' for item '{item_identifier}' was not loaded: value '{val}' is incompatible with BOOLEAN.")
+                return (False, None)
+        print(f"[!] Warning: Field '{col_name}' for item '{item_identifier}' was not loaded: value '{val}' is incompatible with BOOLEAN.")
+        return (False, None)
+
+    elif dtype in ("REAL", "FLOAT", "DOUBLE", "NUMERIC"):
+        if val is None:
+            return (True, None)
+        if isinstance(val, (int, float)) and not isinstance(val, bool):
+            return (True, float(val))
+        if isinstance(val, str):
+            try:
+                return (True, float(val.strip()))
+            except ValueError:
+                print(f"[!] Warning: Field '{col_name}' for item '{item_identifier}' was not loaded: value '{val}' is incompatible with REAL.")
+                return (False, None)
+        print(f"[!] Warning: Field '{col_name}' for item '{item_identifier}' was not loaded: value '{val}' is incompatible with REAL.")
+        return (False, None)
+
+    else:  # TEXT, VARCHAR, STRING or others
+        if val is None:
+            return (True, None)
+        if isinstance(val, (int, float, bool)):
+            return (True, str(val))
+        return (True, sanitize_and_serialize(val))
+
 
 def resolve_template_key(template: str, service_id: str, rec: dict) -> str:
     """Interpolate template string such as '{service}:{id}' or '{service}:{data.path}'."""
@@ -368,7 +438,7 @@ class TaskScheduler:
                         if not mapping.target_column:
                             continue
                         col_name = mapping.target_column.strip().upper()
-                        if col_name in SYSTEM_RESERVED_COLUMNS:
+                        if col_name in SYSTEM_RESERVED_COLUMNS or col_name not in table_cols:
                             continue
 
                         val = extract_dotted_value(context_dict, mapping.source_field)
@@ -381,8 +451,12 @@ class TaskScheduler:
                             except Exception:
                                 pass
 
-                        if col_name in table_cols:
-                            mapped_fields[col_name] = sanitize_and_serialize(val)
+                        data_type = getattr(mapping, "data_type", "TEXT") or "TEXT"
+                        ok, coerced_val = coerce_value_to_type(val, data_type, col_name=col_name, item_identifier=pipeline_key)
+                        if not ok:
+                            continue
+
+                        mapped_fields[col_name] = coerced_val
 
                     # Authoritative Mermaid Lifecycle: NEW_ENTRY -> STATUS_TO_PENDING -> UPDATE_VALUES -> END_OF_CICLE
                     is_sink = not active_stage.complete_condition or not active_stage.complete_condition.strip()
@@ -497,7 +571,13 @@ class TaskScheduler:
                     pass
 
             existing_val = row_dict.get(col_name)
-            mapped_fields[col_name] = merge_field_value(existing_val, val)
+            data_type = getattr(mapping, "data_type", "TEXT") or "TEXT"
+            item_id = str(row_dict.get("PIPELINE_KEY") or row_dict.get("ID"))
+            ok, coerced_val = coerce_value_to_type(val, data_type, col_name=col_name, item_identifier=item_id)
+            if not ok:
+                continue
+
+            mapped_fields[col_name] = merge_field_value(existing_val, coerced_val)
 
         has_changes = any(row_dict.get(k) != v for k, v in mapped_fields.items())
         if mapped_fields and has_changes:

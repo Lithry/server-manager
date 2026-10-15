@@ -8,7 +8,7 @@ export function createOverviewPanel() {
     view() {
       const { status, data, error } = queryCache.read(overviewKeys.all);
       if (status === 'error') return html`<div class="u-text-danger">${error.message}</div>`;
-      if (status === 'loading' || !data) return html`<div style="color: var(--color-text-muted);">Cargando resumen...</div>`;
+      if (status === 'loading' || !data) return html`<div style="color: var(--color-text-muted);">Loading overview...</div>`;
 
       const pipelineItems = data.pipeline_total_items || 0;
       const activeIncidents = data.active_incidents || 0;

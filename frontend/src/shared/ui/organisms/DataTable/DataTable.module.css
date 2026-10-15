@@ -29,13 +29,32 @@
   white-space: nowrap;
 }
 
-.table__grid tbody tr:hover { background-color: rgb(255 255 255 / 2%); }
+.table__grid tbody td:nth-child(odd) {
+  background-color: color-mix(in srgb, var(--color-bg-card) 97%, black 3%);
+}
+
+.table__grid tbody td:nth-child(even) {
+  background-color: color-mix(in srgb, var(--color-bg-card) 97%, white 3%);
+}
+
+.table__grid tbody tr:hover td:nth-child(odd) {
+  background-color: color-mix(in srgb, var(--color-bg-card) 94%, white 6%);
+}
+
+.table__grid tbody tr:hover td:nth-child(even) {
+  background-color: color-mix(in srgb, var(--color-bg-card) 91%, white 9%);
+}
 
 .table__cell--end { text-align: end; }
 .table__cell--center { text-align: center; }
 .table__cell--mono { font-family: var(--font-mono); }
 
-.table__message { text-align: center; color: var(--color-text-muted); padding: var(--space-6); }
+.table__message {
+  text-align: center;
+  color: var(--color-text-muted);
+  padding: var(--space-6);
+  background-color: transparent !important;
+}
 
 .table__skeleton {
   display: block; height: 0.9rem; border-radius: var(--radius-xs);

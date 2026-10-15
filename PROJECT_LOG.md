@@ -133,25 +133,25 @@ This log maintains cross-session operational continuity, recording architectural
 
 ### Architectural Decisions & Changes Applied
 1. **Retrocompatibility Purge**:
-   - Purgó definitivamente los alias y fallbacks obsoletos hacia `apps` (`AppConfig = ServiceConfig`, `getattr(..., "apps")`) en `src/core/config.py`, `src/api/settings.py`, `src/core/scheduler.py`, y `src/api/pipeline.py`.
-   - Reemplazado por acceso directo fuertemente tipado `settings.services`.
+   - Permanently purged obsolete aliases and fallbacks to `apps` (`AppConfig = ServiceConfig`, `getattr(..., "apps")`) in `src/core/config.py`, `src/api/settings.py`, `src/core/scheduler.py`, and `src/api/pipeline.py`.
+   - Replaced with direct, strongly-typed access via `settings.services`.
 2. **Settings API Column Renaming Guard**:
-   - Definida la variable `old_services = old_settings.services` en `src/api/settings.py`, solventando el `NameError` que impedía guardar configuraciones y ejecutar migraciones de esquema dinámico.
+   - Defined `old_services = old_settings.services` in `src/api/settings.py`, resolving the `NameError` preventing settings persistence and dynamic schema migrations.
 3. **Startup Dynamic Column Synchronization**:
-   - Implementado `DatabaseManager.sync_dynamic_columns()` en `src/core/database.py` para asegurar que todas las columnas definidas en `field_mappings` de los servicios existan físicamente en `SERVICES_PIPELINE`.
-   - Integrado en el ciclo `lifespan` de `src/main.py` para garantizar sincronización automática al arranque del contenedor.
+   - Implemented `DatabaseManager.sync_dynamic_columns()` in `src/core/database.py` to ensure all columns defined in service `field_mappings` physically exist in `SERVICES_PIPELINE`.
+   - Integrated into the `lifespan` lifecycle of `src/main.py` ensuring automatic synchronization during container startup.
 4. **Ascending Sequential Progression Engine**:
-   - Refactorizado `TaskScheduler.reconcile_stages()` en `src/core/scheduler.py`:
-     - Resuelve el orden actual a partir del slug (`current_stage.order`).
-     - Evalúa candidatos con `order > current_stage.order` de forma estrictamente secuencial y ascendente.
-     - Transiciona la fila de inmediato al primer candidato cuyo `start_condition` evalúe `True`.
-     - Si ninguno evalúa `True`, la fila se mantiene en la etapa actual con `STATUS = 'COMPLETED'`.
+   - Refactored `TaskScheduler.reconcile_stages()` in `src/core/scheduler.py`:
+     - Resolves current stage order from slug (`current_stage.order`).
+     - Evaluates candidates with `order > current_stage.order` strictly sequentially in ascending order.
+     - Transitions row immediately to the first candidate stage whose `start_condition` evaluates to `True`.
+     - If none evaluates to `True`, the row remains in the current stage with `STATUS = 'COMPLETED'`.
 5. **Terminal SINK Stage Invariance**:
-   - Filas en estado `SINK` quedan completamente aisladas de la búsqueda de etapas posteriores (nunca evalúan etapas con orden mayor).
-   - Filas en etapa `SINK` permiten actualización y enriquecimiento de datos upstream (`STATUS IN ('PENDING', 'SINK')`), manteniendo su estado `STATUS = 'SINK'` inmutable.
+   - Rows in `SINK` status are completely isolated from subsequent stage evaluation (never evaluate forward stages).
+   - Rows in a `SINK` stage allow upstream data updates and enrichment (`STATUS IN ('PENDING', 'SINK')`), keeping their `STATUS = 'SINK'` immutable.
 6. **Consumer Stage Reconciliation Fix**:
-   - Corregida la consulta de evaluación de `complete_condition` para filtrar filas pendientes por slug textual `WHERE STAGE = ?` pasando `(stage.id,)` en lugar del orden numérico `(stage.order,)`.
-   - Limpiado el contexto de evaluación de predicados (`eval_ctx` y `ctx`) para preservar `STAGE` como string slug canónico.
+   - Corrected `complete_condition` query to filter pending rows by text slug `WHERE STAGE = ?` passing `(stage.id,)` instead of numeric order `(stage.order,)`.
+   - Cleaned predicate evaluation context (`eval_ctx` and `ctx`) to preserve `STAGE` as the canonical string slug.
 
 ### Files Modified
 - `src/core/config.py`
@@ -326,6 +326,45 @@ This log maintains cross-session operational continuity, recording architectural
 
 ### Files Modified
 - `src/core/scheduler.py`
+- `PROJECT_LOG.md`
+
+---
+
+## Session Milestone: 2026-10-15 — REF-11: Backend Type Coercion, Strict Validation & Schema-Driven Column Alignment
+
+### Role & Agent Assignment
+- **Orchestrator (`Role 0`)**: Coordinated requirements, governance confirmation, and agent task delegation.
+- **Backend Systems Engineer (`Role 2`)**: Implemented `coerce_value_to_type` in `src/core/scheduler.py` with strict type validation, English warning telemetry, and schema delivery in `src/api/pipeline.py`.
+- **Frontend & WebUI Specialist (`Role 3`)**: Added `col.align === 'center'` support to `DataTable.js`, schema-driven column alignment for system and integer columns in `PipelineTable.js`, and centered `ID` in `IncidentTable.js`.
+- **Technical Documentation Specialist (`Role 5`)**: Logged task `LOG-01` in `docs/BACKLOG.md` and updated `PROJECT_LOG.md`.
+
+### Architectural Decisions & Changes Applied
+1. **Backend Data Type Coercion & Validation (`src/core/scheduler.py`)**:
+   - Implemented `coerce_value_to_type(val, data_type, col_name, item_identifier)`:
+     * **`INTEGER` / `INT`**: Converts integers and valid numeric strings (`^[-+]?\d+$`) to `int`. Rejects booleans, non-integer floats, and arbitrary text with standard English warnings (`[!] Warning: Field '{col_name}' for item '{item_identifier}' was not loaded because value is incompatible: Field requires INT (value: '{val}')`).
+     * **`BOOLEAN`**: Coerces native booleans, `0`/`1`, and standard boolean strings (`"true"`, `"false"`). Rejects incompatible strings.
+     * **`REAL` / `FLOAT`**: Converts numeric values and float strings; rejects non-numeric types.
+     * **`TEXT`**: Converts primitives to string representation (`str(val)`) and serializes lists/dicts to JSON strings.
+   - Applied during both initial root stage ingestion (`_poll_and_ingest`) and consumer enrichment (`_execute_consumer_enrichment`), protecting the pipeline against type corruption.
+2. **Schema-Driven Column Metadata (`src/api/pipeline.py`)**:
+   - `GET /api/v1/pipeline` now exposes `"column_types": { [col_name]: col_type }` derived directly from `PRAGMA table_info(SERVICES_PIPELINE)`.
+3. **Deterministic Column Alignment (`DataTable.js`, `PipelineTable.js`, `IncidentTable.js`)**:
+   - `DataTable.js` wired `col.align === 'center'` to `.table__cell--center` for both `<th>` and `<td>`.
+   - `PipelineTable.js` assigns centered alignment to system columns (`ID`, `PIPELINE_KEY`, `STAGE`, `STATUS`, `LAST_UPDATED`) and any column with `INTEGER`/`INT` schema type. Text and dynamic string columns remain left-aligned.
+   - `IncidentTable.js` centers the `ID` column.
+4. **Technical Debt Backlog Entry (`LOG-01`)**:
+   - Documented task `LOG-01` in `docs/BACKLOG.md` for dedicated `Log` navigation menu displaying filtered error telemetry.
+
+### Files Modified
+- `src/core/scheduler.py`
+- `src/api/pipeline.py`
+- `frontend/src/shared/ui/organisms/DataTable/DataTable.js`
+- `frontend/src/shared/ui/organisms/DataTable/DataTable.module.css`
+- `frontend/src/features/pipeline/PipelineTable.js`
+- `frontend/src/features/incidents/IncidentTable.js`
+- `src/static/index.html`
+- `src/static/assets/index-*.js`
+- `docs/BACKLOG.md`
 - `PROJECT_LOG.md`
 
 

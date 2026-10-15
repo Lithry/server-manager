@@ -34,7 +34,7 @@ export function createIncidentTable({ resolved }) {
   }
 
   const columns = [
-    { key: 'ID', header: 'ID', mono: true },
+    { key: 'ID', header: 'ID', mono: true, align: 'center' },
     { 
       key: 'SEVERITY', 
       header: 'Severity', 

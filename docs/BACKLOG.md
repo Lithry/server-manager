@@ -35,6 +35,7 @@
 | **STG-02** | **P2 (Medium)** | WebUI / Modal | Dedicated Sink Stage Option Checkbox in Stage Modal | Phase 1 (`v0.1.8`) | **COMPLETED ✓** |
 | **STG-03** | **P1 (High)** | Core / Ingestion | Configurable Root Stage Activation Cutoff & Consumer Date Decoupling | Phase 1 (`v0.1.8`) | **COMPLETED ✓** |
 | **SBX-01** | **P2 (Medium)** | WebUI / Tooling | API Sandbox Architectural Debate, Payload Inspector & Visual Refactor | Phase 1 (`v0.1.9`) | **PLANNED 📅** |
+| **LOG-01** | **P1 (High)** | WebUI / Observability | Dedicated Error Log View & Type Incompatibility Alerts | Phase 1 (`v0.1.9`) | **PLANNED 📅** |
 | **CORE-02** | **P1 (High)** | Core / Engine | Multi-Pipeline Dynamic Registry & Scoped DAG Progression Engine | Phase 2 (`v0.2.0`) | **PLANNED 📅** |
 | **API-01** | **P2 (Medium)** | Core / Presets | Shoko Server Verified API Schema & Presets | Phase 1 (`v0.1.6`) | **COMPLETED ✓** |
 | **API-02** | **P2 (Medium)** | LLM / Telemetry | Tier 3 Guided Remediation API (`/api/v1/meta/remediate`) | Phase 4 (`v0.4.0`) | **PLANNED 📅** |
@@ -92,7 +93,17 @@
 
 ---
 
-### 3.4 CORE-02: Multi-Pipeline Dynamic Registry & Scoped DAG Progression Engine (`v0.2.0` - Phase 2)
+### 3.4 LOG-01: Dedicated Error Log View & Type Incompatibility Telemetry (`v0.1.9`)
+- **Objective**: Provide an accessible, dedicated `Log` option in the left navigation sidebar displaying exclusively error and warning events in a clean, human-readable format.
+- **Problem Statement**: When fields are mapped with incompatible data types (e.g. assigning arbitrary text to an `INTEGER` column), the backend safely rejects the corrupted value, but operators currently have no visible frontend feedback explaining why the column remained unassigned.
+- **Tasks**:
+  1. **Navigation Entry**: Add `Log` with an alert/file-text icon to the sidebar menu in `AppShell.js`.
+  2. **Error Filter View**: Create `LogPage.js` leveraging `DataTable` displaying solely `ERROR` and `WARNING` level telemetry (timestamp, service/pipeline key, column, message).
+  3. **Mapping Incompatibility Telemetry**: Expose structured logging / backend event feed (e.g. `"Field 'X' for item 'Z' was not loaded: value incompatible with type INT"`) queryable via `GET /api/v1/system/logs?level=ERROR`.
+
+---
+
+### 3.5 CORE-02: Multi-Pipeline Dynamic Registry & Scoped DAG Progression Engine (`v0.2.0` - Phase 2)
 - **Objective**: Upgrade from single `SERVICES_PIPELINE` to multi-pipeline dynamic architecture.
 - **Dependencies**: Requires stabilization of single-pipeline stage mechanics (`STG-01` through `STG-03`) and developer sandbox tooling (`SBX-01`).
 - **Tasks**:
@@ -113,7 +124,7 @@
 
 ---
 
-### 3.5 VIEW-01: Dual-Mode Table & View Builder (`v0.3.0` - Phase 3)
+### 3.6 VIEW-01: Dual-Mode Table & View Builder (`v0.3.0` - Phase 3)
 - **Objective**: Allow operators to create both virtual SQL views and persistent materialized destination tables.
 - **Tasks**:
   1. Support two dataset types:
@@ -123,7 +134,7 @@
 
 ---
 
-### 3.6 API-02: Tier 3 Guided Remediation API (`v0.4.0` - Phase 4)
+### 3.7 API-02: Tier 3 Guided Remediation API (`v0.4.0` - Phase 4)
 - **Objective**: Complete Tier 3 LLM tool suite for LibreChat / Ollama with safe remediation handoff.
 - **Tasks**:
   1. Implement `POST /api/v1/meta/remediate`:
@@ -135,7 +146,7 @@
 
 ---
 
-### 3.7 UX-02 & CFG-01: Guided Setup Flow & Out-of-the-Box Presets (`v0.5.0` - Phase 5)
+### 3.8 UX-02 & CFG-01: Guided Setup Flow & Out-of-the-Box Presets (`v0.5.0` - Phase 5)
 - **Objective**: Enable zero-friction initial setup for new installations.
 - **Tasks**:
   1. Add built-in service presets for Sonarr, Radarr, Shoko, and Jellyfin with pre-configured endpoints and mappings.
@@ -143,7 +154,7 @@
 
 ---
 
-### 3.8 DB-01: Granular Ingestion Log Audit & Telemetry Timing (`v0.6.0` - Phase 6)
+### 3.9 DB-01: Granular Ingestion Log Audit & Telemetry Timing (`v0.6.0` - Phase 6)
 - **Objective**: Ingestion performance observability.
 - **Tasks**:
   1. Record execution duration in milliseconds for each service loop and secondary enrichment query.
@@ -151,7 +162,7 @@
 
 ---
 
-### 3.9 Production MVP Release Gate (`v1.0.0`)
+### 3.10 Production MVP Release Gate (`v1.0.0`)
 - **Criteria**:
   - All Phases 1 through 6 completed and verified.
   - 100% test pass rate with automated integration suites.
