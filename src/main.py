@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from src import __version__
+from src.core.config import config_manager
 from src.core.database import db_manager
 from src.core.scheduler import scheduler
 
@@ -32,6 +33,11 @@ async def lifespan(app: FastAPI):
     # Startup: Initialize SQLite WAL tables and seed factory presets
     print("[i] Initializing ServerManager database schema...")
     await db_manager.initialize_schema()
+
+    # Sync dynamic columns from configured services into SERVICES_PIPELINE
+    print("[i] Syncing dynamic columns from configured services...")
+    settings = await config_manager.get_settings()
+    await db_manager.sync_dynamic_columns(settings.services)
 
     # Start background task scheduler
     print("[i] Starting task scheduler...")

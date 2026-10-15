@@ -122,6 +122,40 @@ class DatabaseManager:
                 return True
             return False
 
+    async def sync_dynamic_columns(self, services: Dict[str, Any]) -> None:
+        """Dynamically ensure all target columns from service field mappings exist in SERVICES_PIPELINE."""
+        if not services:
+            return
+
+        for service_name, service_conf in services.items():
+            field_mappings = getattr(service_conf, "field_mappings", None)
+            if field_mappings is None and isinstance(service_conf, dict):
+                field_mappings = service_conf.get("field_mappings", [])
+
+            if not field_mappings:
+                continue
+
+            for mapping in field_mappings:
+                target_col = getattr(mapping, "target_column", None)
+                if target_col is None and isinstance(mapping, dict):
+                    target_col = mapping.get("target_column")
+
+                if not target_col:
+                    continue
+
+                data_type = getattr(mapping, "data_type", "TEXT")
+                if isinstance(mapping, dict):
+                    data_type = mapping.get("data_type", "TEXT") or "TEXT"
+
+                clean_col = str(target_col).strip().upper()
+                if clean_col in SYSTEM_RESERVED_COLUMNS:
+                    continue
+
+                try:
+                    await self.ensure_column("SERVICES_PIPELINE", clean_col, data_type)
+                except Exception as e:
+                    print(f"[!] Warning ensuring column {clean_col} for service '{service_name}': {e}")
+
     async def drop_column(self, table_name: str, column_name: str) -> bool:
         """Dynamically drop a user-defined column from table."""
         clean_col = column_name.strip().upper()

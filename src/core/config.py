@@ -40,11 +40,6 @@ class ServiceConfig(BaseModel):
     enrichment_endpoints: Dict[str, str] = Field(default_factory=dict)
     field_mappings: list[FieldMapping] = Field(default_factory=list)
 
-
-# Backward compatibility alias
-AppConfig = ServiceConfig
-
-
 class NotificationTrigger(BaseModel):
     id: str
     event: str  # ON_INCIDENT_OPEN, ON_INCIDENT_RESOLVED, ON_PIPELINE_COMPLETE, ON_DEPLOY_SUCCESS

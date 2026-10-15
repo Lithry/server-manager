@@ -41,7 +41,7 @@ async def get_settings() -> Settings:
 @router.post("")
 async def update_settings(settings: Settings) -> Settings:
     """Update settings, auto-migrate database columns, and reload background scheduler."""
-    services_dict = getattr(settings, "services", {}) or getattr(settings, "apps", {})
+    services_dict = settings.services
 
     # 1. Validate that no mapping uses a reserved system column
     all_new_targets = set()
@@ -59,6 +59,7 @@ async def update_settings(settings: Settings) -> Settings:
     # 2. Validate Stage ID Immutability and Normalize Order
     old_settings = await config_manager.get_settings()
     old_stages = old_settings.stages
+    old_services = old_settings.services
 
     # Match by index to detect renames/swaps of existing slugs
     for idx, stage in enumerate(settings.stages):
@@ -74,7 +75,6 @@ async def update_settings(settings: Settings) -> Settings:
                 )
 
     # 3. Detect renames and auto-migrate data
-
     existing_table_cols = {c["name"].upper() for c in await db_manager.get_table_columns("SERVICES_PIPELINE")}
 
     for s_id, s_conf in services_dict.items():
@@ -103,14 +103,8 @@ async def update_settings(settings: Settings) -> Settings:
                         except Exception as e:
                             print(f"[!] Warning auto-migrating column {old_target} -> {new_target}: {e}")
 
-    # 3. Auto-ensure dynamic columns in SERVICES_PIPELINE for all field mappings
-    for service_name, service_conf in services_dict.items():
-        for mapping in service_conf.field_mappings:
-            if mapping.target_column:
-                try:
-                    await db_manager.ensure_column("SERVICES_PIPELINE", mapping.target_column, mapping.data_type)
-                except Exception as e:
-                    print(f"[!] Warning ensuring column {mapping.target_column}: {e}")
+    # 4. Auto-ensure dynamic columns in SERVICES_PIPELINE for all field mappings
+    await db_manager.sync_dynamic_columns(services_dict)
 
     updated = await config_manager.update_settings(settings)
     await scheduler.restart()

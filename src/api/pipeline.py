@@ -161,7 +161,7 @@ async def get_pipeline_columns() -> List[Dict[str, Any]]:
     """Get all current columns of the SERVICES_PIPELINE table with usage and depreciation metadata."""
     settings = await config_manager.get_settings()
     pref_order = getattr(settings, "pipeline_column_order", []) or []
-    services_dict = getattr(settings, "services", {}) or getattr(settings, "apps", {})
+    services_dict = settings.services
 
     usage_map: Dict[str, List[str]] = {}
     for s_id, s_cfg in services_dict.items():
@@ -251,7 +251,7 @@ async def delete_pipeline_column(column_name: str) -> Dict[str, Any]:
 async def prune_deprecated_columns() -> Dict[str, Any]:
     """Prune all dynamic columns in SERVICES_PIPELINE that are not used by any service."""
     settings = await config_manager.get_settings()
-    services_dict = getattr(settings, "services", {}) or getattr(settings, "apps", {})
+    services_dict = settings.services
 
     active_target_cols = set()
     for s_cfg in services_dict.values():
@@ -295,7 +295,7 @@ async def sample_app_api(req: SampleApiRequest) -> Dict[str, Any]:
         raise HTTPException(status_code=400, detail="service_id is required")
 
     settings = await config_manager.get_settings()
-    services_dict = getattr(settings, "services", {}) or getattr(settings, "apps", {})
+    services_dict = settings.services
     if s_id not in services_dict:
         raise HTTPException(status_code=404, detail=f"Service '{s_id}' not configured")
 
@@ -369,7 +369,7 @@ async def sample_app_api(req: SampleApiRequest) -> Dict[str, Any]:
 async def sandbox_enrichment(req: SandboxEnrichmentRequest) -> Dict[str, Any]:
     """Test a chain of enrichment endpoints sequentially against an existing pipeline record."""
     settings = await config_manager.get_settings()
-    services_dict = getattr(settings, "services", {}) or getattr(settings, "apps", {})
+    services_dict = settings.services
     if req.service_id not in services_dict:
         raise HTTPException(status_code=404, detail=f"Service '{req.service_id}' not configured")
 
@@ -450,7 +450,7 @@ async def sandbox_enrichment(req: SandboxEnrichmentRequest) -> Dict[str, Any]:
 async def discover_service_events(service_id: str) -> Dict[str, Any]:
     """Discover distinct event types from upstream service history."""
     settings = await config_manager.get_settings()
-    services_dict = getattr(settings, "services", {}) or getattr(settings, "apps", {})
+    services_dict = settings.services
     if service_id not in services_dict:
         raise HTTPException(status_code=404, detail=f"Service '{service_id}' not configured")
 

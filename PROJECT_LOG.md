@@ -122,3 +122,45 @@ This log maintains cross-session operational continuity, recording architectural
 - `src/api/pipeline.py`
 - `src/api/settings.py`
 
+---
+
+## Session Milestone: 2026-10-15 — REF-06: Pipeline Dynamic Column Sync, SINK Stage Engine & Retrocompatibility Purge
+
+### Role & Agent Assignment
+- **Orchestrator (`Role 0`)**: Evaluated pipeline breakdown, coordinated architectural analysis, presented root causes, and routed domain tasks following explicit user confirmation.
+- **Backend Systems Engineer (`Role 2`)**: Executed core refactoring across settings, database dynamic column sync, and scheduler progression engine.
+- **Technical Documentation Specialist (`Role 5`)**: Synchronized backend technical specification and updated operational log.
+
+### Architectural Decisions & Changes Applied
+1. **Retrocompatibility Purge**:
+   - Purgó definitivamente los alias y fallbacks obsoletos hacia `apps` (`AppConfig = ServiceConfig`, `getattr(..., "apps")`) en `src/core/config.py`, `src/api/settings.py`, `src/core/scheduler.py`, y `src/api/pipeline.py`.
+   - Reemplazado por acceso directo fuertemente tipado `settings.services`.
+2. **Settings API Column Renaming Guard**:
+   - Definida la variable `old_services = old_settings.services` en `src/api/settings.py`, solventando el `NameError` que impedía guardar configuraciones y ejecutar migraciones de esquema dinámico.
+3. **Startup Dynamic Column Synchronization**:
+   - Implementado `DatabaseManager.sync_dynamic_columns()` en `src/core/database.py` para asegurar que todas las columnas definidas en `field_mappings` de los servicios existan físicamente en `SERVICES_PIPELINE`.
+   - Integrado en el ciclo `lifespan` de `src/main.py` para garantizar sincronización automática al arranque del contenedor.
+4. **Ascending Sequential Progression Engine**:
+   - Refactorizado `TaskScheduler.reconcile_stages()` en `src/core/scheduler.py`:
+     - Resuelve el orden actual a partir del slug (`current_stage.order`).
+     - Evalúa candidatos con `order > current_stage.order` de forma estrictamente secuencial y ascendente.
+     - Transiciona la fila de inmediato al primer candidato cuyo `start_condition` evalúe `True`.
+     - Si ninguno evalúa `True`, la fila se mantiene en la etapa actual con `STATUS = 'COMPLETED'`.
+5. **Terminal SINK Stage Invariance**:
+   - Filas en estado `SINK` quedan completamente aisladas de la búsqueda de etapas posteriores (nunca evalúan etapas con orden mayor).
+   - Filas en etapa `SINK` permiten actualización y enriquecimiento de datos upstream (`STATUS IN ('PENDING', 'SINK')`), manteniendo su estado `STATUS = 'SINK'` inmutable.
+6. **Consumer Stage Reconciliation Fix**:
+   - Corregida la consulta de evaluación de `complete_condition` para filtrar filas pendientes por slug textual `WHERE STAGE = ?` pasando `(stage.id,)` en lugar del orden numérico `(stage.order,)`.
+   - Limpiado el contexto de evaluación de predicados (`eval_ctx` y `ctx`) para preservar `STAGE` como string slug canónico.
+
+### Files Modified
+- `src/core/config.py`
+- `src/api/settings.py`
+- `src/core/database.py`
+- `src/main.py`
+- `src/core/scheduler.py`
+- `src/api/pipeline.py`
+- `docs/BACKEND_SPEC.md`
+- `PROJECT_LOG.md`
+
+

@@ -41,7 +41,7 @@ src/
 ### 2.1 `src/main.py` — Lifecycle & Server Entrypoint
 - **Umask Enforcement**: Configures process umask from `UMASK` environment variable (default: `002` for `664/775` homelab permissions).
 - **Application Lifespan (`lifespan`)**:
-  - *Startup*: Runs `db_manager.initialize_schema()`, ensuring all SQLite tables, indices, and error seeds exist. Starts background ingestion loops via `scheduler.start()`.
+  - *Startup*: Runs `db_manager.initialize_schema()`, ensuring all SQLite tables, indices, and error seeds exist. Synchronizes dynamic columns from configured services via `db_manager.sync_dynamic_columns()`. Starts background ingestion loops via `scheduler.start()`.
   - *Shutdown*: Gracefully stops active scheduler loops via `scheduler.stop()`.
 - **CORS Middleware**: Configured to permit cross-origin requests from homelab network dashboards.
 - **Static Asset Serving**: Mounts `/static` from `src/static/` (Vite build output) and serves `index.html` at the root path `/`.
@@ -141,6 +141,7 @@ src/
   ```
 - **Dynamic Migration Engine**:
   - `ensure_column(table_name, column_name, column_type)`: Executes `ALTER TABLE <table_name> ADD COLUMN "<column_name>" <type>` if column is absent. Rejects system-reserved columns.
+  - `sync_dynamic_columns(services)`: Auto-ensures all target columns defined in service field mappings exist in `SERVICES_PIPELINE` on startup and configuration update.
   - `drop_column(table_name, column_name)`: Removes user-defined columns (`ALTER TABLE ... DROP COLUMN`).
   - `rename_column(table_name, old_col, new_col)`: Renames column dynamically while preserving table indices.
 

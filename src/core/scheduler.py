@@ -196,8 +196,7 @@ class TaskScheduler:
         self._running = True
         print("[i] TaskScheduler started.")
         settings = await config_manager.get_settings()
-
-        services_dict = getattr(settings, "services", {}) or getattr(settings, "apps", {})
+        services_dict = settings.services
         for s_id, s_cfg in services_dict.items():
             if s_cfg.enabled:
                 self._tasks[s_id] = asyncio.create_task(self._service_loop(s_id))
@@ -216,7 +215,7 @@ class TaskScheduler:
     async def trigger_now(self, service_id: str) -> Dict[str, Any]:
         """Trigger ingestion execution for a service if it belongs to an enabled root stage."""
         settings = await config_manager.get_settings()
-        services_dict = getattr(settings, "services", {}) or getattr(settings, "apps", {})
+        services_dict = settings.services
         if service_id not in services_dict:
             return {"status": "error", "message": f"Service '{service_id}' not found"}
 
@@ -386,7 +385,8 @@ class TaskScheduler:
                             **rec,
                             **enrichment_data,
                             **mapped_fields,
-                            "STAGE": active_stage.order,
+                            "STAGE": active_stage.id,
+                            "stage": active_stage.id,
                             "PIPELINE_KEY": pipeline_key,
                         }
                         try:
@@ -409,7 +409,7 @@ class TaskScheduler:
                 table_cols = {c["name"].upper() for c in await db_manager.get_table_columns("SERVICES_PIPELINE")}
                 for c_stage in active_consumer_stages:
                     pending_rows = await db_manager.query(
-                        "SELECT * FROM SERVICES_PIPELINE WHERE STAGE = ? AND STATUS = 'PENDING' LIMIT 50;",
+                        "SELECT * FROM SERVICES_PIPELINE WHERE STAGE = ? AND STATUS IN ('PENDING', 'SINK') LIMIT 50;",
                         (c_stage.id,)
                     )
                     for p_row in pending_rows:
@@ -535,28 +535,26 @@ class TaskScheduler:
                 row_dict = dict(row)
                 current_stage_slug = row_dict.get("STAGE")
 
-                # Resolve current order from config
-                current_stage_order = 0
-                for s in enabled_stages:
-                    if s.id == current_stage_slug:
-                        current_stage_order = s.order
-                        break
+                # Resolve current stage from config
+                current_stage = next((s for s in enabled_stages if s.id == current_stage_slug), None)
+                if not current_stage:
+                    continue
+                current_stage_order = current_stage.order
 
                 # Target stages must be non-root and order > current_stage_order
-                candidate_stages = [
-                    s for s in enabled_stages
-                    if s.order > current_stage_order and s.start_condition and s.start_condition.strip()
-                ]
+                candidate_stages = sorted(
+                    [
+                        s for s in enabled_stages
+                        if s.order > current_stage_order and s.start_condition and s.start_condition.strip()
+                    ],
+                    key=lambda s: s.order
+                )
 
                 # Evaluation context
-                ctx = {**row_dict, "STAGE": current_stage_order, "stage": current_stage_order}
+                ctx = {**row_dict, "STAGE": current_stage.id, "stage": current_stage.id}
                 for s in enabled_stages:
-                    if s.order <= current_stage_order:
-                        ctx[f"stage.{s.id}.completed"] = True
-                        ctx[f"stage.{s.order}.completed"] = True
-                    else:
-                        ctx[f"stage.{s.id}.completed"] = False
-                        ctx[f"stage.{s.order}.completed"] = False
+                    ctx[f"stage.{s.id}.completed"] = (s.order <= current_stage_order)
+                    ctx[f"stage.{s.order}.completed"] = (s.order <= current_stage_order)
 
                 for target_stage in candidate_stages:
                     try:
@@ -567,12 +565,12 @@ class TaskScheduler:
                                 "UPDATE SERVICES_PIPELINE SET STAGE = ?, STATUS = ?, LAST_UPDATED = CURRENT_TIMESTAMP WHERE ID = ?;",
                                 (target_stage.id, new_status, row_dict["ID"])
                             )
-                            print(f"[i] Row {row_dict['ID']} ({row_dict.get('PIPELINE_KEY')}) transitioned: Stage {current_stage_slug} -> Stage {target_stage.id} (STATUS = '{new_status}').")
+                            print(f"[i] Row {row_dict['ID']} ({row_dict.get('PIPELINE_KEY')}) transitioned: Stage '{current_stage_slug}' -> Stage '{target_stage.id}' (STATUS = '{new_status}').")
                             break
                     except Exception as eval_err:
                         print(f"[!] Error evaluating start_condition of stage '{target_stage.id}' for row {row_dict.get('ID')}: {eval_err}")
 
-            # 2. Stage Completion Evaluation (Consumer Stages with PENDING rows)
+            # 2. Stage Completion Evaluation (Stages with PENDING rows)
             for stage in enabled_stages:
                 cond = stage.complete_condition
                 if not cond or not cond.strip():
@@ -580,21 +578,25 @@ class TaskScheduler:
 
                 pending_rows = await db_manager.query(
                     "SELECT * FROM SERVICES_PIPELINE WHERE STAGE = ? AND STATUS = 'PENDING' LIMIT 50;",
-                    (stage.order,)
+                    (stage.id,)
                 )
                 if not pending_rows:
                     continue
 
                 for row in pending_rows:
                     row_dict = dict(row)
-                    ctx = {**row_dict, "STAGE": stage.order, "stage": stage.order}
+                    ctx = {**row_dict, "STAGE": stage.id, "stage": stage.id}
+                    for s in enabled_stages:
+                        ctx[f"stage.{s.id}.completed"] = (s.order <= stage.order)
+                        ctx[f"stage.{s.order}.completed"] = (s.order <= stage.order)
+
                     try:
                         if PredicateEvaluator.evaluate(cond, ctx):
                             await db_manager.execute(
                                 "UPDATE SERVICES_PIPELINE SET STATUS = 'COMPLETED', LAST_UPDATED = CURRENT_TIMESTAMP WHERE ID = ?;",
                                 (row_dict["ID"],)
                             )
-                            print(f"[i] Stage '{stage.id}' (#{stage.order}) marked COMPLETED for row {row_dict['ID']} ({row_dict.get('PIPELINE_KEY')}) via complete_condition.")
+                            print(f"[i] Stage '{stage.id}' marked COMPLETED for row {row_dict['ID']} ({row_dict.get('PIPELINE_KEY')}) via complete_condition.")
                     except Exception as eval_err:
                         print(f"[!] Error evaluating complete_condition for row {row_dict.get('ID')}: {eval_err}")
 
@@ -605,7 +607,7 @@ class TaskScheduler:
         while self._running:
             try:
                 settings = await config_manager.get_settings()
-                services_dict = getattr(settings, "services", {}) or getattr(settings, "apps", {})
+                services_dict = settings.services
                 service_cfg = services_dict.get(service_id)
                 if not service_cfg or not service_cfg.enabled:
                     break
