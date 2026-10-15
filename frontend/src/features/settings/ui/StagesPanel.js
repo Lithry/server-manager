@@ -66,6 +66,9 @@ export function createStagesPanel(store, stagesData = []) {
                         const stg = newSettings.stages.find(x => x.id === stage.id);
                         if (stg) {
                           stg.enabled = newVal;
+                          if (newVal && !stg.start_condition && !stg.last_activated_at) {
+                            stg.last_activated_at = new Date().toISOString();
+                          }
                           queryCache.setData(settingsKeys.all, () => newSettings);
                           store.set(s => ({ ...s, isDirty: true }));
                         }
@@ -99,6 +102,11 @@ export function createStagesPanel(store, stagesData = []) {
                   <div style="color: var(--color-warning);">
                     ${!stage.complete_condition ? '✗ ' : ''}<strong>COMPLETE CONDITION:</strong> ${stage.complete_condition ? stage.complete_condition : 'NULL (SINK STAGE - Ends on Start)'}
                   </div>
+                  ${!stage.start_condition && stage.last_activated_at ? html`
+                    <div style="margin-top: 4px; color: var(--color-text-muted);">
+                      <strong>CUTOFF:</strong> ${stage.last_activated_at}
+                    </div>
+                  ` : nothing}
                 </div>
               </div>
             `;

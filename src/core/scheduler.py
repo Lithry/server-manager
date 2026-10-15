@@ -283,6 +283,8 @@ class TaskScheduler:
                     try:
                         clean_ts = active_stage.last_activated_at.replace("Z", "+00:00")
                         stage_activated_dt = datetime.datetime.fromisoformat(clean_ts)
+                        if stage_activated_dt.tzinfo is None:
+                            stage_activated_dt = stage_activated_dt.replace(tzinfo=datetime.timezone.utc)
                     except Exception as ts_err:
                         print(f"[!] Warning invalid last_activated_at for stage {active_stage.id}: {ts_err}")
 
@@ -300,6 +302,8 @@ class TaskScheduler:
                         try:
                             rec_date_str = str(rec_date_val).replace("Z", "+00:00")
                             rec_dt = datetime.datetime.fromisoformat(rec_date_str)
+                            if rec_dt.tzinfo is None:
+                                rec_dt = rec_dt.replace(tzinfo=datetime.timezone.utc)
                             if rec_dt < stage_activated_dt:
                                 continue
                         except Exception:
@@ -377,24 +381,9 @@ class TaskScheduler:
                         if col_name in table_cols:
                             mapped_fields[col_name] = sanitize_and_serialize(val)
 
-                    # Determine initial STATUS based on active_stage.complete_condition
-                    initial_status = "COMPLETED"
-                    if active_stage.complete_condition and active_stage.complete_condition.strip():
-                        eval_ctx = {
-                            "records": rec,
-                            **rec,
-                            **enrichment_data,
-                            **mapped_fields,
-                            "STAGE": active_stage.id,
-                            "stage": active_stage.id,
-                            "PIPELINE_KEY": pipeline_key,
-                        }
-                        try:
-                            is_completed = PredicateEvaluator.evaluate(active_stage.complete_condition, eval_ctx)
-                            initial_status = "COMPLETED" if is_completed else "PENDING"
-                        except Exception as cond_err:
-                            print(f"[!] Warning evaluating complete_condition for {pipeline_key}: {cond_err}")
-                            initial_status = "PENDING"
+                    # Authoritative Mermaid Lifecycle: NEW_ENTRY -> STATUS_TO_PENDING -> UPDATE_VALUES -> END_OF_CICLE
+                    is_sink = not active_stage.complete_condition or not active_stage.complete_condition.strip()
+                    initial_status = "SINK" if is_sink else "PENDING"
 
                     col_names = ["PIPELINE_KEY", "STAGE", "STATUS"] + list(mapped_fields.keys())
                     placeholders = ["?"] * len(col_names)
@@ -403,28 +392,15 @@ class TaskScheduler:
                     insert_sql = f'INSERT INTO SERVICES_PIPELINE ({", ".join(col_names)}) VALUES ({", ".join(placeholders)});'
                     await db_manager.execute(insert_sql, tuple(values))
                     new_ingested += 1
+                    print(f"[i] New entry ingested: '{pipeline_key}' into stage '{active_stage.id}' with STATUS = '{initial_status}' (END_OF_CICLE).")
 
-            # 2. Process pending items for active CONSUMER stages
-            if active_consumer_stages:
-                table_cols = {c["name"].upper() for c in await db_manager.get_table_columns("SERVICES_PIPELINE")}
-                for c_stage in active_consumer_stages:
-                    pending_rows = await db_manager.query(
-                        "SELECT * FROM SERVICES_PIPELINE WHERE STAGE = ? AND STATUS IN ('PENDING', 'SINK') LIMIT 50;",
-                        (c_stage.id,)
-                    )
-                    for p_row in pending_rows:
-                        p_row_dict = dict(p_row)
-                        updated = await self._execute_consumer_enrichment(service_cfg, p_row_dict, table_cols)
-                        if updated:
-                            new_ingested += 1
-
-            # 3. Continuous reconciliation of stage transitions & completions
-            await self.reconcile_stages()
+            # 2. Reconciliation cycle for existing pipeline items per Mermaid lifecycle state machine
+            reconcile_updates = await self.reconcile_stages()
 
             self._status[service_id] = {
                 "last_run": now_str,
                 "status": "success",
-                "message": f"Execution completed ({service_cfg.name}): {new_ingested} items processed/updated.",
+                "message": f"Execution completed ({service_cfg.name}): {new_ingested} new entries ingested, {reconcile_updates} items reconciled.",
                 "new_items": new_ingested,
             }
             return self._status[service_id]
@@ -439,9 +415,9 @@ class TaskScheduler:
             return self._status[service_id]
 
     async def _execute_consumer_enrichment(
-        self, service_cfg: Any, row_dict: Dict[str, Any], table_cols: set
+        self, service_cfg: Any, row_dict: Dict[str, Any], table_cols: set, service_id: Optional[str] = None
     ) -> bool:
-        """Execute enrichment endpoints and apply field mappings for an existing pending row in a consumer stage."""
+        """Execute enrichment endpoints and apply field mappings for an existing row."""
         endpoints_to_query: Dict[str, str] = dict(service_cfg.enrichment_endpoints or {})
         if service_cfg.poll_endpoint and "{" in service_cfg.poll_endpoint:
             endpoints_to_query["primary"] = service_cfg.poll_endpoint
@@ -454,7 +430,7 @@ class TaskScheduler:
             if not ep_template or not ep_template.strip():
                 continue
             resolved_ep = ep_template.strip()
-            context_dict = {**row_dict, **enrichment_data}
+            context_dict = {"records": row_dict, **row_dict, **enrichment_data}
             missing_ph = False
             for ph in re.findall(r"\{([^}]+)\}", ep_template):
                 val = extract_dotted_value(context_dict, ph)
@@ -488,7 +464,19 @@ class TaskScheduler:
             except Exception as e_err:
                 print(f"[!] Warning consumer enrichment error ({namespace}) for row {row_dict.get('ID')}: {e_err}")
 
-        context_dict = {**row_dict, **enrichment_data}
+        # Resolve numeric tag IDs to readable tag labels if tag map is available
+        if service_id and service_cfg.base_url:
+            service_tags = await self._get_service_tags(service_id, service_cfg)
+            if service_tags:
+                for ns, payload in enrichment_data.items():
+                    if isinstance(payload, dict) and "tags" in payload:
+                        raw_tags = payload.get("tags")
+                        if isinstance(raw_tags, list) and any(isinstance(t, int) for t in raw_tags):
+                            payload["tag_ids"] = raw_tags
+                            payload["tags"] = [service_tags.get(t, str(t)) for t in raw_tags]
+                            payload["tag_labels"] = payload["tags"]
+
+        context_dict = {"records": row_dict, **row_dict, **enrichment_data}
         mapped_fields: Dict[str, Any] = {}
         for mapping in service_cfg.field_mappings:
             if not mapping.target_column:
@@ -510,7 +498,8 @@ class TaskScheduler:
             existing_val = row_dict.get(col_name)
             mapped_fields[col_name] = merge_field_value(existing_val, val)
 
-        if mapped_fields:
+        has_changes = any(row_dict.get(k) != v for k, v in mapped_fields.items())
+        if mapped_fields and has_changes:
             set_clauses = [f"{k} = ?" for k in mapped_fields.keys()]
             vals = list(mapped_fields.values()) + [row_dict["ID"]]
             await db_manager.execute(
@@ -521,87 +510,162 @@ class TaskScheduler:
             return True
         return False
 
-    async def reconcile_stages(self) -> None:
-        """Evaluate stage progression (unidirectional) and completion predicates."""
+    async def _update_mapped_values_for_stage(
+        self, stage: Any, row_id: int, table_cols: set, settings: Any
+    ) -> bool:
+        """Run UPDATE_VALUES: enrichment and mapping for all services assigned to the given stage."""
+        if not stage or not stage.service_ids:
+            return False
+
+        updated_any = False
+        for s_id in stage.service_ids:
+            service_cfg = settings.services.get(s_id)
+            if not service_cfg or not service_cfg.enabled:
+                continue
+
+            try:
+                # Re-query row to ensure latest mapped columns are available for subsequent services
+                current_rows = await db_manager.query(
+                    "SELECT * FROM SERVICES_PIPELINE WHERE ID = ?;",
+                    (row_id,)
+                )
+                if not current_rows:
+                    break
+                row_dict = dict(current_rows[0])
+                updated = await self._execute_consumer_enrichment(service_cfg, row_dict, table_cols, service_id=s_id)
+                if updated:
+                    updated_any = True
+            except Exception as enrich_err:
+                print(f"[!] Error during enrichment with service '{s_id}' for row {row_id}: {enrich_err}")
+
+        return updated_any
+
+    async def reconcile_stages(self) -> int:
+        """Evaluate existing pipeline items strictly following the authoritative Mermaid lifecycle state machine:
+        END_OF_CICLE -> IS_SINK -> (YES) -> UPDATE_VALUES -> END_OF_CICLE
+                     -> (NO)  -> CHECK_STATUS -> (FALSE) -> UPDATE_VALUES -> END_OF_CICLE
+                                              -> (TRUE)  -> IS_NEXT_STAGE -> (YES) -> NEXT_STAGE -> STATUS_TO_PENDING -> UPDATE_VALUES -> END_OF_CICLE
+                                                                          -> (NO)  -> UPDATE_VALUES -> END_OF_CICLE
+        """
+        updates_count = 0
         try:
             settings = await config_manager.get_settings()
             enabled_stages = sorted([s for s in settings.stages if s.enabled], key=lambda s: s.order)
+            stages_by_id = {s.id: s for s in enabled_stages}
+            table_cols = {c["name"].upper() for c in await db_manager.get_table_columns("SERVICES_PIPELINE")}
 
-            # 1. Unidirectional Stage Progression (Advancing COMPLETED rows)
-            completed_rows = await db_manager.query(
-                "SELECT * FROM SERVICES_PIPELINE WHERE STATUS = 'COMPLETED' LIMIT 100;"
+            # Retrieve existing pipeline records
+            pipeline_rows = await db_manager.query(
+                "SELECT * FROM SERVICES_PIPELINE ORDER BY ID ASC;"
             )
-            for row in completed_rows:
+            if not pipeline_rows:
+                return 0
+
+            for row in pipeline_rows:
                 row_dict = dict(row)
+                row_id = row_dict["ID"]
                 current_stage_slug = row_dict.get("STAGE")
 
-                # Resolve current stage from config
-                current_stage = next((s for s in enabled_stages if s.id == current_stage_slug), None)
+                # Resolve current stage from configuration
+                current_stage = stages_by_id.get(current_stage_slug)
+                if not current_stage:
+                    current_stage = next((s for s in enabled_stages if str(s.order) == str(current_stage_slug)), None)
                 if not current_stage:
                     continue
-                current_stage_order = current_stage.order
 
-                # Target stages must be non-root and order > current_stage_order
-                candidate_stages = sorted(
-                    [
-                        s for s in enabled_stages
-                        if s.order > current_stage_order and s.start_condition and s.start_condition.strip()
-                    ],
-                    key=lambda s: s.order
-                )
+                status = str(row_dict.get("STATUS") or "").upper()
 
-                # Evaluation context
-                ctx = {**row_dict, "STAGE": current_stage.id, "stage": current_stage.id}
-                for s in enabled_stages:
-                    ctx[f"stage.{s.id}.completed"] = (s.order <= current_stage_order)
-                    ctx[f"stage.{s.order}.completed"] = (s.order <= current_stage_order)
-
-                for target_stage in candidate_stages:
-                    try:
-                        if PredicateEvaluator.evaluate(target_stage.start_condition, ctx):
-                            is_sink = not target_stage.complete_condition or not target_stage.complete_condition.strip()
-                            new_status = "SINK" if is_sink else "PENDING"
-                            await db_manager.execute(
-                                "UPDATE SERVICES_PIPELINE SET STAGE = ?, STATUS = ?, LAST_UPDATED = CURRENT_TIMESTAMP WHERE ID = ?;",
-                                (target_stage.id, new_status, row_dict["ID"])
-                            )
-                            print(f"[i] Row {row_dict['ID']} ({row_dict.get('PIPELINE_KEY')}) transitioned: Stage '{current_stage_slug}' -> Stage '{target_stage.id}' (STATUS = '{new_status}').")
-                            break
-                    except Exception as eval_err:
-                        print(f"[!] Error evaluating start_condition of stage '{target_stage.id}' for row {row_dict.get('ID')}: {eval_err}")
-
-            # 2. Stage Completion Evaluation (Stages with PENDING rows)
-            for stage in enabled_stages:
-                cond = stage.complete_condition
-                if not cond or not cond.strip():
+                # Node: IS_SINK
+                if status == "SINK":
+                    # IS_SINK -> YES -> UPDATE_VALUES (enrichment for services in row.STAGE) -> END_OF_CICLE
+                    enriched = await self._update_mapped_values_for_stage(current_stage, row_id, table_cols, settings)
+                    if enriched:
+                        updates_count += 1
                     continue
 
-                pending_rows = await db_manager.query(
-                    "SELECT * FROM SERVICES_PIPELINE WHERE STAGE = ? AND STATUS = 'PENDING' LIMIT 50;",
-                    (stage.id,)
-                )
-                if not pending_rows:
-                    continue
+                # Node: IS_SINK -> NO -> CHECK_STATUS
+                if status == "PENDING":
+                    cond = current_stage.complete_condition
+                    is_completed = False
+                    if cond and cond.strip():
+                        ctx = {**row_dict, "STAGE": current_stage.id, "stage": current_stage.id}
+                        for s in enabled_stages:
+                            ctx[f"stage.{s.id}.completed"] = (s.order <= current_stage.order)
+                            ctx[f"stage.{s.order}.completed"] = (s.order <= current_stage.order)
+                        try:
+                            if PredicateEvaluator.evaluate(cond, ctx):
+                                is_completed = True
+                        except Exception as eval_err:
+                            print(f"[!] Error evaluating complete_condition for row {row_id} in stage '{current_stage.id}': {eval_err}")
 
-                for row in pending_rows:
-                    row_dict = dict(row)
-                    ctx = {**row_dict, "STAGE": stage.id, "stage": stage.id}
+                    if is_completed:
+                        # CHECK_STATUS -> TRUE STATUS = COMPLETED -> IS_NEXT_STAGE
+                        await db_manager.execute(
+                            "UPDATE SERVICES_PIPELINE SET STATUS = 'COMPLETED', LAST_UPDATED = CURRENT_TIMESTAMP WHERE ID = ?;",
+                            (row_id,)
+                        )
+                        print(f"[i] Stage '{current_stage.id}' marked COMPLETED for row {row_id} ({row_dict.get('PIPELINE_KEY')}) via complete_condition.")
+                        status = "COMPLETED"
+                        row_dict["STATUS"] = "COMPLETED"
+                        updates_count += 1
+                        # Proceeds to IS_NEXT_STAGE below
+                    else:
+                        # CHECK_STATUS -> FALSE STATUS = STATUS -> UPDATE_VALUES -> END_OF_CICLE
+                        enriched = await self._update_mapped_values_for_stage(current_stage, row_id, table_cols, settings)
+                        if enriched:
+                            updates_count += 1
+                        continue
+
+                # Node: IS_NEXT_STAGE (for STATUS == 'COMPLETED', already completed or just set to COMPLETED)
+                if status == "COMPLETED":
+                    candidate_stages = sorted(
+                        [
+                            s for s in enabled_stages
+                            if s.order > current_stage.order and s.start_condition and s.start_condition.strip()
+                        ],
+                        key=lambda s: s.order
+                    )
+
+                    # Build evaluation context
+                    ctx = {**row_dict, "STAGE": current_stage.id, "stage": current_stage.id}
                     for s in enabled_stages:
-                        ctx[f"stage.{s.id}.completed"] = (s.order <= stage.order)
-                        ctx[f"stage.{s.order}.completed"] = (s.order <= stage.order)
+                        ctx[f"stage.{s.id}.completed"] = (s.order <= current_stage.order)
+                        ctx[f"stage.{s.order}.completed"] = (s.order <= current_stage.order)
 
-                    try:
-                        if PredicateEvaluator.evaluate(cond, ctx):
-                            await db_manager.execute(
-                                "UPDATE SERVICES_PIPELINE SET STATUS = 'COMPLETED', LAST_UPDATED = CURRENT_TIMESTAMP WHERE ID = ?;",
-                                (row_dict["ID"],)
-                            )
-                            print(f"[i] Stage '{stage.id}' marked COMPLETED for row {row_dict['ID']} ({row_dict.get('PIPELINE_KEY')}) via complete_condition.")
-                    except Exception as eval_err:
-                        print(f"[!] Error evaluating complete_condition for row {row_dict.get('ID')}: {eval_err}")
+                    transitioned_stage = None
+                    for target_stage in candidate_stages:
+                        try:
+                            if PredicateEvaluator.evaluate(target_stage.start_condition, ctx):
+                                transitioned_stage = target_stage
+                                break
+                        except Exception as eval_err:
+                            print(f"[!] Error evaluating start_condition of stage '{target_stage.id}' for row {row_id}: {eval_err}")
+
+                    if transitioned_stage:
+                        # IS_NEXT_STAGE -> YES -> NEXT_STAGE -> STATUS_TO_PENDING -> UPDATE_VALUES -> END_OF_CICLE
+                        is_sink = not transitioned_stage.complete_condition or not transitioned_stage.complete_condition.strip()
+                        new_status = "SINK" if is_sink else "PENDING"
+                        await db_manager.execute(
+                            "UPDATE SERVICES_PIPELINE SET STAGE = ?, STATUS = ?, LAST_UPDATED = CURRENT_TIMESTAMP WHERE ID = ?;",
+                            (transitioned_stage.id, new_status, row_id)
+                        )
+                        print(f"[i] Row {row_id} ({row_dict.get('PIPELINE_KEY')}) transitioned: Stage '{current_stage.id}' -> Stage '{transitioned_stage.id}' (STATUS = '{new_status}').")
+                        updates_count += 1
+                        # Run UPDATE_VALUES for target_stage.service_ids
+                        await self._update_mapped_values_for_stage(transitioned_stage, row_id, table_cols, settings)
+                        # END_OF_CICLE
+                    else:
+                        # IS_NEXT_STAGE -> NO -> UPDATE_VALUES -> END_OF_CICLE
+                        # Remains in current stage with STATUS = 'COMPLETED'
+                        enriched = await self._update_mapped_values_for_stage(current_stage, row_id, table_cols, settings)
+                        if enriched:
+                            updates_count += 1
+                        # END_OF_CICLE
 
         except Exception as err:
             print(f"[!] Error in reconcile_stages: {err}")
+
+        return updates_count
 
     async def _service_loop(self, service_id: str) -> None:
         while self._running:
@@ -618,7 +682,6 @@ class TaskScheduler:
 
                 interval = max(int(configured_interval), 10)
                 await self.trigger_now(service_id)
-                await self.reconcile_stages()
                 await asyncio.sleep(interval)
             except asyncio.CancelledError:
                 break

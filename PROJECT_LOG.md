@@ -163,4 +163,142 @@ This log maintains cross-session operational continuity, recording architectural
 - `docs/BACKEND_SPEC.md`
 - `PROJECT_LOG.md`
 
+---
+
+## Session Milestone: 2026-10-15 — DOC-01: Canonical Documentation Synchronization for STG-02
+
+### Role & Agent Assignment
+- **Orchestrator (`Role 0`)**: Evaluated operator feedback, audited `StageModal.js` implementation, and coordinated canonical alignment.
+- **Technical Documentation Specialist (`Role 5`)**: Synchronized project backlog and technical specifications.
+
+### Audit & Synchronization Details
+1. **Verification of STG-02 (`StageModal.js`)**:
+   - Inspected `frontend/src/features/settings/ui/StageModal.js` (lines 114–137).
+   - Confirmed dedicated `chk-stage-sink` checkbox, explanatory tooltip/hint, and reactive nullification of `complete_condition` were already fully functional.
+2. **Canonical Alignment**:
+   - Marked `STG-02` as `COMPLETED ✓` in `docs/BACKLOG.md`.
+   - Purged `STG-02` from pending architectural gaps in `docs/BACKEND_SPEC.md`.
+
+### Files Modified
+- `docs/BACKLOG.md`
+- `docs/BACKEND_SPEC.md`
+- `PROJECT_LOG.md`
+
+---
+
+## Session Milestone: 2026-10-15 — STG-03: Configurable Root Stage Activation Cutoff & Consumer Date Decoupling
+
+### Role & Agent Assignment
+- **Orchestrator (`Role 0`)**: Evaluated objectives, coordinated plan presentation and authorization gate for STG-03.
+- **Backend Systems Engineer (`Role 2`)**: Implemented consumer stage decoupling, auto-stamping of `last_activated_at` on root stage enablement in `src/api/settings.py`, and robust timezone-aware cutoff comparisons in `src/core/scheduler.py`.
+- **Frontend & WebUI Specialist (`Role 3`)**: Added `datetime-local` Historical Event Cutoff input with "Now" / "Clear" actions in `StageModal.js`, auto-stamping on card toggle in `StagesPanel.js`, and stage card cutoff indicator.
+- **QA & Integration Tester (`Role 4`)**: Verified backend compilation (`py_compile`) and frontend production build (`npm run build`).
+- **Technical Documentation Specialist (`Role 5`)**: Updated `docs/BACKLOG.md` marking `STG-03` as complete and bumped baseline version to `v0.1.8`.
+
+### Architectural Decisions & Changes Applied
+1. **Root Cutoff User Control (`StageModal.js`)**:
+   - Added `datetime-local` input for `last_activated_at` displayed exclusively when a stage is marked as Root (`isRoot == true`).
+   - Integrated quick-action buttons "Now" and "Clear" for operator convenience.
+   - Formatted ISO timestamps cleanly to local datetime and mapped back to ISO strings upon saving.
+2. **Consumer Stage Decoupling (`src/api/settings.py`)**:
+   - Explicitly nullified `last_activated_at` for consumer/intermediate stages (`start_condition IS NOT NULL`), guaranteeing they process rows regardless of when stages were enabled.
+3. **Automatic Timestamp Initialization**:
+   - In `src/api/settings.py`, if a root stage is toggled enabled (`enabled == True`) without a timestamp, the current UTC timestamp is auto-populated.
+   - In `StagesPanel.js`, toggling a root stage active from the card view similarly stamps current UTC timestamp if previously empty.
+   - Added card metadata badge indicating active `CUTOFF` timestamp for root stages.
+4. **Timezone Normalization in Scheduler (`src/core/scheduler.py`)**:
+   - Defensive normalization of `tzinfo` to UTC on both `stage_activated_dt` and `rec_dt` before evaluation, preventing `TypeError` on offset-naive vs offset-aware comparisons.
+
+### Files Modified
+- `src/api/settings.py`
+- `src/core/scheduler.py`
+- `frontend/src/features/settings/ui/StageModal.js`
+- `frontend/src/features/settings/ui/StagesPanel.js`
+- `src/static/index.html`
+- `src/static/assets/index-*.js`
+- `docs/BACKLOG.md`
+- `PROJECT_LOG.md`
+
+---
+
+## Session Milestone: 2026-10-15 — REF-07: Inverted Stage Reconciliation Order & Immediate Post-Transition Enrichment
+
+### Role & Agent Assignment
+- **Backend Systems Engineer (`Role 2`)**: Refactored `TaskScheduler.reconcile_stages()` in `src/core/scheduler.py` to invert the reconciliation sequence and implement immediate early data enrichment upon stage transitions.
+
+### Architectural Decisions & Changes Applied
+1. **Inverted Evaluation Order in `reconcile_stages()`**:
+   - **Step 1 (Stage Completion)**: First evaluates completion conditions (`stage.complete_condition`) for `PENDING` rows across all active stages. Satisfied rows are marked `STATUS = 'COMPLETED'`.
+   - **Step 2 (Stage Progression)**: Sequentially evaluates candidate forward stages (`order > current_stage.order`) for `COMPLETED` rows. Newly completed rows from Step 1 can now immediately progress within the same reconciliation cycle.
+2. **Immediate Post-Transition Data Enrichment**:
+   - When a row advances to `target_stage`, its DB status is updated to `SINK` (if sink stage) or `PENDING`.
+   - The scheduler immediately triggers `_execute_consumer_enrichment()` for each active service assigned in `target_stage.service_ids`.
+   - Row data is re-queried between service enrichments to ensure subsequent services receive cumulative mapped columns.
+3. **Immediate Post-Transition Completion Check**:
+   - If `target_stage` is not a sink stage and has a `complete_condition`, the freshly enriched row is immediately re-queried and evaluated against `target_stage.complete_condition`.
+   - If satisfied, the row is promoted to `STATUS = 'COMPLETED'` without waiting for subsequent polling intervals.
+
+### Files Modified
+- `src/core/scheduler.py`
+- `PROJECT_LOG.md`
+
+---
+
+## Session Milestone: 2026-10-15 — REF-08: Purge Post-Transition Immediate Completion Evaluation
+
+### Role & Agent Assignment
+- **Backend Systems Engineer (`Role 2`)**: Corrected `reconcile_stages()` in `src/core/scheduler.py` by purging post-transition immediate completion checks.
+
+### Architectural Decisions & Changes Applied
+1. **Purged Immediate Post-Transition Completion Check**:
+   - Removed lines in `reconcile_stages()` that immediately evaluated `target_stage.complete_condition` right after row transition and early data enrichment.
+   - Prevents potential state loops, premature completion alarms, and uncoordinated multi-stage skips within a single interval.
+2. **Strict Single-Transition-Per-Interval State Machine**:
+   - When a row transitions to `target_stage`, it is stamped with `STAGE = target_stage.id`, `STATUS = ('SINK' if is_sink else 'PENDING')`, and `LAST_UPDATED = CURRENT_TIMESTAMP`.
+   - Early consumer enrichment executes for all active services in `target_stage.service_ids`.
+   - The transition loop breaks immediately for this row.
+   - The row strictly remains in `PENDING` (or `SINK`). Its `complete_condition` is evaluated solely during Step 1 in subsequent reconciliation cycles.
+
+### Files Modified
+- `src/core/scheduler.py`
+- `PROJECT_LOG.md`
+
+---
+
+## Session Milestone: 2026-10-15 — REF-09: Implement Mermaid Flowchart State Machine for Stage Progression and Enrichment
+
+### Role & Agent Assignment
+- **Backend Systems Engineer (`Role 2`)**: Refactored `src/core/scheduler.py` to strictly implement the authoritative Mermaid lifecycle state machine for stage progression, status transitions, and data enrichment.
+
+### Architectural Decisions & Changes Applied
+1. **Authoritative State Machine Implementation**:
+   - Strictly implemented the canonical Mermaid lifecycle flowchart:
+     * `NEW_ENTRY --> STATUS_TO_PENDING --> UPDATE_VALUES --> END_OF_CICLE`
+     * `END_OF_CICLE --> IS_SINK`
+     * `IS_SINK --> (YES) --> UPDATE_VALUES --> END_OF_CICLE`
+     * `IS_SINK --> (NO)  --> CHECK_STATUS`
+     * `CHECK_STATUS --> (TRUE, STATUS = COMPLETED)  --> IS_NEXT_STAGE`
+     * `CHECK_STATUS --> (FALSE, STATUS = STATUS)    --> UPDATE_VALUES --> END_OF_CICLE`
+     * `IS_NEXT_STAGE --> (YES) --> NEXT_STAGE --> STATUS_TO_PENDING --> UPDATE_VALUES --> END_OF_CICLE`
+     * `IS_NEXT_STAGE --> (NO)  --> UPDATE_VALUES --> END_OF_CICLE`
+2. **New Entry Lifecycle Alignment (`trigger_now`)**:
+   - Purged premature completion evaluation at initial record discovery.
+   - For all newly ingested records:
+     * Compute `is_sink = not active_stage.complete_condition or not active_stage.complete_condition.strip()`
+     * Set `initial_status = "SINK" if is_sink else "PENDING"`
+     * Populate mapped fields (`UPDATE_VALUES`) and insert into `SERVICES_PIPELINE`.
+     * Successfully completes new entry cycle (`END_OF_CICLE`).
+3. **Unified Pipeline Reconciliation (`reconcile_stages`)**:
+   - Replaced fragmented stage-based queries with unified per-row lifecycle reconciliation:
+     * **SINK rows**: Evaluates `IS_SINK == YES` -> triggers `_update_mapped_values_for_stage` -> `END_OF_CICLE`.
+     * **PENDING rows**: Evaluates stage `complete_condition`. If False -> stays `PENDING` -> triggers stage enrichment -> `END_OF_CICLE`. If True -> updates DB to `STATUS = 'COMPLETED'` and proceeds immediately to `IS_NEXT_STAGE`.
+     * **COMPLETED rows**: Evaluates forward candidate stages (`order > current_stage.order`) for `start_condition == True`. If matched -> transitions to `NEXT_STAGE`, computes `is_sink`, sets `new_status = "SINK" if is_sink else "PENDING"`, updates DB, triggers target stage enrichment (`UPDATE_VALUES`), and reaches `END_OF_CICLE`. If not matched -> remains `COMPLETED`, triggers current stage enrichment (`UPDATE_VALUES`), and reaches `END_OF_CICLE`.
+4. **Targeted Stage Enrichment Helper (`_update_mapped_values_for_stage`)**:
+   - Added helper method iterating all active services configured in `stage.service_ids`, re-querying cumulative columns between service passes, resolving service tag labels, and executing field mapping with transformers.
+   - Avoids no-op DB writes when mapped field values have not changed.
+
+### Files Modified
+- `src/core/scheduler.py`
+- `PROJECT_LOG.md`
+
 

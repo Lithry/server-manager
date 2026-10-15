@@ -101,6 +101,8 @@ class PredicateEvaluator:
     def _eval_node(cls, node: ast.AST, context: Dict[str, Any]) -> Any:
         if isinstance(node, ast.Constant):
             return node.value
+        elif isinstance(node, (ast.Tuple, ast.List)):
+            return [cls._eval_node(elt, context) for elt in node.elts]
         elif isinstance(node, ast.Name):
             # Identifiers like IS_ANIME, FILE_PATH, VFS_PATH (case-insensitive lookup)
             if node.id in context:

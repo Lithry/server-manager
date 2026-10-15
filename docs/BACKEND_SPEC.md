@@ -233,7 +233,5 @@ src/
 1. **CORE-02 (Multi-Pipeline Dynamic Registry `PIPELINES`)**:
    - Currently, all workflows share a single `SERVICES_PIPELINE` table.
    - Future architectural phase must support dynamic isolated tables (`PIPELINE_<SLUG>`) registered in a `PIPELINES` catalog table.
-2. **STG-02 (Dedicated Sink Stage UI Toggle)**:
-   - Dedicated toggle in StageModal to explicitly declare sink stages (`complete_condition = NULL`).
-3. **API-02 (Remediation REST API for LLM Agents)**:
+2. **API-02 (Remediation REST API for LLM Agents)**:
    - `POST /api/v1/meta/remediate` is planned to execute pre-authorized remediation runbooks via HATEOAS parameter handoff.

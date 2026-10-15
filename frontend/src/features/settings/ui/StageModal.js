@@ -8,6 +8,19 @@ import { settingsKeys } from '../api.js';
 // Local state for the modal to handle sink/root toggles
 const localStore = createStore({ isSink: false, isRoot: false });
 
+// Helper to format ISO string to datetime-local format
+function formatDateTimeLocal(isoStr) {
+  if (!isoStr) return '';
+  try {
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) return '';
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  } catch {
+    return '';
+  }
+}
+
 export function createStageModal(store) {
   const state = store.get();
   const snapshot = queryCache.read(settingsKeys.all);
@@ -29,6 +42,18 @@ export function createStageModal(store) {
       const stageId = document.getElementById('stage-id').value.trim();
       if (!stageId) { alert('Stage ID is required'); return; }
       
+      let lastActivatedAt = null;
+      if (isRoot) {
+        const rawDateVal = document.getElementById('stage-last-activated')?.value;
+        if (rawDateVal) {
+          try {
+            lastActivatedAt = new Date(rawDateVal).toISOString();
+          } catch {
+            lastActivatedAt = editingStage?.last_activated_at || null;
+          }
+        }
+      }
+
       const newStage = {
         id: stageId,
         name: document.getElementById('stage-name').value.trim() || stageId,
@@ -39,7 +64,8 @@ export function createStageModal(store) {
         grace_period_minutes: parseInt(document.getElementById('stage-grace').value) || 0,
         watchdog_timeout_minutes: parseInt(document.getElementById('stage-watchdog').value) || 0,
         enabled: document.getElementById('chk-stage-enabled').checked,
-        order: editingStage ? editingStage.order : stages.length + 1
+        order: editingStage ? editingStage.order : stages.length + 1,
+        last_activated_at: lastActivatedAt
       };
       
       let newStages = [...stages];
@@ -107,6 +133,36 @@ export function createStageModal(store) {
               else alert('Syntax Error ❌: ' + res.message);
             } catch(e) { alert('Validation failed: ' + e.message); }
           } })}
+        </div>
+      </div>
+
+      <div style="display: ${isRoot ? 'block' : 'none'};" class="u-mt-3">
+        <label class="form-label u-text-sm"><strong>Historical Event Cutoff (last_activated_at)</strong></label>
+        <p class="u-text-sm u-text-muted u-mb-2">Only service events occurring on or after this timestamp will be ingested. Leave empty to ingest all events without cutoff.</p>
+        <div class="u-flex u-gap-2" style="align-items: center;">
+          <input type="datetime-local" id="stage-last-activated" class="form-input font-mono" style="flex: 1;" .value=${formatDateTimeLocal(editingStage ? editingStage.last_activated_at : (isRoot ? new Date().toISOString() : ''))}>
+          ${Button({
+            label: 'Now',
+            variant: 'secondary',
+            size: 'sm',
+            onClick: () => {
+              const el = document.getElementById('stage-last-activated');
+              if (el) {
+                const now = new Date();
+                const pad = (n) => String(n).padStart(2, '0');
+                el.value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+              }
+            }
+          })}
+          ${Button({
+            label: 'Clear',
+            variant: 'secondary',
+            size: 'sm',
+            onClick: () => {
+              const el = document.getElementById('stage-last-activated');
+              if (el) el.value = '';
+            }
+          })}
         </div>
       </div>
     </div>

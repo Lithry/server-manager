@@ -2,7 +2,7 @@
 
 **Appliance:** `server-manager` (Universal Telemetry & Cross-Service Pipeline)  
 **Tracking Repository:** `Lithry/server-manager.git`  
-**Current Baseline Version:** `v0.1.7`  
+**Current Baseline Version:** `v0.1.8`  
 **Status:** Living Technical Backlog  
 **Language Standard:** English (Universal Codebase Standard)
 
@@ -32,8 +32,8 @@
 | **AUDIT-01** | **P1 (High)** | Governance | Comprehensive Codebase Audit & Dead Code Elimination | Phase 1 (`v0.1.6`) | **COMPLETED ✓** |
 | **REF-01** | **P1 (High)** | Frontend / Build | Modular ES Architecture & Vite Bundler Pipeline | Phase 1 (`v0.1.7`) | **COMPLETED ✓** |
 | **STG-01** | **P1 (High)** | Core / WebUI | Auto-Assigned Numeric Stage IDs & Visual Reordering | Phase 1 (`v0.1.7`) | **COMPLETED ✓** |
-| **STG-02** | **P2 (Medium)** | WebUI / Modal | Dedicated Sink Stage Option Checkbox in Stage Modal | Phase 1 (`v0.1.8`) | **PLANNED 📅** |
-| **STG-03** | **P1 (High)** | Core / Ingestion | Configurable Root Stage Activation Cutoff & Consumer Date Decoupling | Phase 1 (`v0.1.8`) | **PLANNED 📅** |
+| **STG-02** | **P2 (Medium)** | WebUI / Modal | Dedicated Sink Stage Option Checkbox in Stage Modal | Phase 1 (`v0.1.8`) | **COMPLETED ✓** |
+| **STG-03** | **P1 (High)** | Core / Ingestion | Configurable Root Stage Activation Cutoff & Consumer Date Decoupling | Phase 1 (`v0.1.8`) | **COMPLETED ✓** |
 | **SBX-01** | **P2 (Medium)** | WebUI / Tooling | API Sandbox Architectural Debate, Payload Inspector & Visual Refactor | Phase 1 (`v0.1.9`) | **PLANNED 📅** |
 | **CORE-02** | **P1 (High)** | Core / Engine | Multi-Pipeline Dynamic Registry & Scoped DAG Progression Engine | Phase 2 (`v0.2.0`) | **PLANNED 📅** |
 | **API-01** | **P2 (Medium)** | Core / Presets | Shoko Server Verified API Schema & Presets | Phase 1 (`v0.1.6`) | **COMPLETED ✓** |
@@ -68,10 +68,10 @@
   1. **STG-01 (Auto-Assigned Stage IDs & Visual Reordering)**: [✓ COMPLETED]
      - Visual stage reordering via Move Up / Move Down controls with boundary protections (`StagesPanel.js`).
      - Automatic normalization of integer `order` based on visual array position (`index + 1`) and slug immutability enforcement (`src/api/settings.py`).
-  2. **STG-02 (Dedicated Sink Stage Checkbox)**: [📅 PLANNED]
+  2. **STG-02 (Dedicated Sink Stage Checkbox)**: [✓ COMPLETED]
      - Add explicit "Sink Stage" toggle/checkbox in `StageModal.js` reflecting the backend engine rules established in `REF-06`.
      - When checked, sets `complete_condition = NULL` and displays informative hint: *"Items entering this stage are marked as SINK and will not transition further."*
-  3. **STG-03 (Configurable Root Stage Activation Cutoff & Consumer Date Decoupling)**: [📅 PLANNED]
+  3. **STG-03 (Configurable Root Stage Activation Cutoff & Consumer Date Decoupling)**: [✓ COMPLETED]
      - Restrict `last_activated_at` filtering exclusively to Root stages (`start_condition IS NULL`) in `src/core/scheduler.py`.
      - Make `last_activated_at` user-configurable in `StageModal.js`, defaulting to `new Date().toISOString()` upon initial activation but allowing operator editing (e.g. to reprocess past events or constrain ingestion window).
      - Decouple Consumer and Sink stages from all activation timestamps, ensuring they evaluate and enrich any pipeline row satisfying their `start_condition`.

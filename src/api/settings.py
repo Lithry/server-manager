@@ -1,5 +1,6 @@
 """Configuration and settings management API."""
 
+import datetime
 import httpx
 from typing import Any, Dict
 from fastapi import APIRouter, HTTPException
@@ -56,10 +57,11 @@ async def update_settings(settings: Settings) -> Settings:
                     )
                 all_new_targets.add(col_upper)
 
-    # 2. Validate Stage ID Immutability and Normalize Order
+    # 2. Validate Stage ID Immutability, Normalize Order and Sync Activation Cutoffs
     old_settings = await config_manager.get_settings()
     old_stages = old_settings.stages
     old_services = old_settings.services
+    old_stages_by_id = {s.id: s for s in old_stages}
 
     # Match by index to detect renames/swaps of existing slugs
     for idx, stage in enumerate(settings.stages):
@@ -73,6 +75,16 @@ async def update_settings(settings: Settings) -> Settings:
                     status_code=400,
                     detail=f"Stage ID at index {idx} cannot be changed from '{old_stage.id}' to '{stage.id}'."
                 )
+
+        # Decouple consumer stages from last_activated_at
+        if stage.start_condition and stage.start_condition.strip():
+            stage.last_activated_at = None
+        else:
+            # Root stage: auto-populate last_activated_at if stage is enabled and timestamp is unset
+            old_s = old_stages_by_id.get(stage.id)
+            was_enabled = old_s.enabled if old_s else False
+            if stage.enabled and not was_enabled and not stage.last_activated_at:
+                stage.last_activated_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
     # 3. Detect renames and auto-migrate data
     existing_table_cols = {c["name"].upper() for c in await db_manager.get_table_columns("SERVICES_PIPELINE")}
