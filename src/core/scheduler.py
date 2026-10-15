@@ -396,9 +396,9 @@ class TaskScheduler:
                             print(f"[!] Warning evaluating complete_condition for {pipeline_key}: {cond_err}")
                             initial_status = "PENDING"
 
-                    col_names = ["PIPELINE_KEY", "STAGE", "STAGE_SLUG", "STATUS"] + list(mapped_fields.keys())
+                    col_names = ["PIPELINE_KEY", "STAGE", "STATUS"] + list(mapped_fields.keys())
                     placeholders = ["?"] * len(col_names)
-                    values = [pipeline_key, active_stage.order, active_stage.id, initial_status] + list(mapped_fields.values())
+                    values = [pipeline_key, active_stage.id, initial_status] + list(mapped_fields.values())
 
                     insert_sql = f'INSERT INTO SERVICES_PIPELINE ({", ".join(col_names)}) VALUES ({", ".join(placeholders)});'
                     await db_manager.execute(insert_sql, tuple(values))
@@ -410,7 +410,7 @@ class TaskScheduler:
                 for c_stage in active_consumer_stages:
                     pending_rows = await db_manager.query(
                         "SELECT * FROM SERVICES_PIPELINE WHERE STAGE = ? AND STATUS = 'PENDING' LIMIT 50;",
-                        (c_stage.order,)
+                        (c_stage.id,)
                     )
                     for p_row in pending_rows:
                         p_row_dict = dict(p_row)
@@ -533,7 +533,14 @@ class TaskScheduler:
             )
             for row in completed_rows:
                 row_dict = dict(row)
-                current_stage_order = row_dict.get("STAGE", 1)
+                current_stage_slug = row_dict.get("STAGE")
+
+                # Resolve current order from config
+                current_stage_order = 0
+                for s in enabled_stages:
+                    if s.id == current_stage_slug:
+                        current_stage_order = s.order
+                        break
 
                 # Target stages must be non-root and order > current_stage_order
                 candidate_stages = [
@@ -557,10 +564,10 @@ class TaskScheduler:
                             is_sink = not target_stage.complete_condition or not target_stage.complete_condition.strip()
                             new_status = "SINK" if is_sink else "PENDING"
                             await db_manager.execute(
-                                "UPDATE SERVICES_PIPELINE SET STAGE = ?, STAGE_SLUG = ?, STATUS = ?, LAST_UPDATED = CURRENT_TIMESTAMP WHERE ID = ?;",
-                                (target_stage.order, target_stage.id, new_status, row_dict["ID"])
+                                "UPDATE SERVICES_PIPELINE SET STAGE = ?, STATUS = ?, LAST_UPDATED = CURRENT_TIMESTAMP WHERE ID = ?;",
+                                (target_stage.id, new_status, row_dict["ID"])
                             )
-                            print(f"[i] Row {row_dict['ID']} ({row_dict.get('PIPELINE_KEY')}) transitioned: Stage {current_stage_order} -> Stage {target_stage.order} ('{target_stage.id}', STATUS = '{new_status}').")
+                            print(f"[i] Row {row_dict['ID']} ({row_dict.get('PIPELINE_KEY')}) transitioned: Stage {current_stage_slug} -> Stage {target_stage.id} (STATUS = '{new_status}').")
                             break
                     except Exception as eval_err:
                         print(f"[!] Error evaluating start_condition of stage '{target_stage.id}' for row {row_dict.get('ID')}: {eval_err}")

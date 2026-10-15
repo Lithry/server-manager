@@ -122,7 +122,7 @@ The core data structure is the dynamic pipeline table (`SERVICES_PIPELINE`), des
 - **System Reserved Columns**: The following columns are protected and managed exclusively by the core engine:
   - `ID`: Autoincrement primary key.
   - `PIPELINE_KEY`: Unique tracking identifier across services (e.g. `sonarr:1284`).
-  - `STAGE`: Current integer stage sequence (1-indexed).
+  - `STAGE`: Current progression stage semantic slug (TEXT, immutable identifier).
   - `STATUS`: Progression state (`PENDING`, `COMPLETED`, `SINK`).
   - `LAST_UPDATED`: Current ISO timestamp.
 - **Automated DDL Evolution**: Saving field mappings automatically triggers non-destructive SQLite migrations:

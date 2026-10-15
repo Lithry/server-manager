@@ -32,7 +32,7 @@ class DatabaseManager:
                 CREATE TABLE IF NOT EXISTS SERVICES_PIPELINE (
                     ID INTEGER PRIMARY KEY AUTOINCREMENT,
                     PIPELINE_KEY TEXT UNIQUE NOT NULL,
-                    STAGE INTEGER DEFAULT 1,
+                    STAGE TEXT,
                     STATUS TEXT DEFAULT 'PENDING',
                     LAST_UPDATED TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
@@ -77,9 +77,6 @@ class DatabaseManager:
                     CREATED_AT TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
             """)
-
-            # Migration: Ensure STAGE_SLUG exists in SERVICES_PIPELINE
-            await self.ensure_column("SERVICES_PIPELINE", "STAGE_SLUG", "TEXT")
 
             # Baseline Seed for ERROR_INDEX
             baseline_errors = [

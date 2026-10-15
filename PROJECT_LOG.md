@@ -94,5 +94,31 @@ This log maintains cross-session operational continuity, recording architectural
 - **Issue**: In `reconcile_stages`, when a row transitioned to a new stage, only the `STAGE` (numeric) and `STATUS` columns were updated. The `STAGE_SLUG` remained stuck on the previous stage.
 - **Fix**: Updated the transition `UPDATE` statement in `src/core/scheduler.py` to simultaneously update `STAGE` and `STAGE_SLUG` using `target_stage.order` and `target_stage.id` respectively.
 
+
+---
+
+## Session Milestone: 2026-10-15 — REF-05: Hard Reset of Pipeline Table (Phase 2 Consolidation)
+
+### Role & Agent Assignment
+- **Backend Systems Engineer (`Role 2`)**: Performed destructive cleanup and consolidation of stage identifiers.
+
+### Architectural Decisions & Changes Applied
+1. **Schema Hard Reset**:
+   - Modified `SERVICES_PIPELINE` table: `STAGE` column changed from `INTEGER` to `TEXT` to store immutable slugs directly.
+   - Removed all references to temporary `STAGE_SLUG` column.
+2. **System Column Protection**:
+    - Finalized `SYSTEM_RESERVED_COLUMNS` as `{"ID", "PIPELINE_KEY", "STAGE", "STATUS", "LAST_UPDATED"}`.
+    - These columns are now strictly protected from WebUI modifications/deletions.
+3. **Progression Engine Refactor**:
+    - Updated `src/core/scheduler.py` to identify stages exclusively by slug.
+    - Logic now resolves numeric `order` from configuration based on the slug found in the database.
+    - All `INSERT` and `UPDATE` operations now write the slug to the `STAGE` column.
+4. **API Cleanup**:
+    - Simplified `src/api/pipeline.py` to treat `STAGE` as a text field, removing legacy numeric resolution and cleaning up dead code.
+
 ### Files Modified
+- `src/core/database.py`
 - `src/core/scheduler.py`
+- `src/api/pipeline.py`
+- `src/api/settings.py`
+

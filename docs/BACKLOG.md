@@ -31,7 +31,7 @@
 | **CORE-01** | **P1 (High)** | Core / Engine | Tri-State Unidirectional Stage Progression Engine | Phase 1 (`v0.1.6`) | **COMPLETED ✓** |
 | **AUDIT-01** | **P1 (High)** | Governance | Comprehensive Codebase Audit & Dead Code Elimination | Phase 1 (`v0.1.6`) | **COMPLETED ✓** |
 | **REF-01** | **P1 (High)** | Frontend / Build | Modular ES Architecture & Vite Bundler Pipeline | Phase 1 (`v0.1.7`) | **COMPLETED ✓** |
-| **STG-01** | **P1 (High)** | Core / WebUI | Auto-Assigned Numeric Stage IDs & Visual Reordering | Phase 1 (`v0.1.7`) | **PLANNED 📅** |
+| **STG-01** | **P1 (High)** | Core / WebUI | Auto-Assigned Numeric Stage IDs & Visual Reordering | Phase 1 (`v0.1.7`) | **COMPLETED ✓** |
 | **STG-02** | **P2 (Medium)** | WebUI / Modal | Dedicated Sink Stage Option Checkbox in Stage Modal | Phase 1 (`v0.1.7`) | **PLANNED 📅** |
 | **CORE-02** | **P1 (High)** | Core / Engine | Multi-Pipeline Dynamic Registry & Scoped DAG Engine | Phase 2 (`v0.2.0`) | **PLANNED 📅** |
 | **API-01** | **P2 (Medium)** | Core / Presets | Shoko Server Verified API Schema & Presets | Phase 1 (`v0.1.6`) | **COMPLETED ✓** |
@@ -63,9 +63,10 @@
 ### 3.2 STG-01 & STG-02: Stage Order Automation & Dedicated Sink UI (`v0.1.7`)
 - **Objective**: Improve stage configuration ergonomics and eliminate manual numeric ordering.
 - **Tasks**:
-  1. **STG-01 (Auto-Assigned Stage IDs)**:
-     - Automatically compute the integer `order` field based on visual array sequence (drag-and-drop index), preventing duplicate or conflicting order values.
-  2. **STG-02 (Dedicated Sink Stage Checkbox)**:
+  1. **STG-01 (Auto-Assigned Stage IDs & Visual Reordering)**: [✓ COMPLETED]
+     - Visual stage reordering via Move Up / Move Down controls with boundary protections (`StagesPanel.js`).
+     - Automatic normalization of integer `order` based on visual array position (`index + 1`) and slug immutability enforcement (`src/api/settings.py`).
+  2. **STG-02 (Dedicated Sink Stage Checkbox)**: [📅 PLANNED]
      - Add an explicit "Sink Stage" toggle/checkbox in `StageModal.js`.
      - When checked, sets `complete_condition = NULL` and displays informative hint: *"Items entering this stage are marked as SINK and will not transition further."*
 
