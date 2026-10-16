@@ -36,7 +36,7 @@ export function createServiceModal(store) {
         base_url: document.getElementById('srv-url').value.trim(),
         api_key: document.getElementById('srv-api').value.trim(),
         poll_interval_seconds: document.getElementById('chk-service-inherit-poll').checked ? null : 60,
-        primary_endpoint: document.getElementById('srv-endpoint').value.trim(),
+        poll_endpoint: document.getElementById('srv-endpoint').value.trim(),
         pipeline_key_template: document.getElementById('srv-pipeline').value.trim(),
         enrichment_endpoints: enrichments,
         enabled: document.getElementById('chk-service-enabled').checked,
@@ -107,7 +107,7 @@ export function createServiceModal(store) {
       
       <div class="form-group u-mb-3">
         <label>Primary Ingestion Endpoint (Root Stages)</label>
-        <input type="text" id="srv-endpoint" class="form-input font-mono" placeholder="/api/v3/history?pageSize=50" .value=${editingService?.primary_endpoint || '/api/v3/history?pageSize=50&sortKey=date&sortDirection=descending'}>
+        <input type="text" id="srv-endpoint" class="form-input font-mono" placeholder="/api/v3/history?pageSize=100" .value=${editingService?.poll_endpoint || editingService?.primary_endpoint || '/api/v3/history?pageSize=100&sortKey=date&sortDirection=descending'}>
         <small class="u-text-muted">Polled when this service is assigned to a Root Stage (e.g. <code>/api/v3/history</code> for Sonarr/Radarr).</small>
       </div>
 

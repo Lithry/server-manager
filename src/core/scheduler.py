@@ -329,22 +329,75 @@ class TaskScheduler:
 
             # 2. SECOND: Root stage ingestion for new incoming records (NEW_ENTRY)
             if active_root_stages:
-                poll_ep = getattr(service_cfg, "poll_endpoint", None) or "/api/v3/history?pageSize=50&sortKey=date&sortDirection=descending"
-                history_url, headers = prepare_service_request(
-                    service_cfg.base_url,
-                    poll_ep,
-                    service_cfg.api_key or "",
-                )
-                async with httpx.AsyncClient(timeout=15.0) as client:
-                    resp = await client.get(history_url, headers=headers)
-                    if resp.status_code != 200:
-                        raise Exception(f"HTTP {resp.status_code}: {resp.text[:150]}")
-                    data = resp.json()
+                poll_ep = getattr(service_cfg, "poll_endpoint", None) or "/api/v3/history?pageSize=100&sortKey=date&sortDirection=descending"
 
-                if isinstance(data, list):
-                    records = data
-                elif isinstance(data, dict):
-                    records = data.get("records") or data.get("Items") or data.get("files") or []
+                # Fetch records across pages until all new records are retrieved or known items are reached
+                records = []
+                current_page = 1
+                max_pages = 25  # Safety boundary preventing runaway pagination loops
+
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    while current_page <= max_pages:
+                        ep_to_fetch = poll_ep
+                        if "page=" in ep_to_fetch:
+                            ep_to_fetch = re.sub(r"page=\d+", f"page={current_page}", ep_to_fetch)
+                        elif "?" in ep_to_fetch:
+                            ep_to_fetch = f"{ep_to_fetch}&page={current_page}"
+                        else:
+                            ep_to_fetch = f"{ep_to_fetch}?page={current_page}"
+
+                        history_url, headers = prepare_service_request(
+                            service_cfg.base_url,
+                            ep_to_fetch,
+                            service_cfg.api_key or "",
+                        )
+
+                        resp = await client.get(history_url, headers=headers)
+                        if resp.status_code != 200:
+                            if current_page == 1:
+                                raise Exception(f"HTTP {resp.status_code}: {resp.text[:150]}")
+                            break
+
+                        data = resp.json()
+                        page_records = []
+                        total_available = None
+                        page_size = None
+
+                        if isinstance(data, list):
+                            records.extend(data)
+                            break  # Unpaginated array endpoint
+                        elif isinstance(data, dict):
+                            page_records = data.get("records") or data.get("Items") or data.get("files") or []
+                            total_available = data.get("totalRecords") or data.get("TotalRecordCount")
+                            page_size = data.get("pageSize")
+                            records.extend(page_records)
+
+                        if not page_records:
+                            break
+
+                        # Check if all records on this page already exist in SERVICES_PIPELINE
+                        all_seen = True
+                        for r in page_records:
+                            if not isinstance(r, dict):
+                                continue
+                            pk = resolve_template_key(service_cfg.pipeline_key_template, service_id, r)
+                            if pk:
+                                existing_row = await db_manager.query("SELECT 1 FROM SERVICES_PIPELINE WHERE PIPELINE_KEY = ?", (pk,))
+                                if not existing_row:
+                                    all_seen = False
+                                    break
+
+                        if all_seen:
+                            # Reached already ingested history; stop pagination early
+                            break
+
+                        if total_available is not None and len(records) >= total_available:
+                            break
+
+                        if page_size is not None and len(page_records) < page_size:
+                            break
+
+                        current_page += 1
 
             # Read existing table columns to avoid referencing non-existent columns
             table_cols = {c["name"].upper() for c in await db_manager.get_table_columns("SERVICES_PIPELINE")}

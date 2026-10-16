@@ -27,7 +27,7 @@ export function createPipelinePage() {
     if (confirmed) {
       try {
         await http.post('/api/v1/pipeline/purge');
-        pipelineApi.getPipeline({ dedupe: false }); // force refresh
+        pipelineApi.getPipeline({ offset: 0 }); // force refresh and reset offset
       } catch (err) {
         alert('Error purging pipeline: ' + err.message);
       }
@@ -62,7 +62,21 @@ export function createPipelinePage() {
               }})}
               ${Button({ label: 'Sample Service API', variant: 'test', size: 'sm', icon: 'search', onClick: () => alert('Sample API') })}
             </div>
-            <div>
+            <div class="u-flex u-gap-2">
+              ${Button({
+                label: 'Sync Now',
+                variant: 'secondary',
+                size: 'sm',
+                icon: 'refresh',
+                onClick: async () => {
+                  try {
+                    await http.post('/api/v1/settings/scheduler/restart');
+                    setTimeout(() => pipelineApi.getPipeline({ offset: 0 }), 1200);
+                  } catch (err) {
+                    alert('Error triggering sync: ' + err.message);
+                  }
+                }
+              })}
               ${Button({ label: 'Purge DB', variant: 'delete', size: 'sm', icon: 'trash', onClick: handlePurge })}
             </div>
             <div class="u-flex u-gap-2">

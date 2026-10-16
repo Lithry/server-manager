@@ -14,3 +14,11 @@ export function Badge({ label, tone = 'neutral', mono = false, uppercase = false
   );
   return html`<span class=${classes}>${label}</span>`;
 }
+
+export function BooleanBadge({ value }) {
+  if (value === null || value === undefined || value === '') {
+    return html`<span class="u-text-muted">-</span>`;
+  }
+  const isTrue = value === 1 || value === '1' || value === true || String(value).toLowerCase() === 'true';
+  return html`<span class=${cx(styles.badge, styles['badge--bool'], isTrue ? styles['badge--bool-true'] : styles['badge--bool-false'])}>${isTrue ? 'TRUE' : 'FALSE'}</span>`;
+}

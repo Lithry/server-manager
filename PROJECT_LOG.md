@@ -362,10 +362,53 @@ This log maintains cross-session operational continuity, recording architectural
 - `frontend/src/shared/ui/organisms/DataTable/DataTable.module.css`
 - `frontend/src/features/pipeline/PipelineTable.js`
 - `frontend/src/features/incidents/IncidentTable.js`
+
+---
+
+## Session Milestone: 2026-10-15 — REF-12: Dynamic Pipeline Pagination, Multi-Page Ingestion & Boolean Badge Sizing
+
+### Role & Agent Assignment
+- **Orchestrator (`Role 0`)**: Coordinated root-cause diagnosis of the 50-item ingestion ceiling, pagination planning, and confirmation gate.
+- **Backend Systems Engineer (`Role 2`)**: Implemented multi-page pagination for root stage history polling in `src/core/scheduler.py` with intelligent early termination when reaching existing records. Increased default `pageSize` to 100 in `src/core/config.py`.
+- **Frontend & WebUI Specialist (`Role 3`)**:
+  * Added dynamic pagination controls (`limit`, `offset`), active range display, reactive Previous/Next navigation, and rows-per-page selector in `PipelineTable.js`.
+  * Fixed row key mapping to uppercase `r.ID` from SQLite schema.
+  * Added "Sync Now" quick-trigger button in `PipelinePage.js` to immediately restart the scheduler and refresh pipeline records.
+  * Fixed service primary endpoint property mapping to `poll_endpoint` in `ServiceModal.js`.
+  * Unified `BooleanBadge` container to a fixed 64px width and 3px solid border in `Badge.module.css`.
+  * Restored centered muted hyphen (`-`) placeholder for empty/null cells in `PipelineTable.js`.
+
+### Architectural Decisions & Changes Applied
+1. **Multi-Page Upstream History Ingestion (`src/core/scheduler.py`)**:
+   - In `TaskScheduler.trigger_now()`, replaced the single unpaginated HTTP request to `poll_endpoint` with an iterative pagination loop supporting query parameter `page=1, page=2...` up to a safety boundary of 25 pages.
+   - Incorporated intelligent early-stop detection: if all records on a queried page already exist in `SERVICES_PIPELINE` or fall before `last_activated_at`, pagination concludes immediately, preserving sub-second cadence during routine polling.
+2. **Endpoint Schema Synchronization (`src/core/config.py`, `ServiceModal.js`)**:
+   - Corrected property naming in `ServiceModal.js` to persist to `ServiceConfig.poll_endpoint`.
+   - Raised default pagination page size from 50 to 100 in both frontend input and backend defaults.
+3. **Dynamic Pagination & Controls (`PipelineTable.js`, `api.js`)**:
+   - Extracted `total`, `limit`, and `offset` from `GET /api/v1/pipeline`.
+   - Wires dynamic page navigation (`offset: Math.max(0, offset - limit)` for Previous, `offset: offset + limit` for Next) with reactive `disabled` bindings.
+   - Provided rows-per-page selector (50, 100, 200, 500) that resets offset to 0 and re-queries the backend.
+   - Added immediate "Sync Now" action in `PipelinePage.js` to allow operators to trigger ingestion cycles on demand.
+4. **Visual Badge Standardization (`Badge.module.css`, `Badge.js`)**:
+   - Fixed `BooleanBadge` width to `64px` (`box-sizing: border-box`) so both `TRUE` and `FALSE` badges occupy identical horizontal space.
+   - Styled badge border with `3px solid` contrast.
+   - Rendered centered `-` placeholder for empty/null table values.
+
+### Files Modified
+- `src/core/scheduler.py`
+- `src/core/config.py`
+- `frontend/src/features/settings/ui/ServiceModal.js`
+- `frontend/src/features/pipeline/PipelineTable.js`
+- `frontend/src/features/pipeline/api.js`
+- `frontend/src/pages/PipelinePage.js`
+- `frontend/src/shared/ui/atoms/Badge/Badge.js`
+- `frontend/src/shared/ui/atoms/Badge/Badge.module.css`
 - `src/static/index.html`
 - `src/static/assets/index-*.js`
-- `docs/BACKLOG.md`
+- `src/static/assets/index-*.css`
 - `PROJECT_LOG.md`
+
 
 
 

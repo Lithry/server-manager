@@ -34,7 +34,7 @@ export function createManageColumnsModal(store) {
     try {
       await http.put('/api/v1/pipeline/columns/order', { column_order: order });
       store.set(s => ({ ...s, isManageColumnsModalOpen: false }));
-      pipelineApi.getPipeline({ dedupe: false }); // Refresh pipeline data and columns
+      pipelineApi.getPipeline(); // Refresh pipeline data and columns
     } catch (err) {
       alert("Failed to save column order: " + err.message);
     }
@@ -47,7 +47,7 @@ export function createManageColumnsModal(store) {
       // Refetch columns
       const cols = await http.get('/api/v1/pipeline/columns');
       store.set(s => ({ ...s, columnsData: cols }));
-      pipelineApi.getPipeline({ dedupe: false });
+      pipelineApi.getPipeline();
     } catch (err) {
       alert("Failed to prune columns: " + err.message);
     }
