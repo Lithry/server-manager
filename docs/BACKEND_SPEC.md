@@ -195,6 +195,27 @@ src/
 
 ---
 
+### 2.7 `src/api/pipeline.py` — Pipeline Data, Sampling & Decoupled Sandbox Engine
+- **Decoupled API Sandbox (`POST /api/v1/pipeline/sandbox/enrichment`)**:
+  - **`SandboxEnrichmentRequest` Schema**:
+    - `service_id: str`: Target upstream service configuration key.
+    - `record_id: Optional[int] = None`: Optional `SERVICES_PIPELINE` row ID. If omitted, database queries are entirely bypassed.
+    - `sample_endpoint: Optional[str] = None`: Direct upstream path (e.g., `/api/v3/history?pageSize=1`) sampled live via HTTP GET.
+    - `custom_context: Optional[Dict[str, Any]] = None`: Arbitrary operator-defined JSON mock context.
+    - `enrichment_endpoints: Dict[str, str] = Field(default_factory=dict)`: Mapping of namespace labels to endpoint URI templates.
+  - **Multi-Source Context Resolution**:
+    - Assembles unified context: `{**row_dict, **sample_dict, **custom_context, **enrichment_data}`.
+    - If `record_id` is supplied, fetches row from `SERVICES_PIPELINE`; raises `404` if not found.
+    - If `sample_endpoint` is supplied, queries upstream service via `httpx.AsyncClient`, storing payload under `"sample"` and merging at root.
+    - Injects `custom_context` for mock evaluation.
+    - Sequentially iterates over `enrichment_endpoints`, resolving `{placeholder}` expressions using `extract_dotted_value` with case-insensitive fallbacks. Unresolved placeholders are recorded in execution logs without aborting the simulation.
+    - Returns `{ "success": True, "logs": logs, "context_data": final_context, "flattened_keys": flatten_json_keys(final_context) }`.
+- **Payload Schema Flattening (`flatten_json_keys`)**:
+  - Recursively flattens nested dictionaries and collections into discrete paths, types, and sample strings.
+  - Formats array items using explicit `[*]` wildcard projection notation (e.g. `items[*].id`, `tags[*]`) matching `CORE-04` array extractor semantics.
+
+---
+
 ## 3. REST API Contract & Route Matrix
 
 | Method | Path | Summary | Tags |
@@ -208,7 +229,7 @@ src/
 | `POST` | `/api/v1/pipeline/columns/prune` | Batch prune unused dynamic columns | Pipeline |
 | `PUT` | `/api/v1/pipeline/columns/order` | Persist visual column display order | Pipeline |
 | `POST` | `/api/v1/pipeline/sample` | Live sample upstream service API payloads | Pipeline |
-| `POST` | `/api/v1/pipeline/sandbox/enrichment` | Simulate enrichment pipeline chains in isolation | Pipeline |
+| `POST` | `/api/v1/pipeline/sandbox/enrichment` | Simulate enrichment chains against DB records, live samples, or custom contexts | Pipeline |
 | `GET` | `/api/v1/pipeline/services/{id}/events` | Discover unique event types from upstream history | Pipeline |
 | `GET` | `/api/v1/pipeline/stats` | Aggregated pipeline progression counts | Pipeline |
 | `GET` | `/api/v1/views` | List all custom and preset SQL views | Views |

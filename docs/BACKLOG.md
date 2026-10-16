@@ -34,7 +34,7 @@
 | **STG-01** | **P1 (High)** | Core / WebUI | Auto-Assigned Numeric Stage IDs & Visual Reordering | Phase 1 (`v0.1.7`) | **COMPLETED ✓** |
 | **STG-02** | **P2 (Medium)** | WebUI / Modal | Dedicated Sink Stage Option Checkbox in Stage Modal | Phase 1 (`v0.1.8`) | **COMPLETED ✓** |
 | **STG-03** | **P1 (High)** | Core / Ingestion | Configurable Root Stage Activation Cutoff & Consumer Date Decoupling | Phase 1 (`v0.1.8`) | **COMPLETED ✓** |
-| **SBX-01** | **P2 (Medium)** | WebUI / Tooling | API Sandbox Architectural Debate, Payload Inspector & Visual Refactor | Phase 1 (`v0.1.9`) | **PLANNED 📅** |
+| **SBX-01** | **P2 (Medium)** | WebUI / Tooling | API Sandbox Architectural Debate, Payload Inspector & Visual Refactor | Phase 1 (`v0.1.9`) | **COMPLETED ✓** |
 | **LOG-01** | **P1 (High)** | WebUI / Observability | Dedicated Error Log View & Type Incompatibility Alerts | Phase 1 (`v0.1.9`) | **PLANNED 📅** |
 | **UX-03** | **P3 (Polish)** | WebUI / Tooling | Discrete Multi-Variable Context Inputs for Transformer Test Harness | Phase 1 (`v0.1.9`) | **PLANNED 📅** |
 | **CORE-04** | **P2 (Medium)** | Core / Storage | Accumulative JSON List Merging & Deduplication | Phase 1 (`v0.1.9`) | **COMPLETED ✓** |
@@ -82,22 +82,31 @@
 
 ---
 
-### 3.3 SBX-01: API Sandbox Architectural Debate, Payload Inspector & Visual Refactor (`v0.1.9`)
-- **Objective**: Overhaul the developer API Sandbox into an ergonomic, visually consistent testing environment for upstream services and enrichment chains prior to multi-pipeline expansion.
-- **Problem Statement**: The current API Sandbox is tightly coupled to the local database `SERVICES_PIPELINE` table (requiring an existing record ID). If a service payload attribute (such as `episodeId`) was not already mapped into a dedicated SQLite column, the record context lacks the variable, causing endpoint template tests to fail with "Missing placeholder".
-- **Architectural Solution & Tasks**:
-  1. **Database Decoupling & Upstream Payload Sampling**:
-     - Untether the Sandbox from requiring an existing `SERVICES_PIPELINE` row ID.
-     - Allow testing secondary enrichment endpoints against live upstream service samples (e.g. fetching the latest record from `/api/v3/history` or pasting arbitrary sample JSON).
-  2. **Upstream Attribute Explorer & Placeholder Verification**:
-     - Provide a dedicated payload inspector displaying all real upstream keys and dot-notation paths (`episodeId`, `seriesId`, `data.importedPath`, etc.).
-     - Allow operators to test placeholder replacements (`{episodeId}`, `{seriesId}`) directly against the raw upstream payload before saving field mappings.
-  3. **Visual & Split-Pane Refactor (`SandboxPage.js`)**:
-     - Retain split-pane UI (Request Configurator on left, Response & Mappings Inspector on right).
-     - Fix CSS styling inconsistencies, card borders, contrast ratios, and dark theme alignment.
-     - Implement structured tree visualizer for nested JSON payloads with one-click path copying (e.g. `series.title`, `data.id`).
-     - Direct "+ Map to Column" action shortcuts from discovered attributes into Field Mappings.
-     - Integrate live feedback for predicate and transformer evaluation directly inside the sandbox view.
+### 3.3 SBX-01: API Sandbox Decoupling, Payload Inspector & Visual Refactor (`v0.1.9`) [COMPLETED ✓]
+- **Objective**: Overhaul the developer API Sandbox into an ergonomic, visually consistent testing environment for upstream services and enrichment chains decoupled from mandatory database rows.
+- **Architectural Solution & Implemented Changes**:
+  1. **Backend Database Decoupling & Multi-Source Resolution (`src/api/pipeline.py`)**: [✓ COMPLETED]
+     - Updated `SandboxEnrichmentRequest` schema: `record_id: Optional[int] = None`, `sample_endpoint: Optional[str] = None`, `custom_context: Optional[Dict[str, Any]] = None`, and `enrichment_endpoints: Dict[str, str] = Field(default_factory=dict)`.
+     - Completely decoupled sandbox execution from requiring an existing SQLite record: when `record_id` is omitted (`None`), database querying is entirely bypassed.
+     - Direct Upstream Sampling: When `sample_endpoint` is provided (e.g., `/api/v3/history?pageSize=1`), performs an asynchronous HTTP GET against the service `base_url`, storing response data under `"sample"` and merging into root context.
+     - Arbitrary Custom Context: Integrates user-provided JSON mock contexts into the evaluation dictionary.
+     - Unified Sequential Enrichment: Evaluates secondary enrichment endpoints resolving `{placeholder}` expressions against the merged multi-source context (`{**row_dict, **sample_dict, **custom_context, **enrichment_data}`).
+     - Returns unified response containing execution `logs`, `context_data`, and `flattened_keys` with wildcard projection paths (`[*]`).
+  2. **Interactive Payload Inspector (`frontend/src/features/sandbox/ui/PayloadInspector.js`)**: [✓ COMPLETED]
+     - Implemented 4-tab inspection workspace: `Discovered Keys (${N})`, `Endpoint Result`, `Cumulative Context`, and `Logs (${N})`.
+     - Discovered Keys view renders all payload attributes with live search filtering, typed badges (`int`, `float`, `bool`, `list`, `dict`), and sample value previews.
+     - 1-Click Copy: Copies dot-notation path to clipboard with temporary visual feedback.
+     - 1-Click Insert: Appends or interpolates `{path}` placeholders directly into the active endpoint input template.
+     - Endpoint Result tab provides a live JSON Path evaluation input field for quick ad-hoc extraction.
+  3. **Modular Context Source Controls & Saved Endpoints (`frontend/src/features/sandbox/`)**: [✓ COMPLETED]
+     - Extracted `ContextSourceControls.js` (<130 lines) providing service selector, optional `record_id` input, upstream live sample input, collapsible custom JSON context panel with live syntax validation, and action buttons.
+     - Extracted `SavedEndpointsList.js` (<55 lines) displaying existing service enrichment endpoints with one-click template loading.
+     - Extracted `sandboxStore.js` (<135 lines) for decoupled state management, error handling, and settings persistence.
+     - Replaced blocking `alert()` popups with inline non-blocking feedback banners.
+     - Replaced hardcoded inline styles with standard CSS design tokens (`var(--color-bg-*)`, `var(--color-border)`, `var(--color-accent)`).
+  4. **Automated Verification & Production Build**: [✓ COMPLETED]
+     - 4 unit tests implemented in `tests/test_sbx01_sandbox_decoupling.py` (all 19 project tests passing in 0.48s).
+     - Vite production bundle compiled cleanly to `src/static/` with zero errors.
 
 ---
 

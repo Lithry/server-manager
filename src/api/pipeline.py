@@ -65,7 +65,9 @@ class AddColumnRequest(BaseModel):
 class SandboxEnrichmentRequest(BaseModel):
     service_id: str
     record_id: Optional[int] = None
-    enrichment_endpoints: Dict[str, str]
+    custom_context: Optional[Dict[str, Any]] = None
+    sample_endpoint: Optional[str] = None
+    enrichment_endpoints: Dict[str, str] = Field(default_factory=dict)
 
 
 class ReorderColumnsRequest(BaseModel):
@@ -407,7 +409,7 @@ async def sample_app_api(req: SampleApiRequest) -> Dict[str, Any]:
 
 @router.post("/sandbox/enrichment")
 async def sandbox_enrichment(req: SandboxEnrichmentRequest) -> Dict[str, Any]:
-    """Test a chain of enrichment endpoints sequentially against an existing pipeline record."""
+    """Test a chain of enrichment endpoints sequentially against an existing pipeline record, direct sample, or custom context."""
     settings = await config_manager.get_settings()
     services_dict = settings.services
     if req.service_id not in services_dict:
@@ -417,24 +419,48 @@ async def sandbox_enrichment(req: SandboxEnrichmentRequest) -> Dict[str, Any]:
     if not service_cfg.base_url:
         raise HTTPException(status_code=400, detail=f"Service '{req.service_id}' has no base_url configured")
 
+    logs: List[str] = []
+
     # Fetch the base record if provided
-    row_dict = {}
-    if req.record_id:
+    row_dict: Dict[str, Any] = {}
+    if req.record_id is not None:
         rows = await db_manager.query("SELECT * FROM SERVICES_PIPELINE WHERE ID = ?", (req.record_id,))
         if not rows:
             raise HTTPException(status_code=404, detail=f"Pipeline record with ID {req.record_id} not found")
         row_dict = dict(rows[0])
 
+    # Direct upstream sample fetching if sample_endpoint is provided
+    sample_dict: Dict[str, Any] = {}
+    if req.sample_endpoint and req.sample_endpoint.strip():
+        s_endpoint = req.sample_endpoint.strip()
+        logs.append(f"[sample] GET {s_endpoint}")
+        sample_url, sample_headers = prepare_service_request(
+            service_cfg.base_url, s_endpoint, service_cfg.api_key or ""
+        )
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                s_resp = await client.get(sample_url, headers=sample_headers)
+                logs.append(f"[sample] HTTP {s_resp.status_code}")
+                if s_resp.status_code == 200:
+                    s_json = s_resp.json()
+                    if isinstance(s_json, dict):
+                        sample_dict["sample"] = s_json
+                        sample_dict.update(s_json)
+                    elif isinstance(s_json, list):
+                        sample_dict["sample"] = {"List": s_json}
+                else:
+                    logs.append(f"[sample] Error: {s_resp.text[:100]}")
+        except Exception as e:
+            logs.append(f"[sample] Exception: {str(e)}")
+
     enrichment_data: Dict[str, Any] = {}
     from src.core.scheduler import extract_dotted_value
-
-    logs = []
 
     for namespace, ep_template in req.enrichment_endpoints.items():
         if not ep_template or not ep_template.strip():
             continue
 
-        context_dict = {**row_dict, **enrichment_data}
+        context_dict = {**row_dict, **sample_dict, **(req.custom_context or {}), **enrichment_data}
         resolved_ep = ep_template.strip()
 
         missing_ph = False
@@ -477,7 +503,7 @@ async def sandbox_enrichment(req: SandboxEnrichmentRequest) -> Dict[str, Any]:
         except Exception as e:
             logs.append(f"[{namespace}] Exception: {str(e)}")
 
-    final_context = {**row_dict, **enrichment_data}
+    final_context = {**row_dict, **sample_dict, **(req.custom_context or {}), **enrichment_data}
     return {
         "success": True,
         "logs": logs,

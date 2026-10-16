@@ -27,7 +27,7 @@ Complete architectural specifications, backend contracts, and technical roadmaps
    - **Generic Dotted-Path List Projection**: Extract attributes across arrays of nested objects (e.g. `movie.alternateTitles.title` or `[*]`) into clean string lists without hardcoded schemas.
    - **Field Transformers & Tag Resolution**: Map incoming attributes using conditional expressions (e.g. `if 'anime' in tags then 1 else 0 -> IS_ANIME`). Automatically resolves numeric tag IDs to human-readable labels via in-memory cached `/api/v3/tag` queries.
    - **Clean Database Principle & Cross-Service Merging**: Empty lists, empty objects, and blank strings normalize to SQL `NULL` (preventing `"[]"` noise). Multi-stage updates seamlessly accumulate and deduplicate array elements natively across different downstream services (e.g. merging English names from Sonarr with Japanese names from Shoko into a unified list). Ignored files route to a volatile ring-buffer.
-   - **API Sandbox**: Integrated playground to simulate full enrichment pipelines in isolation, allowing administrators to visually extract dot-notation mapping paths and execute new nested API endpoints against real database contexts.
+   - **API Sandbox**: Integrated playground to simulate full enrichment pipelines in isolation, allowing administrators to visually extract dot-notation mapping paths (`[*]`), test placeholder interpolation (`{series.id}`), and execute nested API endpoints against database records, live upstream API samples, or custom mock JSON contexts with one-click path copying and template injection.
 
 2. **Tri-State Unidirectional Stage Progression Engine (`SERVICES_PIPELINE`)**:
    - **Tri-State Stage Taxonomy**:

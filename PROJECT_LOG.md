@@ -848,6 +848,111 @@ This log maintains cross-session operational continuity, recording architectural
 - `PROJECT_LOG.md`
 - Production static bundle (`src/static/index.html`, `src/static/assets/index-CxxlFXEb.js`)
 
+---
+
+## Session Milestone: 2026-10-16 — SBX-01: API Sandbox Decoupling & Direct Upstream Sampling
+
+### Role & Agent Assignment
+- **Backend Systems Engineer (`Role 2` / `backend-engineer`)**: Decoupled sandbox enrichment from SQLite `SERVICES_PIPELINE` records, added direct upstream sampling via `sample_endpoint`, and supported arbitrary placeholder injection via `custom_context`.
+
+### Architectural Decisions & Changes Applied
+1. **Pydantic Model Decoupling (`SandboxEnrichmentRequest`)**:
+   - Made `record_id: Optional[int] = None` so sandbox testing does not require an existing database record.
+   - Added `sample_endpoint: Optional[str] = None` allowing direct extraction from upstream endpoints (e.g. `/api/v3/history?pageSize=1`).
+   - Added `custom_context: Optional[Dict[str, Any]] = None` enabling custom key-value mock contexts.
+   - Set `enrichment_endpoints: Dict[str, str] = Field(default_factory=dict)` to allow sampling without secondary endpoints.
+2. **Sequential Multi-Source Context Resolution (`sandbox_enrichment`)**:
+   - Initialized `row_dict = {}` if `record_id` is None, completely bypassing SQLite queries. If provided and not found, returns `404 Not Found`.
+   - When `sample_endpoint` is specified, executed asynchronous GET request using `prepare_service_request` and `httpx.AsyncClient`. Parsed JSON response is stored under `"sample"` namespace and merged into root context for immediate placeholder substitution.
+   - Merged `custom_context` into active evaluation context.
+   - Evaluated `enrichment_endpoints` sequentially with placeholder interpolation `{placeholder}` against the unified multi-source context (`{**row_dict, **sample_dict, **custom_context, **enrichment_data}`).
+   - Formatted final response dictionary containing `success`, execution `logs`, `context_data`, and `flattened_keys`.
+3. **Automated Test Coverage**:
+   - Implemented `tests/test_sbx01_sandbox_decoupling.py` covering decoupled mock context, direct upstream sampling, DB lookup with 404 validation, and graceful skipped placeholder logging.
+   - Verified 19/19 tests passing with zero errors.
+
+### Files Modified
+- `src/api/pipeline.py`
+- `tests/test_sbx01_sandbox_decoupling.py` (Created)
+- `PROJECT_LOG.md`
+
+---
+
+## Session Milestone: 2026-10-16 — SBX-01 (Frontend): API Sandbox Decoupling, Payload Inspector & Visual Refactor
+
+### Role & Agent Assignment
+- **Frontend & WebUI Specialist (`Role 3` / `frontend-specialist`)**: Decoupled sandbox context sources, implemented interactive `PayloadInspector` with discovered keys and 1-click insertion, refactored layout to atomic theme variables, and enforced architectural modularity (<250 lines).
+
+### Architectural Decisions & Changes Applied
+1. **Decoupled Multi-Source Context Controls (`ContextSourceControls.js`)**:
+   - `record_id` is now completely optional; if empty, `record_id: null` is transmitted to the backend.
+   - Added text input for upstream live sample endpoints (e.g. `/api/v3/history?pageSize=1`) enabling direct live service sampling without pipeline records.
+   - Added collapsible `<details>` panel for Custom JSON Context with real-time JSON validation feedback (`✓ Valid JSON` / `Invalid JSON syntax`).
+   - Removed blocking `alert()` calls, replacing them with inline non-blocking feedback banners.
+2. **Interactive Payload Inspector (`PayloadInspector.js`)**:
+   - Implemented tabbed inspection workspace: `Discovered Keys (${N})`, `Endpoint Result`, `Cumulative Context`, and `Logs (${N})`.
+   - `Discovered Keys` renders full schema paths with real-time search filtering, typed badges (`Badge`), and truncated sample values.
+   - Added 1-click Copy Path action with temporary checkmark feedback indicator.
+   - Added 1-click Insert action to append or interpolate `{path}` placeholders into the active endpoint input.
+   - Preserved quick JSON Path Evaluator on endpoint response.
+3. **Architectural Modularity & Invariant Adherence (<250 Lines)**:
+   - Extracted state management and API dispatching to `frontend/src/features/sandbox/model/sandboxStore.js` (133 lines).
+   - Extracted endpoint client calls to `frontend/src/features/sandbox/api.js` (5 lines).
+   - Extracted UI components: `ContextSourceControls.js` (129 lines), `PayloadInspector.js` (154 lines), and `SavedEndpointsList.js` (54 lines).
+   - Streamlined `frontend/src/pages/SandboxPage.js` to 133 lines.
+   - Added `copy`, `plus`, and `terminal` SVG paths to `frontend/src/shared/ui/atoms/Icon/Icon.js`.
+   - All modified/created files are strictly under 155 lines.
+4. **Visual Polish & Design Tokens**:
+   - Replaced all legacy hardcoded `#000` / `#FFFFFF` / inline text borders with standard CSS design tokens (`var(--color-bg-base)`, `var(--color-bg-surface)`, `var(--color-bg-card)`, `var(--color-border)`, `var(--color-text)`, `var(--color-accent)`).
+5. **Vite Production Compilation**:
+   - Executed `npm run build` in `frontend/`. Production assets generated in `src/static/` with 0 errors.
+
+### Files Created & Modified
+- `frontend/src/features/sandbox/api.js` (Created)
+- `frontend/src/features/sandbox/model/sandboxStore.js` (Created)
+- `frontend/src/features/sandbox/ui/ContextSourceControls.js` (Created)
+- `frontend/src/features/sandbox/ui/PayloadInspector.js` (Created)
+- `frontend/src/features/sandbox/ui/SavedEndpointsList.js` (Created)
+- `frontend/src/pages/SandboxPage.js` (Refactored)
+- `frontend/src/shared/ui/atoms/Icon/Icon.js` (Updated)
+- `src/static/*` (Compiled production bundle)
+- `PROJECT_LOG.md` (Updated)
+
+---
+
+## Session Milestone: 2026-10-16 — Docs Synchronization for SBX-01 (API Sandbox Decoupling & Modular WebUI)
+
+### Role & Agent Assignment
+- **Technical Documentation Specialist (`Role 5` / `docs-specialist`)**: Synchronized canonical technical documentation across `docs/BACKLOG.md`, `docs/BACKEND_SPEC.md`, `docs/FRONTEND_SPEC.md`, `docs/ARCHITECTURE.md`, `README.md`, and `PROJECT_LOG.md` following completion and validation of workpackage `SBX-01`.
+
+### Documentation Updates & Alignment Performed
+1. **Backlog & Roadmap Alignment (`docs/BACKLOG.md`)**:
+   - Updated workpackage `SBX-01` status to `COMPLETED ✓` in Section 2 (Priority Overview Matrix).
+   - Updated Section 3.3 to `[COMPLETED ✓]` with full architectural completion summary detailing backend database decoupling, multi-source context resolution, live upstream sampling, and modular frontend components (`PayloadInspector`, `ContextSourceControls`, `SavedEndpointsList`, `sandboxStore`).
+2. **Backend Technical Specification (`docs/BACKEND_SPEC.md`)**:
+   - Added Section 2.7 documenting `src/api/pipeline.py` sandbox capabilities, `SandboxEnrichmentRequest` schema (`record_id: Optional[int]`, `sample_endpoint: Optional[str]`, `custom_context: Optional[Dict[str, Any]]`, `enrichment_endpoints: Dict[str, str]`), multi-source context merging, sequential endpoint evaluation, and payload schema flattening with explicit `[*]` wildcard notation (`flatten_json_keys`).
+   - Updated Section 3 REST API Contract table summary for `POST /api/v1/pipeline/sandbox/enrichment` reflecting testing against records, live samples, or custom contexts.
+3. **Modular Frontend Specification (`docs/FRONTEND_SPEC.md`)**:
+   - Added `features/sandbox/` to the Feature-Sliced directory tree in Section 2.
+   - Documented `PayloadInspector.js` (4 inspection tabs, live search, type badges, 1-click path copying and `{path}` template injection, embedded JSON Path evaluator).
+   - Documented `ContextSourceControls.js` (multi-source parameters, optional record ID, upstream live sampling, collapsible JSON context editor with live syntax validation).
+   - Documented `SavedEndpointsList.js` and `sandboxStore.js` (reactive state management under 135 lines).
+   - Noted SVG path extensions in `Icon.js` (`copy`, `plus`, `terminal`).
+4. **Platform Architecture Blueprint (`docs/ARCHITECTURE.md`)**:
+   - Added Section 4.6 (`Decoupled Developer API Sandbox & Payload Inspector`) detailing the shift from database-tethered evaluation to multi-source context resolution, upstream HTTP sampling, and wildcard payload discovery.
+5. **Universal Appliance Overview (`README.md`)**:
+   - Updated Core Features Section 1 (API Sandbox) reflecting decoupled multi-source execution, live upstream sampling, mock contexts, and 1-click template injection.
+
+### Files Modified
+- `docs/BACKLOG.md`
+- `docs/BACKEND_SPEC.md`
+- `docs/FRONTEND_SPEC.md`
+- `docs/ARCHITECTURE.md`
+- `README.md`
+- `PROJECT_LOG.md`
+
+
+
 
 
 

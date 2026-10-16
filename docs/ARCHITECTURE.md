@@ -160,6 +160,14 @@ Primary events from services like Sonarr or Radarr (e.g., `/api/v3/history`) fre
 - **Null Normalization**: Empty strings, empty lists, empty dictionaries, and whitespace strings normalize to SQL `NULL`, preventing `"[]"` or `""` dead rows.
 - **Type-Safe Merging & Deduplication**: Downstream consumer stages accumulating array data (e.g., alternative titles from Sonarr merged with Japanese titles from Shoko) use `merge_field_value` to deduplicate and store a unified JSON array. Strict type boundaries are enforced: scalar-to-list and list-to-scalar cross-updates are safely rejected with error telemetry, while list-to-list updates deduplicate with case-insensitive and stripped-whitespace matching while preserving insertion order.
 
+### 4.6 Decoupled Developer API Sandbox & Payload Inspector
+The API Sandbox (`POST /api/v1/pipeline/sandbox/enrichment`) provides an isolated environment for operators to simulate, verify, and register secondary enrichment endpoints before committing them into pipeline stages.
+- **Database Decoupling**: Sandbox testing does not require an existing database record ID (`SERVICES_PIPELINE`), eliminating friction when testing new services or when pipeline tables are unpopulated. The `record_id` parameter is optional; if omitted, SQLite database lookups are bypassed entirely.
+- **Direct Upstream Sampling**: Operators can test against live upstream services by specifying a `sample_endpoint` (e.g., `/api/v3/history?pageSize=1`). The engine issues an asynchronous HTTP GET directly to the upstream service, injecting the response under the `"sample"` namespace as well as into the root context.
+- **Arbitrary Custom Mock Context**: Operators can provide custom JSON mock payloads (`custom_context`) to test edge cases, simulate downstream variables, or prototype transformation logic before real events arrive.
+- **Multi-Source Context Resolution & Sequential Chaining**: The evaluation context merges all available sources: `{**row_dict, **sample_dict, **custom_context, **enrichment_data}`. Secondary enrichment endpoints are evaluated sequentially, allowing downstream endpoint templates to interpolate variables discovered by upstream endpoints (e.g., `{series.id}`).
+- **Payload Inspection & Wildcard Discovery**: Flattens nested JSON payloads into dot-notation paths and explicit array wildcard notations (`[*]`). The WebUI `PayloadInspector` presents discovered keys with real-time search filtering, data type indicators, 1-click clipboard path copying, and 1-click `{path}` placeholder injection into endpoint templates.
+
 ---
 
 ## 5. Tri-State DAG Stage Engine (`SERVICES_PIPELINE`)

@@ -48,6 +48,7 @@ frontend/
     │   ├── incidents/        # IncidentTable, CatalogTable, ReportIncidentModal, AddErrorModal
     │   ├── overview/         # OverviewPanel, telemetry cards & metrics
     │   ├── pipeline/         # PipelineTable, ManageColumnsModal, cell renderers
+    │   ├── sandbox/          # PayloadInspector, ContextSourceControls, SavedEndpointsList, sandboxStore
     │   ├── settings/         # ServiceModal, StageModal, ServiceScopeSelector, MappingModal, NotificationTriggerModal
     │   ├── tools/            # ToolList & live streaming ToolRunnerModal
     │   └── views/            # ViewList & dynamic SQL view query modal
@@ -79,7 +80,7 @@ All UI elements utilize predefined styles and components rather than arbitrary a
 ### 3.1 Atoms (`shared/ui/atoms/`)
 - **`Button`**: Clickable action element with 5 semantic variants (`primary`, `secondary`, `ghost`, `danger`, `warning`) and integrated async `loading` spinner state.
 - **`Badge`**: Status indicator supporting tones: `info`, `success`, `warning`, `danger`, `neutral`, `sink` (amber).
-- **`Icon`**: Standardized SVG glyph renderer with consistent sizing tokens (`sm`, `md`, `lg`).
+- **`Icon`**: Standardized SVG glyph renderer with consistent sizing tokens (`sm`, `md`, `lg`). Includes `copy`, `plus`, and `terminal` paths.
 - **`Spinner`**: Non-blocking CSS animation spinner for async loading states.
 - **`Toggle`**: Accessible toggle switch for boolean settings and stage toggles.
 
@@ -100,6 +101,20 @@ All UI elements utilize predefined styles and components rather than arbitrary a
   - Dynamically computes and displays status badges: `(${checkedCount} of ${totalCount} active)` if scoped, or `All fields active by default` when unscoped.
   - Controls: "Select All" and "Clear All" buttons, with inline guidance for operators.
   - Exports `collectServiceMappingScopes` with clean default fallback: omits the service key from the resulting dictionary if 0 or all columns are checked, preserving the backend engine's default all-columns behavior without blocking alerts.
+- **Developer API Sandbox Feature Slice (`features/sandbox/`)**:
+  - **`PayloadInspector` (`features/sandbox/ui/PayloadInspector.js`)**:
+    - Four-tab inspection view (<155 lines): `Discovered Keys`, `Endpoint Result`, `Cumulative Context`, and `Logs`.
+    - Real-time search filter and data type pills (`int`, `float`, `bool`, `list`, `dict`) with preview samples.
+    - 1-Click Copy: Copies dot-notation paths (`series.id`, `tags[*]`) to clipboard with animated visual checkmark feedback.
+    - 1-Click Insert: Injects or interpolates `{path}` placeholders directly into the active endpoint URL template textarea.
+    - Embedded JSON Path evaluator for instant expression testing over responses.
+  - **`ContextSourceControls` (`features/sandbox/ui/ContextSourceControls.js`)**:
+    - Multi-source parameter inputs (<130 lines) supporting service selection, optional database `record_id`, direct live `sample_endpoint` sampling, and collapsible Custom JSON Mock Context panel.
+    - Real-time JSON syntax feedback (`✓ Valid JSON` / `Invalid JSON syntax`) and non-blocking error banners replacing legacy `alert()`.
+  - **`SavedEndpointsList` (`features/sandbox/ui/SavedEndpointsList.js`)**:
+    - Visual catalog (<55 lines) of saved enrichment endpoints with click-to-select and active highlight state.
+  - **`sandboxStore` (`features/sandbox/model/sandboxStore.js`)**:
+    - Reactive state store (<135 lines) handling asynchronous test dispatching to `/api/v1/pipeline/sandbox/enrichment`, context assembly, tab selection, and settings persistence.
 
 ---
 
