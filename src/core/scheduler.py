@@ -222,7 +222,9 @@ def coerce_value_to_type(val: Any, data_type: str, col_name: str = "", item_iden
 
 
 def resolve_template_key(template: str, service_id: str, rec: dict) -> str:
-    """Interpolate template string such as '{service}:{id}' or '{service}:{data.path}'."""
+    """Interpolate template string such as '{service}:{id}' or '{service}:{data.path}'.
+    Returns empty string if any placeholder cannot be resolved or is missing.
+    """
     if not template:
         template = "{service}:{id}"
 
@@ -232,8 +234,10 @@ def resolve_template_key(template: str, service_id: str, rec: dict) -> str:
         val = extract_dotted_value(rec, ph)
         if val is None:
             val = rec.get(ph)
-        if val is not None:
+        if val is not None and str(val).strip() and str(val).strip().lower() != "none":
             res = res.replace(f"{{{ph}}}", str(val))
+        else:
+            return ""
     return res
 
 
@@ -470,13 +474,34 @@ class TaskScheduler:
                             continue
 
                     pipeline_key = resolve_template_key(service_cfg.pipeline_key_template, service_id, rec)
-                    if not pipeline_key:
+                    # Check if pipeline_key failed to resolve placeholders (e.g. contains unmatched '{' or evaluates to f"{service_id}:None" or f"{service_id}:")
+                    is_key_unresolved = (
+                        not pipeline_key or
+                        "{" in pipeline_key or
+                        pipeline_key.endswith(":None") or
+                        pipeline_key == f"{service_id}:"
+                    )
+                    if is_key_unresolved and getattr(service_cfg, "fallback_lookup_column", None) and getattr(service_cfg, "fallback_lookup_field", None):
+                        lookup_col = service_cfg.fallback_lookup_column.strip().upper()
+                        lookup_field = service_cfg.fallback_lookup_field.strip()
+                        if lookup_col in table_cols:
+                            lookup_val = extract_dotted_value(rec, lookup_field)
+                            if lookup_val is None:
+                                lookup_val = rec.get(lookup_field)
+                            if lookup_val:
+                                match_query = f"SELECT PIPELINE_KEY FROM SERVICES_PIPELINE WHERE {lookup_col} = ? AND PIPELINE_KEY LIKE ? LIMIT 1;"
+                                matched_rows = await db_manager.query(match_query, (str(lookup_val), f"{service_id}:%"))
+                                if matched_rows and matched_rows[0].get("PIPELINE_KEY"):
+                                    pipeline_key = matched_rows[0]["PIPELINE_KEY"]
+                                    is_key_unresolved = False
+
+                    if not pipeline_key or is_key_unresolved:
+                        # Cannot be identified and cannot be correlated to existing row, skip safely
                         continue
 
-                    # Avoid duplicate entries
-                    existing = await db_manager.query("SELECT 1 FROM SERVICES_PIPELINE WHERE PIPELINE_KEY = ?", (pipeline_key,))
-                    if existing:
-                        continue
+                    # Query existing row for in-place update vs insert
+                    existing_rows = await db_manager.query("SELECT * FROM SERVICES_PIPELINE WHERE PIPELINE_KEY = ?", (pipeline_key,))
+                    existing_row = existing_rows[0] if existing_rows else None
 
                     # Secondary enrichment queries with namespaces
                     enrichment_data: Dict[str, Any] = {}
@@ -543,23 +568,41 @@ class TaskScheduler:
                         if not ok:
                             continue
 
-                        mapped_fields[col_name] = coerced_val
-                        context_dict[col_name] = coerced_val
-                        context_dict[col_name.lower()] = coerced_val
+                        if existing_row:
+                            existing_val = existing_row.get(col_name)
+                            if existing_val is None:
+                                existing_val = existing_row.get(col_name.lower())
+                            merged_val = merge_field_value(existing_val, coerced_val)
+                            mapped_fields[col_name] = merged_val
+                            context_dict[col_name] = merged_val
+                            context_dict[col_name.lower()] = merged_val
+                        else:
+                            mapped_fields[col_name] = coerced_val
+                            context_dict[col_name] = coerced_val
+                            context_dict[col_name.lower()] = coerced_val
 
-                    # Authoritative Mermaid Lifecycle: NEW_ENTRY -> STATUS_TO_PENDING -> UPDATE_VALUES -> END_OF_CICLE
-                    is_sink = not active_stage.complete_condition or not active_stage.complete_condition.strip()
-                    initial_status = "SINK" if is_sink else "PENDING"
+                    # Authoritative Mermaid Lifecycle: In-Place UPDATE or NEW_ENTRY INSERT
+                    if existing_row:
+                        # Perform in-place UPDATE
+                        set_clauses = [f"{col} = ?" for col in mapped_fields.keys()]
+                        if set_clauses:
+                            update_sql = f"UPDATE SERVICES_PIPELINE SET {', '.join(set_clauses)}, LAST_UPDATED = CURRENT_TIMESTAMP WHERE PIPELINE_KEY = ?;"
+                            await db_manager.execute(update_sql, tuple(mapped_fields.values()) + (pipeline_key,))
+                            reconcile_updates += 1
+                            print(f"[i] Existing entry updated in-place: '{pipeline_key}'.")
+                    else:
+                        # Perform INSERT of new row
+                        is_sink = not active_stage.complete_condition or not active_stage.complete_condition.strip()
+                        initial_status = "SINK" if is_sink else "PENDING"
+                        item_created_at = _get_item_date(rec) or datetime.datetime.now(datetime.timezone.utc).isoformat()
+                        col_names = ["PIPELINE_KEY", "STAGE", "STATUS", "CREATED_AT"] + list(mapped_fields.keys())
+                        placeholders = ["?"] * len(col_names)
+                        values = [pipeline_key, active_stage.id, initial_status, item_created_at] + list(mapped_fields.values())
 
-                    item_created_at = _get_item_date(rec) or datetime.datetime.now(datetime.timezone.utc).isoformat()
-                    col_names = ["PIPELINE_KEY", "STAGE", "STATUS", "CREATED_AT"] + list(mapped_fields.keys())
-                    placeholders = ["?"] * len(col_names)
-                    values = [pipeline_key, active_stage.id, initial_status, item_created_at] + list(mapped_fields.values())
-
-                    insert_sql = f'INSERT INTO SERVICES_PIPELINE ({", ".join(col_names)}) VALUES ({", ".join(placeholders)});'
-                    await db_manager.execute(insert_sql, tuple(values))
-                    new_ingested += 1
-                    print(f"[i] New entry ingested: '{pipeline_key}' into stage '{active_stage.id}' with STATUS = '{initial_status}' (END_OF_CICLE).")
+                        insert_sql = f'INSERT INTO SERVICES_PIPELINE ({", ".join(col_names)}) VALUES ({", ".join(placeholders)});'
+                        await db_manager.execute(insert_sql, tuple(values))
+                        new_ingested += 1
+                        print(f"[i] New entry ingested: '{pipeline_key}' into stage '{active_stage.id}' with STATUS = '{initial_status}' (END_OF_CICLE).")
 
 
             self._status[service_id] = {

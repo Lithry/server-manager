@@ -523,3 +523,35 @@ This log maintains cross-session operational continuity, recording architectural
 - `docs/BACKLOG.md`
 - `PROJECT_LOG.md`
 
+---
+
+## Session Milestone: 2026-10-16 — REF-16: Generic Fallback Lookup Correlation & Root Ingestion In-Place Updates
+
+### Role & Agent Assignment
+- **Orchestrator (`Role 0`)**: Diagnosed Sonarr API behavior (absence of fileId in deletion events), architected the agnostic correlation fallback design, and delegated backend, frontend, and documentation tasks.
+- **Backend Systems Engineer (`Role 2`)**: Added `fallback_lookup_column` and `fallback_lookup_field` to `ServiceConfig` in `src/core/config.py`. In `src/core/scheduler.py`, updated `resolve_template_key` to fail safely on missing template variables, implemented database fallback lookup correlation when primary keys cannot be resolved, and added in-place `UPDATE` support in `_poll_and_ingest()` for existing records using `merge_field_value`.
+- **Frontend & WebUI Specialist (`Role 3`)**: Integrated `fallback_lookup_column` and `fallback_lookup_field` inputs into `ServiceModal.js` under Ingestion & Pipeline Identity. Rebuilt production Vite bundle in `src/static/`.
+- **Technical Documentation Specialist (`Role 5`)**: Updated `PROJECT_LOG.md`.
+
+### Architectural Decisions & Changes Applied
+1. **Generic Fallback Correlation (`src/core/config.py`, `src/core/scheduler.py`)**:
+   - Extended `ServiceConfig` with optional `fallback_lookup_column` (DB column name) and `fallback_lookup_field` (payload property path).
+   - When an incoming event lacks primary key template parameters (e.g. deletion events lacking internal surrogate IDs like `data.fileId`), the scheduler queries `SELECT PIPELINE_KEY FROM SERVICES_PIPELINE WHERE {col} = ? AND PIPELINE_KEY LIKE ? LIMIT 1`.
+   - If correlated, adopts the existing record's `PIPELINE_KEY`, ensuring events like `episodeFileDeleted` map directly to the original file's row without creating orphaned or ghost entries.
+2. **In-Place Updates during Root Ingestion (`src/core/scheduler.py`)**:
+   - Refactored `_poll_and_ingest()`: when an incoming record resolves to an existing `PIPELINE_KEY`, it now evaluates service `field_mappings` with sequential context chaining, applies `merge_field_value`, and executes an in-place `UPDATE SERVICES_PIPELINE SET ..., LAST_UPDATED = CURRENT_TIMESTAMP WHERE PIPELINE_KEY = ?`.
+   - Preserves existing immutable fields (like `CREATED_AT` and non-null `FILE_PATH`) while updating dynamic fields (such as `EVENT = 'DELETED'`).
+3. **WebUI Service Configuration Controls (`ServiceModal.js`)**:
+   - Added responsive inputs for Fallback Match Column and Fallback Source Field in the Service Modal, allowing users to configure correlation rules without touching code.
+4. **Production Asset Compilation**:
+   - Compiled production bundle using `npm --prefix frontend run build`, updating `src/static/`.
+
+### Files Modified
+- `src/core/config.py`
+- `src/core/scheduler.py`
+- `frontend/src/features/settings/ui/ServiceModal.js`
+- `src/static/index.html`
+- `src/static/assets/index-*.js`
+- `src/static/assets/index-*.css`
+- `PROJECT_LOG.md`
+

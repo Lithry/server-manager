@@ -36,6 +36,8 @@ class ServiceConfig(BaseModel):
     poll_interval_seconds: int | None = None  # None = inherit Settings.global_poll_interval_seconds
     poll_endpoint: str = "/api/v3/history?pageSize=100&sortKey=date&sortDirection=descending"
     pipeline_key_template: str = "{service}:{id}"
+    fallback_lookup_column: str | None = None
+    fallback_lookup_field: str | None = None
     allowed_event_types: list[str] = Field(default_factory=list)
     enrichment_endpoints: Dict[str, str] = Field(default_factory=dict)
     field_mappings: list[FieldMapping] = Field(default_factory=list)

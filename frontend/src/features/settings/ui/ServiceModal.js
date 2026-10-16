@@ -38,6 +38,8 @@ export function createServiceModal(store) {
       poll_endpoint: endpointEl ? endpointEl.value : (editingService?.poll_endpoint || editingService?.primary_endpoint || '/api/v3/history?pageSize=100&sortKey=date&sortDirection=descending'),
       pipeline_key_template: pipelineEl ? pipelineEl.value : (editingService?.pipeline_key_template || '{service}:{id}'),
       enrichments: enrichEl ? enrichEl.value : (editingService?.enrichment_endpoints ? Object.entries(editingService.enrichment_endpoints).map(([k, v]) => `${k}: ${v}`).join('\n') : ''),
+      fallback_lookup_column: (document.getElementById('srv-fallback-col')?.value || '').trim() || null,
+      fallback_lookup_field: (document.getElementById('srv-fallback-field')?.value || '').trim() || null,
       enabled: enabledEl ? enabledEl.checked : (editingService ? editingService.enabled : true)
     };
   };
@@ -79,6 +81,8 @@ export function createServiceModal(store) {
         poll_interval_seconds: document.getElementById('chk-service-inherit-poll')?.checked ? null : 60,
         poll_endpoint: (document.getElementById('srv-endpoint')?.value || '').trim(),
         pipeline_key_template: (document.getElementById('srv-pipeline')?.value || '').trim(),
+        fallback_lookup_column: (document.getElementById('srv-fallback-col')?.value || '').trim() || null,
+        fallback_lookup_field: (document.getElementById('srv-fallback-field')?.value || '').trim() || null,
         enrichment_endpoints: enrichments,
         enabled: document.getElementById('chk-service-enabled')?.checked ?? true,
         allowed_event_types: currentAllowedEvents,
@@ -228,6 +232,8 @@ export function createServiceModal(store) {
   const formEndpoint = draft ? draft.poll_endpoint : (editingService?.poll_endpoint || editingService?.primary_endpoint || '/api/v3/history?pageSize=100&sortKey=date&sortDirection=descending');
   const formPipeline = draft ? draft.pipeline_key_template : (editingService?.pipeline_key_template || '{service}:{id}');
   const formEnrich = draft ? draft.enrichments : (editingService?.enrichment_endpoints ? Object.entries(editingService.enrichment_endpoints).map(([k, v]) => `${k}: ${v}`).join('\n') : '');
+  const formFallbackCol = draft?.fallback_lookup_column ?? (editingService?.fallback_lookup_column || '');
+  const formFallbackField = draft?.fallback_lookup_field ?? (editingService?.fallback_lookup_field || '');
   const formEnabled = draft ? draft.enabled : (editingService ? editingService.enabled : true);
 
   const allEventsToDisplay = Array.from(new Set([...currentAllowedEvents, ...discoveredEvents]));
@@ -293,6 +299,19 @@ export function createServiceModal(store) {
           <label>Secondary Enrichment Endpoints (Optional)</label>
           <textarea id="srv-enrich" class="form-input font-mono" rows="4" style="resize: none;" placeholder="episode: /api/v3/episode/{episodeId}&#10;series: /api/v3/series/{seriesId}">${formEnrich}</textarea>
           <small class="u-text-muted">Specify <code>namespace: /endpoint/{param}</code> per line to isolate attributes.</small>
+        </div>
+      </div>
+
+      <div class="form-grid-2 u-mb-3">
+        <div class="form-group">
+          <label>Fallback Match Column (Optional)</label>
+          <input type="text" id="srv-fallback-col" class="form-input font-mono" placeholder="FILE_PATH" .value=${formFallbackCol}>
+          <small class="u-text-muted">DB column to search if primary key cannot be resolved on mutation/deletion events (e.g. <code>FILE_PATH</code>).</small>
+        </div>
+        <div class="form-group">
+          <label>Fallback Source Field (Optional)</label>
+          <input type="text" id="srv-fallback-field" class="form-input font-mono" placeholder="sourceTitle" .value=${formFallbackField}>
+          <small class="u-text-muted">Incoming event payload field to match against the DB column (e.g. <code>sourceTitle</code>).</small>
         </div>
       </div>
 
