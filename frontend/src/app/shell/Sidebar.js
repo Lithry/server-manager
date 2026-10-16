@@ -17,10 +17,10 @@ function toggleSidebar() {
 
 export function Sidebar({ routes, activeId, onNavigate }) {
   const meta = queryCache.read(overviewKeys.all);
-  const commit = meta?.data?.telemetry?.short_commit || '6b319ac';
-  const branch = meta?.data?.telemetry?.branch || 'main';
+  const commit = meta?.data?.gitops?.commit || meta?.data?.telemetry?.short_commit || '-';
+  const branch = meta?.data?.gitops?.branch || meta?.data?.telemetry?.branch || '-';
 
-  const version = meta?.data?.version ? (meta.data.version.startsWith('v') ? meta.data.version : `v${meta.data.version}`) : 'v0.1.7';
+  const version = meta?.data?.version ? (meta.data.version.startsWith('v') ? meta.data.version : `v${meta.data.version}`) : '...';
 
   return html`<aside id="app-sidebar" class="${styles.sidebar} ${isExpanded ? styles.expanded : ''}">
     <div class=${styles.brand}>

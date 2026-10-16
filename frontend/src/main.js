@@ -16,6 +16,8 @@ import { createGitOpsPage } from './pages/GitOpsPage.js';
 import { createSettingsPage } from './pages/SettingsPage.js';
 import { createSandboxPage } from './pages/SandboxPage.js';
 import { modalManager } from './shared/ui/organisms/Modal/modalManager.js';
+import { overviewApi, overviewKeys } from './features/overview/api.js';
+import { queryCache } from './shared/api/index.js';
 const router = createRouter(ROUTES);
 
 const pages = {
@@ -59,4 +61,6 @@ function renderApp() {
 
 router.store.subscribe(renderApp);
 modalManager.store.subscribe(renderApp);
+queryCache.subscribe(overviewKeys.all, renderApp);
+overviewApi.getOverview().catch(() => {});
 renderApp();

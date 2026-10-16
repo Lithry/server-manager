@@ -657,6 +657,32 @@ This log maintains cross-session operational continuity, recording architectural
 - `docs/BACKEND_SPEC.md`
 - `PROJECT_LOG.md`
 
+---
+
+## Session Milestone: 2026-10-16 — UI-03: Dynamic AppShell Version & GitOps Telemetry Reactivity
+
+### Role & Agent Assignment
+- **Frontend & WebUI Specialist (`Role 3`)**: Implemented global overview telemetry subscription in `main.js`, eliminated hardcoded version and commit fallback values in `Sidebar.js`, aligned gitops telemetry keys, and recompiled production assets into `src/static/` via Vite.
+
+### Architectural Decisions & Changes Applied
+1. **Global Telemetry Reactivity (`frontend/src/main.js`)**:
+   - Subscribed `renderApp` directly to `overviewKeys.all` via `queryCache.subscribe(overviewKeys.all, renderApp)`.
+   - Added startup trigger `overviewApi.getOverview().catch(() => {})` on app bootstrap, ensuring version and git telemetry are retrieved immediately across all routes (including `/pipeline`, `/settings`, etc.).
+2. **Dynamic Telemetry & Version Resolution in Sidebar (`frontend/src/app/shell/Sidebar.js`)**:
+   - Removed hardcoded fallback version `'v0.1.7'` and hardcoded commit `'6b319ac'`.
+   - Aligned GitOps commit resolution with backend `gitops` payload (`meta?.data?.gitops?.commit || meta?.data?.telemetry?.short_commit || '-'`).
+   - Aligned GitOps branch resolution (`meta?.data?.gitops?.branch || meta?.data?.telemetry?.branch || '-'`).
+   - Dynamically resolves application version with leading 'v' formatting or `'...'` pending cache resolution (`meta?.data?.version ? (meta.data.version.startsWith('v') ? meta.data.version : \`v\${meta.data.version}\`) : '...'`).
+3. **Vite Production Compilation**:
+   - Executed `npm run build` in `frontend/`, compiling all assets into `src/static/` with 0 errors.
+
+### Files Modified
+- `frontend/src/main.js`
+- `frontend/src/app/shell/Sidebar.js`
+- `src/static/index.html`
+- `src/static/assets/index-*.js`
+- `PROJECT_LOG.md`
+
 
 
 
