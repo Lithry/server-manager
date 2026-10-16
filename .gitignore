@@ -34,4 +34,6 @@ logs/
 
 # AI
 ROLES.md
+AGENTS.md
+.agents/
 .claude/

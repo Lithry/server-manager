@@ -439,3 +439,38 @@ This log maintains cross-session operational continuity, recording architectural
 - `src/static/index.html`
 - `src/static/assets/index-*.js`
 - `PROJECT_LOG.md`
+
+---
+
+## Session Milestone: 2026-10-15 — DOC-02: Workspace Agent Rules and Subagent Roles Persistence
+
+### Role & Agent Assignment
+- **Orchestrator (`Role 0`)**: Authorized workspace customization and subagent rule persistence tasks.
+- **Technical Documentation & Specifications Specialist (`Role 5`)**: Created root workspace agent rules in `AGENTS.md`, defined native workspace subagents under `.agents/agents/`, updated `.gitignore`, and logged session milestone.
+
+### Architectural Decisions & Changes Applied
+1. **Workspace Agent Rules (`AGENTS.md`)**:
+   - Created `AGENTS.md` at repository root defining all 10 Global Directives & System Safeguards and all 6 Team Roles (Role 0 through Role 5).
+   - Highlighted the canonical server deployment command for `cubi-server`:
+     `docker compose -f /home/facundo/cubi-server/docker/server-manager/docker-compose.yml build --no-cache && docker compose -f /home/facundo/cubi-server/docker/server-manager/docker-compose.yml up -d --force-recreate`.
+2. **Native Subagent Definitions (`.agents/agents/`)**:
+   - Created native agent definition configurations with structured YAML frontmatter (`name`, `description`, `tools`, `hidden: true`, `inheritCustomizations: false`) and dedicated role directives derived directly from `ROLES.md`:
+     * `.agents/agents/systems-architect/agent.md`: Systems Architect / Analyst (Role 1).
+     * `.agents/agents/backend-engineer/agent.md`: Backend Systems Engineer (Role 2).
+     * `.agents/agents/frontend-specialist/agent.md`: Frontend & WebUI Specialist (Role 3).
+     * `.agents/agents/qa-tester/agent.md`: QA & Integration Tester (Role 4).
+     * `.agents/agents/docs-specialist/agent.md`: Technical Documentation Specialist (Role 5).
+3. **Repository Exclusion (`.gitignore`)**:
+   - Added `AGENTS.md` and `.agents/` under `# AI` in `.gitignore` to preserve local agent workspace rules without polluting version control.
+
+### Files Created
+- `AGENTS.md`
+- `.agents/agents/systems-architect/agent.md`
+- `.agents/agents/backend-engineer/agent.md`
+- `.agents/agents/frontend-specialist/agent.md`
+- `.agents/agents/qa-tester/agent.md`
+- `.agents/agents/docs-specialist/agent.md`
+
+### Files Modified
+- `.gitignore`
+- `PROJECT_LOG.md`
