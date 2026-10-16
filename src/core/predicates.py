@@ -160,6 +160,21 @@ class PredicateEvaluator:
 class TransformerEvaluator:
     """Evaluates field transformations safely (e.g. if 'anime' in tags then 1 else 0)."""
 
+    class SafeContext(dict):
+        """Dictionary that resolves missing keys as None and supports case-insensitive lookups."""
+
+        def __missing__(self, key: str) -> Any:
+            if not isinstance(key, str):
+                return None
+            for k in (key.upper(), key.lower(), key.capitalize()):
+                if k in self:
+                    return self[k]
+            key_lower = key.lower()
+            for k, v in self.items():
+                if isinstance(k, str) and k.lower() == key_lower:
+                    return v
+            return None
+
     @classmethod
     def validate_syntax(cls, expr: Optional[str]) -> Tuple[bool, str]:
         if not expr or not expr.strip():
@@ -205,9 +220,14 @@ class TransformerEvaluator:
         }
         if context:
             safe_locals.update(context)
+        safe_context = cls.SafeContext(safe_locals)
         try:
-            return eval(py_expr, safe_globals, safe_locals)
+            return eval(py_expr, safe_globals, safe_context)
         except Exception as e:
             if raise_errors:
                 raise e
             return value
+
+
+SafeContext = TransformerEvaluator.SafeContext
+

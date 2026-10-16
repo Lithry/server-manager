@@ -544,6 +544,8 @@ class TaskScheduler:
                             continue
 
                         mapped_fields[col_name] = coerced_val
+                        context_dict[col_name] = coerced_val
+                        context_dict[col_name.lower()] = coerced_val
 
                     # Authoritative Mermaid Lifecycle: NEW_ENTRY -> STATUS_TO_PENDING -> UPDATE_VALUES -> END_OF_CICLE
                     is_sink = not active_stage.complete_condition or not active_stage.complete_condition.strip()
@@ -666,6 +668,8 @@ class TaskScheduler:
                 continue
 
             mapped_fields[col_name] = merge_field_value(existing_val, coerced_val)
+            context_dict[col_name] = mapped_fields[col_name]
+            context_dict[col_name.lower()] = mapped_fields[col_name]
 
         has_changes = any(row_dict.get(k) != v for k, v in mapped_fields.items())
         if mapped_fields and has_changes:

@@ -469,3 +469,37 @@ This log maintains cross-session operational continuity, recording architectural
 - `src/static/assets/index-*.js`
 - `src/static/assets/index-*.css`
 - `PROJECT_LOG.md`
+
+---
+
+## Session Milestone: 2026-10-16 — REF-15: Chained Mapping Context, Safe Transformer Fallback, API Discovery & Mapping Reordering
+
+### Role & Agent Assignment
+- **Orchestrator (`Role 0`)**: Decomposed issues across transformer evaluation, API discovery, and mapping controls; coordinated cross-tier solution.
+- **Backend Systems Engineer (`Role 2`)**: Implemented `SafeContext` dictionary in `src/core/predicates.py` ensuring undefined variables evaluate to `None` instead of raising `NameError`. In `src/core/scheduler.py`, added sequential `context_dict` population during field mapping evaluation for both root ingestion and consumer enrichment.
+- **Frontend & WebUI Specialist (`Role 3`)**: Added Move Up (`▲`) and Move Down (`▼`) reordering controls in `MappingsPanel.js`. Connected `Discover Events from API` in `ServiceModal.js` with dynamic event-type checkboxes. Connected `Fetch Sample` in `SampleApiModal.js` with live search and direct mapping creation. Rebuilt production bundle into `src/static/`.
+- **Technical Documentation Specialist (`Role 5`)**: Updated `PROJECT_LOG.md`.
+
+### Architectural Decisions & Changes Applied
+1. **Safe Variable Resolution (`src/core/predicates.py`)**:
+   - `TransformerEvaluator` now wraps evaluation context in `SafeContext(dict)`. Any missing or undefined variable resolves to `None` with case-insensitive fallback instead of throwing a `NameError`.
+   - Prevents transformers like `if eventType == 'downloadFolderImported' then value else None` from failing towards the default `value` when `eventType` is absent in consumer enrichment.
+2. **Sequential Mapping Chaining (`src/core/scheduler.py`)**:
+   - Immediately upon computing and coercing a target column in `field_mappings`, the scheduler updates `context_dict[col_name]` and `context_dict[col_name.lower()]`.
+   - Allows downstream mappings within the same service to directly reference previously calculated columns (e.g. referencing `EVENT`).
+3. **Interactive API Discovery & Reordering (`MappingsPanel.js`, `ServiceModal.js`, `SampleApiModal.js`)**:
+   - Added `▲` and `▼` reordering controls to each mapping row in `MappingsPanel.js`, persisting array ordering.
+   - Connected `Discover Events from API` in `ServiceModal.js` to `POST /api/v1/pipeline/sample`, discovering distinct `eventType`s and binding them to `allowed_event_types`.
+   - Connected `Fetch Sample` in `SampleApiModal.js` to inspect external schemas with live search filtering and direct `+ Map` shortcuts.
+4. **Production Asset Compilation**:
+   - Compiled production bundle using `npm --prefix frontend run build`, updating `src/static/`.
+
+### Files Modified
+- `src/core/predicates.py`
+- `src/core/scheduler.py`
+- `frontend/src/features/settings/ui/MappingsPanel.js`
+- `frontend/src/features/settings/ui/ServiceModal.js`
+- `frontend/src/features/settings/ui/SampleApiModal.js`
+- `src/static/index.html`
+- `src/static/assets/index-*.js`
+- `PROJECT_LOG.md`

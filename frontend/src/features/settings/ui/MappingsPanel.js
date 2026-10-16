@@ -8,7 +8,7 @@ export function createMappingsPanel(store, servicesData = {}) {
   const selectedService = store.get().selectedMappingService || serviceKeys[0] || '';
 
   const handleOpenSampleApi = () => {
-    store.set(s => ({ ...s, isSampleApiModalOpen: true }));
+    store.set(s => ({ ...s, isSampleApiModalOpen: true, selectedMappingService: selectedService }));
   };
 
   const handleAddMapping = () => {
@@ -27,6 +27,19 @@ export function createMappingsPanel(store, servicesData = {}) {
       editingMapping: { ...m },
       editingMappingIndex: index
     }));
+  };
+
+  const handleMove = (index, direction) => {
+    const snapshot = queryCache.read(settingsKeys.all);
+    const newSettings = { ...snapshot.data };
+    const mappings = newSettings.services[selectedService].field_mappings;
+    const targetIndex = index + direction;
+    if (targetIndex < 0 || targetIndex >= mappings.length) return;
+    const temp = mappings[index];
+    mappings[index] = mappings[targetIndex];
+    mappings[targetIndex] = temp;
+    queryCache.setData(settingsKeys.all, () => newSettings);
+    store.set(s => ({ ...s, isDirty: true }));
   };
 
   const handleDelete = (index) => {
@@ -90,6 +103,8 @@ export function createMappingsPanel(store, servicesData = {}) {
                     ${m.transformer ? html`<div class="u-text-xs u-text-muted u-mt-1 font-mono">Transformer: ${m.transformer}</div>` : nothing}
                   </div>
                   <div class="u-flex u-gap-2">
+                    ${Button({ label: '▲', variant: 'ghost', size: 'sm', disabled: i === 0, ariaLabel: 'Move Up', onClick: () => handleMove(i, -1) })}
+                    ${Button({ label: '▼', variant: 'ghost', size: 'sm', disabled: i === s.field_mappings.length - 1, ariaLabel: 'Move Down', onClick: () => handleMove(i, 1) })}
                     ${Button({ label: 'Edit', variant: 'ghost', size: 'sm', onClick: () => handleEditMapping(m, i) })}
                     ${Button({ label: 'Delete', variant: 'delete', size: 'sm', onClick: () => handleDelete(i) })}
                   </div>
