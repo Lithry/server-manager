@@ -36,6 +36,7 @@
 | **STG-03** | **P1 (High)** | Core / Ingestion | Configurable Root Stage Activation Cutoff & Consumer Date Decoupling | Phase 1 (`v0.1.8`) | **COMPLETED ✓** |
 | **SBX-01** | **P2 (Medium)** | WebUI / Tooling | API Sandbox Architectural Debate, Payload Inspector & Visual Refactor | Phase 1 (`v0.1.9`) | **PLANNED 📅** |
 | **LOG-01** | **P1 (High)** | WebUI / Observability | Dedicated Error Log View & Type Incompatibility Alerts | Phase 1 (`v0.1.9`) | **PLANNED 📅** |
+| **UX-03** | **P3 (Polish)** | WebUI / Tooling | Discrete Multi-Variable Context Inputs for Transformer Test Harness | Phase 1 (`v0.1.9`) | **PLANNED 📅** |
 | **CORE-02** | **P1 (High)** | Core / Engine | Multi-Pipeline Dynamic Registry & Scoped DAG Progression Engine | Phase 2 (`v0.2.0`) | **PLANNED 📅** |
 | **API-01** | **P2 (Medium)** | Core / Presets | Shoko Server Verified API Schema & Presets | Phase 1 (`v0.1.6`) | **COMPLETED ✓** |
 | **API-02** | **P2 (Medium)** | LLM / Telemetry | Tier 3 Guided Remediation API (`/api/v1/meta/remediate`) | Phase 4 (`v0.4.0`) | **PLANNED 📅** |
@@ -103,7 +104,24 @@
 
 ---
 
-### 3.5 CORE-02: Multi-Pipeline Dynamic Registry & Scoped DAG Progression Engine (`v0.2.0` - Phase 2)
+### 3.5 UX-03: Discrete Multi-Variable Context Inputs for Transformer Test Harness (`v0.1.9`)
+- **Objective**: Improve ergonomics and eliminate JSON syntax friction when testing transformer expressions in `MappingModal.js`.
+- **Problem Statement**: Operators currently have to handcraft a raw JSON object (e.g. `{"EVENT": "ADDED", "value": "/path/..."}`) to test chained predicates and sample values, which frequently causes syntax errors with quotes, types, and brackets.
+- **Tasks**:
+  1. **Dedicated Sample Value (`value`) Input**:
+     - Provide an isolated input field for the primary `value` being mapped (supports strings, numbers, paths, booleans).
+  2. **Multi-Variable Context Inputs with Comma-Separated Support**:
+     - Allow specifying multiple context variables either via parallel comma-separated lists:
+       - Variable Names: `SHOKO_ID, ANIDB_ID, EVENT`
+       - Variable Values: `2547, 3587, ADDED`
+     - Or via key=value shorthand: `SHOKO_ID=2547, ANIDB_ID=3587, EVENT=ADDED`.
+  3. **Automatic Type Coercion**:
+     - Automatically infer numeric types (e.g. integers, floats), booleans, and strings without manual quotes.
+     - Construct the final `context_dict` payload sent to `POST /api/v1/settings/test-transformer`.
+
+---
+
+### 3.6 CORE-02: Multi-Pipeline Dynamic Registry & Scoped DAG Progression Engine (`v0.2.0` - Phase 2)
 - **Objective**: Upgrade from single `SERVICES_PIPELINE` to multi-pipeline dynamic architecture.
 - **Dependencies**: Requires stabilization of single-pipeline stage mechanics (`STG-01` through `STG-03`) and developer sandbox tooling (`SBX-01`).
 - **Tasks**:
@@ -124,7 +142,7 @@
 
 ---
 
-### 3.6 VIEW-01: Dual-Mode Table & View Builder (`v0.3.0` - Phase 3)
+### 3.7 VIEW-01: Dual-Mode Table & View Builder (`v0.3.0` - Phase 3)
 - **Objective**: Allow operators to create both virtual SQL views and persistent materialized destination tables.
 - **Tasks**:
   1. Support two dataset types:
@@ -134,7 +152,7 @@
 
 ---
 
-### 3.7 API-02: Tier 3 Guided Remediation API (`v0.4.0` - Phase 4)
+### 3.8 API-02: Tier 3 Guided Remediation API (`v0.4.0` - Phase 4)
 - **Objective**: Complete Tier 3 LLM tool suite for LibreChat / Ollama with safe remediation handoff.
 - **Tasks**:
   1. Implement `POST /api/v1/meta/remediate`:
@@ -146,7 +164,7 @@
 
 ---
 
-### 3.8 UX-02 & CFG-01: Guided Setup Flow & Out-of-the-Box Presets (`v0.5.0` - Phase 5)
+### 3.9 UX-02 & CFG-01: Guided Setup Flow & Out-of-the-Box Presets (`v0.5.0` - Phase 5)
 - **Objective**: Enable zero-friction initial setup for new installations.
 - **Tasks**:
   1. Add built-in service presets for Sonarr, Radarr, Shoko, and Jellyfin with pre-configured endpoints and mappings.
@@ -154,7 +172,7 @@
 
 ---
 
-### 3.9 DB-01: Granular Ingestion Log Audit & Telemetry Timing (`v0.6.0` - Phase 6)
+### 3.10 DB-01: Granular Ingestion Log Audit & Telemetry Timing (`v0.6.0` - Phase 6)
 - **Objective**: Ingestion performance observability.
 - **Tasks**:
   1. Record execution duration in milliseconds for each service loop and secondary enrichment query.
@@ -162,7 +180,7 @@
 
 ---
 
-### 3.10 Production MVP Release Gate (`v1.0.0`)
+### 3.11 Production MVP Release Gate (`v1.0.0`)
 - **Criteria**:
   - All Phases 1 through 6 completed and verified.
   - 100% test pass rate with automated integration suites.
