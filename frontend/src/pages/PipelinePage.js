@@ -45,6 +45,13 @@ export function createPipelinePage() {
       if (unsubStore) unsubStore();
     },
     view() {
+      const snapshot = queryCache.read(pipelineKeys.all);
+      const availableStages = snapshot.data?.available_stages ?? [];
+      const availableStatuses = snapshot.data?.available_statuses ?? [];
+      const currentParams = pipelineApi.getCurrentParams();
+      const currentStage = currentParams.stage || '';
+      const currentStatus = currentParams.status || '';
+
       return html`
         <div class="u-flex u-flex-col u-gap-4">
           <div class="u-flex u-items-center u-justify-between">
@@ -80,8 +87,30 @@ export function createPipelinePage() {
               ${Button({ label: 'Purge DB', variant: 'delete', size: 'sm', icon: 'trash', onClick: handlePurge })}
             </div>
             <div class="u-flex u-gap-2">
-              <select class="u-text-sm" style="background: var(--color-bg-surface); border: 1px solid var(--color-border); color: var(--color-text); padding: 5px var(--space-3); border-radius: var(--radius-sm); outline: none;"><option>All Stages</option></select>
-              <select class="u-text-sm" style="background: var(--color-bg-surface); border: 1px solid var(--color-border); color: var(--color-text); padding: 5px var(--space-3); border-radius: var(--radius-sm); outline: none;"><option>All Statuses</option></select>
+              <select
+                class="u-text-sm"
+                style="background: var(--color-bg-surface); border: 1px solid var(--color-border); color: var(--color-text); padding: 5px var(--space-3); border-radius: var(--radius-sm); outline: none; cursor: pointer;"
+                @change=${(e) => {
+                  pipelineApi.getPipeline({ stage: e.target.value, offset: 0 });
+                }}
+              >
+                <option value="" ?selected=${!currentStage}>All Stages</option>
+                ${availableStages.map(s => html`
+                  <option value=${s.id} ?selected=${currentStage === s.id}>${s.name || s.id}</option>
+                `)}
+              </select>
+              <select
+                class="u-text-sm"
+                style="background: var(--color-bg-surface); border: 1px solid var(--color-border); color: var(--color-text); padding: 5px var(--space-3); border-radius: var(--radius-sm); outline: none; cursor: pointer;"
+                @change=${(e) => {
+                  pipelineApi.getPipeline({ status: e.target.value, offset: 0 });
+                }}
+              >
+                <option value="" ?selected=${!currentStatus}>All Statuses</option>
+                ${availableStatuses.map(st => html`
+                  <option value=${st} ?selected=${currentStatus === st}>${st}</option>
+                `)}
+              </select>
             </div>
           </div>
           ${table.view()}

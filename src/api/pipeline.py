@@ -148,6 +148,40 @@ async def get_pipeline_items(
     pref_order = getattr(settings, "pipeline_column_order", []) or []
     ordered_cols = sort_pipeline_columns(all_col_names, pref_order)
 
+    # Collect available stages from settings and DB
+    configured_stages: List[Dict[str, Any]] = [
+        {"id": s.id, "name": s.name} for s in (getattr(settings, "stages", []) or [])
+    ]
+    known_stage_ids = {st["id"] for st in configured_stages if st.get("id")}
+    db_stages = await db_manager.query(
+        "SELECT DISTINCT STAGE FROM SERVICES_PIPELINE WHERE STAGE IS NOT NULL AND STAGE != ''"
+    )
+    for row in db_stages:
+        val = row.get("STAGE") if "STAGE" in row else row.get("stage")
+        if val is None and row:
+            val = list(row.values())[0]
+        if val is not None:
+            stage_val = str(val).strip()
+            if stage_val and stage_val not in known_stage_ids:
+                configured_stages.append({"id": stage_val, "name": stage_val})
+                known_stage_ids.add(stage_val)
+
+    # Collect available statuses from standard list and DB
+    standard_statuses: List[str] = ["PENDING", "COMPLETED", "SINK"]
+    db_statuses = await db_manager.query(
+        "SELECT DISTINCT STATUS FROM SERVICES_PIPELINE WHERE STATUS IS NOT NULL AND STATUS != ''"
+    )
+    known_statuses = set(standard_statuses)
+    for row in db_statuses:
+        val = row.get("STATUS") if "STATUS" in row else row.get("status")
+        if val is None and row:
+            val = list(row.values())[0]
+        if val is not None:
+            status_val = str(val).strip()
+            if status_val and status_val not in known_statuses:
+                standard_statuses.append(status_val)
+                known_statuses.add(status_val)
+
     return {
         "total": total,
         "limit": limit,
@@ -155,6 +189,8 @@ async def get_pipeline_items(
         "columns": ordered_cols,
         "column_types": col_types,
         "items": items,
+        "available_stages": configured_stages,
+        "available_statuses": standard_statuses,
     }
 
 

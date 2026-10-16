@@ -442,35 +442,30 @@ This log maintains cross-session operational continuity, recording architectural
 
 ---
 
-## Session Milestone: 2026-10-15 — DOC-02: Workspace Agent Rules and Subagent Roles Persistence
+## Session Milestone: 2026-10-16 — REF-14: Dynamic Stage and Status Filtering in Universal Pipeline
 
 ### Role & Agent Assignment
-- **Orchestrator (`Role 0`)**: Authorized workspace customization and subagent rule persistence tasks.
-- **Technical Documentation & Specifications Specialist (`Role 5`)**: Created root workspace agent rules in `AGENTS.md`, defined native workspace subagents under `.agents/agents/`, updated `.gitignore`, and logged session milestone.
+- **Orchestrator (`Role 0`)**: Triaged UI filter limitation, coordinated requirements, and delegated backend and frontend implementations.
+- **Backend Systems Engineer (`Role 2`)**: Updated `get_pipeline_items()` in `src/api/pipeline.py` to dynamically collect and expose `available_stages` (combining `settings.stages` and database entries) and `available_statuses` (combining baseline statuses with database entries).
+- **Frontend & WebUI Specialist (`Role 3`)**: Updated `frontend/src/features/pipeline/api.js` to manage `stage` and `status` query parameters and refactored `frontend/src/pages/PipelinePage.js` to render reactive, dynamic `<select>` dropdowns for filtering stages and statuses. Rebuilt production assets into `src/static/`.
+- **Technical Documentation Specialist (`Role 5`)**: Updated `PROJECT_LOG.md`.
 
 ### Architectural Decisions & Changes Applied
-1. **Workspace Agent Rules (`AGENTS.md`)**:
-   - Created `AGENTS.md` at repository root defining all 10 Global Directives & System Safeguards and all 6 Team Roles (Role 0 through Role 5).
-   - Highlighted the canonical server deployment command for `cubi-server`:
-     `docker compose -f /home/facundo/cubi-server/docker/server-manager/docker-compose.yml build --no-cache && docker compose -f /home/facundo/cubi-server/docker/server-manager/docker-compose.yml up -d --force-recreate`.
-2. **Native Subagent Definitions (`.agents/agents/`)**:
-   - Created native agent definition configurations with structured YAML frontmatter (`name`, `description`, `tools`, `hidden: true`, `inheritCustomizations: false`) and dedicated role directives derived directly from `ROLES.md`:
-     * `.agents/agents/systems-architect/agent.md`: Systems Architect / Analyst (Role 1).
-     * `.agents/agents/backend-engineer/agent.md`: Backend Systems Engineer (Role 2).
-     * `.agents/agents/frontend-specialist/agent.md`: Frontend & WebUI Specialist (Role 3).
-     * `.agents/agents/qa-tester/agent.md`: QA & Integration Tester (Role 4).
-     * `.agents/agents/docs-specialist/agent.md`: Technical Documentation Specialist (Role 5).
-3. **Repository Exclusion (`.gitignore`)**:
-   - Added `AGENTS.md` and `.agents/` under `# AI` in `.gitignore` to preserve local agent workspace rules without polluting version control.
-
-### Files Created
-- `AGENTS.md`
-- `.agents/agents/systems-architect/agent.md`
-- `.agents/agents/backend-engineer/agent.md`
-- `.agents/agents/frontend-specialist/agent.md`
-- `.agents/agents/qa-tester/agent.md`
-- `.agents/agents/docs-specialist/agent.md`
+1. **Dynamic Stage & Status Enumeration (`src/api/pipeline.py`)**:
+   - `GET /api/v1/pipeline` now dynamically queries `SELECT DISTINCT STAGE FROM SERVICES_PIPELINE` and merges with `settings.stages`, returning the full list of `available_stages` (`id` and `name`).
+   - Dynamically queries `SELECT DISTINCT STATUS FROM SERVICES_PIPELINE` and merges with baseline statuses (`PENDING`, `COMPLETED`, `SINK`), returning `available_statuses`.
+2. **Reactive Filter Binding & Parameter Management (`PipelinePage.js`, `api.js`)**:
+   - Replaced static placeholder dropdowns in `PipelinePage.js` with reactive `<select>` controls populated from API response metadata.
+   - Tied `@change` events to `pipelineApi.getPipeline({ stage / status, offset: 0 })`, automatically resetting pagination to page 1 upon filtering.
+   - Cleaned falsy/empty values in `api.js` to avoid transmitting superfluous empty query parameters.
+3. **Production Asset Compilation**:
+   - Compiled production bundle using `npm --prefix frontend run build`, updating `src/static/`.
 
 ### Files Modified
-- `.gitignore`
+- `src/api/pipeline.py`
+- `frontend/src/features/pipeline/api.js`
+- `frontend/src/pages/PipelinePage.js`
+- `src/static/index.html`
+- `src/static/assets/index-*.js`
+- `src/static/assets/index-*.css`
 - `PROJECT_LOG.md`

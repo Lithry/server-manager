@@ -17,6 +17,12 @@ export const pipelineApi = {
       ...opts
     };
     currentParams = { ...currentParams, ...cleanParams };
+    if (currentParams.stage === '' || currentParams.stage === null) {
+      delete currentParams.stage;
+    }
+    if (currentParams.status === '' || currentParams.status === null) {
+      delete currentParams.status;
+    }
     return queryCache.load(
       pipelineKeys.all,
       () => http.get('/api/v1/pipeline', { query: currentParams, dedupe: false }),
