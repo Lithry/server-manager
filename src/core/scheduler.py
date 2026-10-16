@@ -523,7 +523,7 @@ class TaskScheduler:
                                     enrich_url, enrich_headers = prepare_service_request(
                                         service_cfg.base_url, resolved_ep, service_cfg.api_key or ""
                                     )
-                                    async with httpx.AsyncClient(timeout=10.0) as client:
+                                    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
                                         e_resp = await client.get(enrich_url, headers=enrich_headers)
                                         if e_resp.status_code == 200:
                                             e_json = e_resp.json()
@@ -574,12 +574,8 @@ class TaskScheduler:
                                 existing_val = existing_row.get(col_name.lower())
                             merged_val = merge_field_value(existing_val, coerced_val)
                             mapped_fields[col_name] = merged_val
-                            context_dict[col_name] = merged_val
-                            context_dict[col_name.lower()] = merged_val
                         else:
                             mapped_fields[col_name] = coerced_val
-                            context_dict[col_name] = coerced_val
-                            context_dict[col_name.lower()] = coerced_val
 
                     # Authoritative Mermaid Lifecycle: In-Place UPDATE or NEW_ENTRY INSERT
                     if existing_row:
@@ -661,7 +657,7 @@ class TaskScheduler:
                 enrich_url, enrich_headers = prepare_service_request(
                     service_cfg.base_url, resolved_ep, service_cfg.api_key or ""
                 )
-                async with httpx.AsyncClient(timeout=10.0) as client:
+                async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
                     e_resp = await client.get(enrich_url, headers=enrich_headers)
                     if e_resp.status_code == 200:
                         e_json = e_resp.json()
@@ -711,8 +707,6 @@ class TaskScheduler:
                 continue
 
             mapped_fields[col_name] = merge_field_value(existing_val, coerced_val)
-            context_dict[col_name] = mapped_fields[col_name]
-            context_dict[col_name.lower()] = mapped_fields[col_name]
 
         has_changes = any(row_dict.get(k) != v for k, v in mapped_fields.items())
         if mapped_fields and has_changes:

@@ -555,3 +555,24 @@ This log maintains cross-session operational continuity, recording architectural
 - `src/static/assets/index-*.css`
 - `PROJECT_LOG.md`
 
+---
+
+## Session Milestone: 2026-10-16 — REF-17: Pure Evaluation Context & Elimination of In-Place Context Mutation
+
+### Role & Agent Assignment
+- **Orchestrator (`Role 0`)**: Diagnosed context clobbering between SQL target column names and API namespace dictionaries; directed pure evaluation refactor.
+- **Backend Systems Engineer (`Role 2`)**: Refactored `_poll_and_ingest()` and `_execute_consumer_enrichment()` in `src/core/scheduler.py` to eliminate `context_dict` in-place mutations, guaranteeing API payloads and namespaces remain immutable during field mapping evaluation. Added `follow_redirects=True` to HTTP enrichment requests.
+- **Technical Documentation Specialist (`Role 5`)**: Updated `PROJECT_LOG.md`.
+
+### Architectural Decisions & Changes Applied
+1. **Immutable Evaluation Context (`src/core/scheduler.py`)**:
+   - Removed sequential mutation of `context_dict[col_name]` and `context_dict[col_name.lower()]` during field mapping loops in both root ingestion and consumer enrichment stages.
+   - Prevents SQL target column names (e.g. `EPISODE = 16`) from clobbering incoming payload and secondary enrichment namespace dictionaries (`context_dict["episode"]`), resolving null values in subsequent field evaluations (e.g. `episode.title`).
+2. **HTTP Redirect Resilience (`src/core/scheduler.py`)**:
+   - Enabled `follow_redirects=True` on `httpx.AsyncClient` for all secondary enrichment endpoint queries.
+
+### Files Modified
+- `src/core/scheduler.py`
+- `PROJECT_LOG.md`
+
+
