@@ -69,7 +69,10 @@ class TestSbx01SandboxDecoupling(unittest.IsolatedAsyncioTestCase):
 
         sample_resp = MagicMock()
         sample_resp.status_code = 200
-        sample_resp.json.return_value = {"id": 999, "seriesId": 105, "sourceTitle": "Test.Show.S01E01"}
+        sample_resp.json.return_value = {
+            "page": 1,
+            "records": [{"id": 999, "seriesId": 105, "sourceTitle": "Test.Show.S01E01"}]
+        }
 
         series_resp = MagicMock()
         series_resp.status_code = 200
@@ -88,10 +91,12 @@ class TestSbx01SandboxDecoupling(unittest.IsolatedAsyncioTestCase):
 
             mock_db.assert_not_called()
             self.assertTrue(result["success"])
-            # Root context has seriesId from sample
+            # Root context has seriesId unpacked from records[0]
             self.assertEqual(result["context_data"]["seriesId"], 105)
-            # sample namespace is populated
-            self.assertEqual(result["context_data"]["sample"]["sourceTitle"], "Test.Show.S01E01")
+            # sample namespace is populated with raw wrapper
+            self.assertEqual(result["context_data"]["sample"]["records"][0]["sourceTitle"], "Test.Show.S01E01")
+            # records namespace holds first record dictionary
+            self.assertEqual(result["context_data"]["records"]["sourceTitle"], "Test.Show.S01E01")
             # Enrichment using placeholder from sample
             self.assertEqual(result["context_data"]["series"]["title"], "Test Show")
 

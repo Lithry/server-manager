@@ -951,13 +951,60 @@ This log maintains cross-session operational continuity, recording architectural
 - `README.md`
 - `PROJECT_LOG.md`
 
+---
 
+## Session Milestone: 2026-10-16 — Sandbox Context Source Endpoint Suggestions Refinement
 
+### Role & Agent Assignment
+- **Frontend & WebUI Specialist (`Role 3` / `frontend-specialist`)**: Refined `ContextSourceControls.js` to provide auto-suggested service endpoints via HTML5 `<datalist>` and clean ergonomics.
 
+### Key Changes Implemented
+1. **Endpoint Suggestions Datalist**:
+   - Added `resolveAvailableEndpoints(selectedService, currentService)` in `frontend/src/features/sandbox/ui/ContextSourceControls.js`.
+   - Dynamic aggregation of:
+     - Configured service `poll_endpoint` (if non-empty).
+     - Values from configured `enrichment_endpoints` (dict or array).
+     - Known service presets based on service key or name matching:
+       - **Sonarr**: `/api/v3/history`, `/api/v3/queue`, `/api/v3/series`, `/api/v3/episode`, `/api/v3/tag`.
+       - **Radarr**: `/api/v3/history`, `/api/v3/queue`, `/api/v3/movie`, `/api/v3/tag`.
+       - **Shoko**: `/api/v3/Series`, `/api/v3/Episode`, `/api/v3/File`.
+       - **Jellyfin**: `/Items?Recursive=true`, `/Users`, `/System/Info`.
+     - Preserves insertion order and deduplicates endpoints.
+     - **Zero generic fallback**: Empty datalist options when service is unmapped and has no custom endpoints.
+2. **Ergonomic Simplification**:
+   - Simplified input `placeholder` from `"Sample Endpoint (e.g. /api/v3/history?pageSize=1)"` to `"Sample Endpoint"`.
+   - Wired `list="sandbox-endpoints-list"` to the sample endpoint input with dynamic `<option value="${ep}">${ep}</option>` rendering.
+3. **Module Architecture & Size**:
+   - `ContextSourceControls.js` maintained strictly under ~250 lines (205 lines total).
+4. **Vite Production Compilation**:
+   - Executed `npm run build` with `Cwd: frontend`. Verified 0 build errors and production bundle generated cleanly in `src/static/`.
 
+### Files Modified
+- `frontend/src/features/sandbox/ui/ContextSourceControls.js`
+- `src/static/*` (Production bundle)
+- `PROJECT_LOG.md`
 
+---
 
+## Session Milestone: 2026-10-16 — Upstream Direct Sampling Record Unpacking Refinement
 
+### Role & Agent Assignment
+- **Backend Systems Engineer (`Role 2` / `backend-engineer`)**: Refined direct upstream sampling logic in `src/api/pipeline.py` (`sandbox_enrichment`) to align with production Scheduler ingestion behavior.
 
+### Key Changes Implemented
+1. **Direct Upstream Sampling Record Unpacking (`src/api/pipeline.py`)**:
+   - In `sandbox_enrichment`, when `sample_endpoint` returns a paginated wrapper dict containing a record list (e.g., `records`, `Items`, `files`), the first record `first_rec` is extracted.
+   - `sample_dict` updates with `first_rec` keys at root level, and explicitly sets `sample_dict["records"] = first_rec`.
+   - When `s_json` is a direct JSON list of dicts, the first record is similarly unpacked into root keys and `sample_dict["records"] = first_rec`.
+   - Mirrors production scheduler behavior (`context_dict = {"records": rec, **rec, **enrichment_data}`) so that `{episodeId}`, `{seriesId}`, `{records.episodeId}`, and `{sample.records[0].episodeId}` placeholders all resolve seamlessly in sandbox tests.
+2. **Automated Test Suite Alignment (`tests/test_sbx01_sandbox_decoupling.py`)**:
+   - Updated `test_sandbox_enrichment_with_direct_sample_endpoint` to test a wrapped response `{"page": 1, "records": [{"id": 999, "seriesId": 105, "sourceTitle": "Test.Show.S01E01"}]}`.
+   - Verified that root `{seriesId}`, wrapper path `sample.records[0].sourceTitle`, and `records.sourceTitle` resolve accurately.
+3. **Verification**:
+   - Syntax validation via `py_compile`.
+   - Full test discovery execution (`.venv\Scripts\python.exe -m unittest discover -s tests`): all 19 tests pass cleanly.
 
-
+### Files Modified
+- `src/api/pipeline.py`
+- `tests/test_sbx01_sandbox_decoupling.py`
+- `PROJECT_LOG.md`

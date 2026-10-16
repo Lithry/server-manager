@@ -2,6 +2,75 @@ import { html, nothing } from 'lit-html';
 import { Button } from '../../../shared/ui/atoms/Button/Button.js';
 import { Icon } from '../../../shared/ui/atoms/Icon/Icon.js';
 
+const KNOWN_SERVICE_ENDPOINTS = {
+  sonarr: [
+    '/api/v3/history',
+    '/api/v3/queue',
+    '/api/v3/series',
+    '/api/v3/episode',
+    '/api/v3/tag'
+  ],
+  radarr: [
+    '/api/v3/history',
+    '/api/v3/queue',
+    '/api/v3/movie',
+    '/api/v3/tag'
+  ],
+  shoko: [
+    '/api/v3/Series',
+    '/api/v3/Episode',
+    '/api/v3/File'
+  ],
+  jellyfin: [
+    '/Items?Recursive=true',
+    '/Users',
+    '/System/Info'
+  ]
+};
+
+function resolveAvailableEndpoints(selectedService, currentService) {
+  if (!currentService && !selectedService) {
+    return [];
+  }
+
+  const endpoints = [];
+
+  if (currentService?.poll_endpoint && typeof currentService.poll_endpoint === 'string') {
+    const trimmed = currentService.poll_endpoint.trim();
+    if (trimmed) {
+      endpoints.push(trimmed);
+    }
+  }
+
+  if (currentService?.enrichment_endpoints) {
+    const rawValues = Array.isArray(currentService.enrichment_endpoints)
+      ? currentService.enrichment_endpoints
+      : Object.values(currentService.enrichment_endpoints);
+
+    for (const val of rawValues) {
+      if (typeof val === 'string' && val.trim()) {
+        endpoints.push(val.trim());
+      }
+    }
+  }
+
+  const keyLower = String(selectedService || '').toLowerCase();
+  const nameLower = String(currentService?.name || '').toLowerCase();
+  const combined = `${keyLower} ${nameLower}`;
+
+  if (combined.includes('sonarr')) {
+    endpoints.push(...KNOWN_SERVICE_ENDPOINTS.sonarr);
+  } else if (combined.includes('radarr')) {
+    endpoints.push(...KNOWN_SERVICE_ENDPOINTS.radarr);
+  } else if (combined.includes('shoko')) {
+    endpoints.push(...KNOWN_SERVICE_ENDPOINTS.shoko);
+  } else if (combined.includes('jellyfin')) {
+    endpoints.push(...KNOWN_SERVICE_ENDPOINTS.jellyfin);
+  }
+
+  return Array.from(new Set(endpoints));
+}
+
 export function ContextSourceControls({
   services = {},
   selectedService = '',
@@ -21,6 +90,8 @@ export function ContextSourceControls({
   onSaveToService
 }) {
   const serviceKeys = Object.keys(services);
+  const currentService = services[selectedService];
+  const availableEndpoints = resolveAvailableEndpoints(selectedService, currentService);
 
   return html`
     <div class="u-flex u-flex-col u-gap-3" style="flex-shrink: 0;">
@@ -57,12 +128,16 @@ export function ContextSourceControls({
         <div style="flex: 2; min-width: 220px;">
           <input
             type="text"
+            list="sandbox-endpoints-list"
             class="form-input u-font-mono u-text-sm"
-            placeholder="Sample Endpoint (e.g. /api/v3/history?pageSize=1)"
+            placeholder="Sample Endpoint"
             title="Optional upstream live sample endpoint to seed context without DB records"
             .value=${sampleEndpoint}
             @input=${(e) => onSampleEndpointChange?.(e.target.value)}
           />
+          <datalist id="sandbox-endpoints-list">
+            ${availableEndpoints.map((ep) => html`<option value="${ep}">${ep}</option>`)}
+          </datalist>
         </div>
 
         <!-- Run Action -->
