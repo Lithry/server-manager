@@ -14,6 +14,27 @@ from src.core.predicates import PredicateEvaluator, TransformerEvaluator
 from src.api.pipeline import prepare_service_request
 
 
+def _get_item_date(r: dict) -> str:
+    """Extract item date/timestamp string from record dictionary."""
+    if not isinstance(r, dict):
+        return ""
+    val = r.get("date") or r.get("Created") or r.get("Imported") or r.get("CreatedAt") or r.get("DateCreated") or ""
+    return str(val)
+
+
+def _parse_timestamp(val: Any) -> Optional[datetime.datetime]:
+    """Parse ISO or SQL timestamp string into UTC aware datetime."""
+    if not val:
+        return None
+    try:
+        dt = datetime.datetime.fromisoformat(str(val).strip().replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
+        return dt
+    except Exception:
+        return None
+
+
 def extract_dotted_value(data: dict, path: str) -> Any:
     """Extract nested value using dot notation, supporting list projection and numeric indexing."""
     if not path or not isinstance(data, dict):
@@ -329,6 +350,13 @@ class TaskScheduler:
 
             # 2. SECOND: Root stage ingestion for new incoming records (NEW_ENTRY)
             if active_root_stages:
+                max_created_res = await db_manager.query(
+                    "SELECT MAX(CREATED_AT) as latest FROM SERVICES_PIPELINE WHERE PIPELINE_KEY LIKE ?",
+                    (f"{service_id}:%",)
+                )
+                latest_created_at = max_created_res[0]["latest"] if max_created_res and max_created_res[0]["latest"] else None
+                latest_dt = _parse_timestamp(latest_created_at) if latest_created_at else None
+
                 poll_ep = getattr(service_cfg, "poll_endpoint", None) or "/api/v3/history?pageSize=100&sortKey=date&sortDirection=descending"
 
                 # Fetch records across pages until all new records are retrieved or known items are reached
@@ -375,20 +403,37 @@ class TaskScheduler:
                         if not page_records:
                             break
 
-                        # Check if all records on this page already exist in SERVICES_PIPELINE
+                        # Check if all records on this page already exist in SERVICES_PIPELINE or are older than latest_created_at
                         all_seen = True
                         for r in page_records:
                             if not isinstance(r, dict):
                                 continue
+
+                            # Check if older than latest_created_at
+                            is_older = False
+                            if latest_dt:
+                                r_dt = _parse_timestamp(_get_item_date(r))
+                                if r_dt and r_dt <= latest_dt:
+                                    is_older = True
+                            elif latest_created_at:
+                                r_date = _get_item_date(r)
+                                if r_date and r_date <= latest_created_at:
+                                    is_older = True
+
+                            if is_older:
+                                continue
+
                             pk = resolve_template_key(service_cfg.pipeline_key_template, service_id, r)
                             if pk:
                                 existing_row = await db_manager.query("SELECT 1 FROM SERVICES_PIPELINE WHERE PIPELINE_KEY = ?", (pk,))
-                                if not existing_row:
-                                    all_seen = False
-                                    break
+                                if existing_row:
+                                    continue
+
+                            all_seen = False
+                            break
 
                         if all_seen:
-                            # Reached already ingested history; stop pagination early
+                            # Reached already ingested history or items older than latest_created_at; stop pagination early
                             break
 
                         if total_available is not None and len(records) >= total_available:
@@ -399,20 +444,15 @@ class TaskScheduler:
 
                         current_page += 1
 
+                # Filter and sort records chronologically ascending (from oldest to newest)
+                records.sort(key=_get_item_date)
+
             # Read existing table columns to avoid referencing non-existent columns
             table_cols = {c["name"].upper() for c in await db_manager.get_table_columns("SERVICES_PIPELINE")}
             service_tags = await self._get_service_tags(service_id, service_cfg)
 
             for active_stage in active_root_stages:
-                stage_activated_dt = None
-                if active_stage.last_activated_at:
-                    try:
-                        clean_ts = active_stage.last_activated_at.replace("Z", "+00:00")
-                        stage_activated_dt = datetime.datetime.fromisoformat(clean_ts)
-                        if stage_activated_dt.tzinfo is None:
-                            stage_activated_dt = stage_activated_dt.replace(tzinfo=datetime.timezone.utc)
-                    except Exception as ts_err:
-                        print(f"[!] Warning invalid last_activated_at for stage {active_stage.id}: {ts_err}")
+                stage_activated_dt = _parse_timestamp(active_stage.last_activated_at) if active_stage.last_activated_at else None
 
                 for rec in records:
                     if not isinstance(rec, dict):
@@ -423,17 +463,11 @@ class TaskScheduler:
                         continue
 
                     # Filter out historical events that occurred prior to stage activation
-                    rec_date_val = rec.get("date") or rec.get("Imported") or rec.get("Created") or rec.get("DateCreated")
+                    rec_date_val = _get_item_date(rec)
                     if stage_activated_dt and rec_date_val:
-                        try:
-                            rec_date_str = str(rec_date_val).replace("Z", "+00:00")
-                            rec_dt = datetime.datetime.fromisoformat(rec_date_str)
-                            if rec_dt.tzinfo is None:
-                                rec_dt = rec_dt.replace(tzinfo=datetime.timezone.utc)
-                            if rec_dt < stage_activated_dt:
-                                continue
-                        except Exception:
-                            pass
+                        rec_dt = _parse_timestamp(rec_date_val)
+                        if rec_dt and rec_dt < stage_activated_dt:
+                            continue
 
                     pipeline_key = resolve_template_key(service_cfg.pipeline_key_template, service_id, rec)
                     if not pipeline_key:
@@ -515,9 +549,10 @@ class TaskScheduler:
                     is_sink = not active_stage.complete_condition or not active_stage.complete_condition.strip()
                     initial_status = "SINK" if is_sink else "PENDING"
 
-                    col_names = ["PIPELINE_KEY", "STAGE", "STATUS"] + list(mapped_fields.keys())
+                    item_created_at = _get_item_date(rec) or datetime.datetime.now(datetime.timezone.utc).isoformat()
+                    col_names = ["PIPELINE_KEY", "STAGE", "STATUS", "CREATED_AT"] + list(mapped_fields.keys())
                     placeholders = ["?"] * len(col_names)
-                    values = [pipeline_key, active_stage.id, initial_status] + list(mapped_fields.values())
+                    values = [pipeline_key, active_stage.id, initial_status, item_created_at] + list(mapped_fields.values())
 
                     insert_sql = f'INSERT INTO SERVICES_PIPELINE ({", ".join(col_names)}) VALUES ({", ".join(placeholders)});'
                     await db_manager.execute(insert_sql, tuple(values))

@@ -6,7 +6,7 @@ import { queryCache } from '../../shared/api/index.js';
 import { Button } from '../../shared/ui/atoms/Button/Button.js';
 import { BooleanBadge } from '../../shared/ui/atoms/Badge/Badge.js';
 
-const SYSTEM_COLUMNS = new Set(['ID', 'PIPELINE_KEY', 'STAGE', 'STATUS', 'LAST_UPDATED']);
+const SYSTEM_COLUMNS = new Set(['ID', 'PIPELINE_KEY', 'STAGE', 'STATUS', 'CREATED_AT', 'LAST_UPDATED']);
 
 // Uses the order and columns returned by the API
 function getColumns(data) {

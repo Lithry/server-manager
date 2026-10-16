@@ -8,7 +8,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 
 
 SQL_IDENTIFIER_REGEX = re.compile(r"^[A-Z0-9_]+$")
-SYSTEM_RESERVED_COLUMNS = {"ID", "PIPELINE_KEY", "STAGE", "STATUS", "LAST_UPDATED"}
+SYSTEM_RESERVED_COLUMNS = {"ID", "PIPELINE_KEY", "STAGE", "STATUS", "CREATED_AT", "LAST_UPDATED"}
 
 
 class DatabaseManager:
@@ -34,9 +34,15 @@ class DatabaseManager:
                     PIPELINE_KEY TEXT UNIQUE NOT NULL,
                     STAGE TEXT,
                     STATUS TEXT DEFAULT 'PENDING',
+                    CREATED_AT TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     LAST_UPDATED TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
             """)
+
+            cursor = await db.execute("PRAGMA table_info(SERVICES_PIPELINE);")
+            existing_cols = [row["name"].upper() for row in await cursor.fetchall()]
+            if "CREATED_AT" not in existing_cols:
+                await db.execute("ALTER TABLE SERVICES_PIPELINE ADD COLUMN CREATED_AT TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
 
             # 2. Extensible ERROR_INDEX catalog
             await db.execute("""

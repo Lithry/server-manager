@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api/v1/pipeline", tags=["Pipeline"])
 
 def sort_pipeline_columns(all_columns: List[str], preferred_order: List[str]) -> List[str]:
     """Sort columns placing fixed system columns first, followed by user columns according to preferred order."""
-    system_cols = [c for c in ["ID", "PIPELINE_KEY", "STAGE", "STATUS", "LAST_UPDATED"] if c in all_columns]
+    system_cols = [c for c in ["ID", "PIPELINE_KEY", "STAGE", "STATUS", "CREATED_AT", "LAST_UPDATED"] if c in all_columns]
     user_cols = [c for c in all_columns if c not in SYSTEM_RESERVED_COLUMNS]
 
     sorted_user = []

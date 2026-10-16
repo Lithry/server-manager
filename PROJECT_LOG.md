@@ -409,6 +409,33 @@ This log maintains cross-session operational continuity, recording architectural
 - `src/static/assets/index-*.css`
 - `PROJECT_LOG.md`
 
+---
 
+## Session Milestone: 2026-10-15 — REF-13: Universal Delta Ingestion with CREATED_AT & Chronological Ingestion Sequence
 
+### Role & Agent Assignment
+- **Orchestrator (`Role 0`)**: Coordinated universal delta ingestion requirement and delegated backend and frontend modifications.
+- **Backend Systems Engineer (`Role 2`)**: Added `CREATED_AT` to `SERVICES_PIPELINE` in `src/core/database.py`, exposed it in `src/api/pipeline.py`, and refactored `TaskScheduler.trigger_now()` in `src/core/scheduler.py` to stop at `MAX(CREATED_AT)` and ingest records chronologically ascending 1 by 1.
+- **Frontend & WebUI Specialist (`Role 3`)**: Integrated `CREATED_AT` into system reserved columns in `PipelineTable.js` and rebuilt production bundle.
+- **Documentation Specialist (`Role 5`)**: Updated `PROJECT_LOG.md`.
 
+### Architectural Decisions & Changes Applied
+1. **Immutable `CREATED_AT` System Column (`src/core/database.py`, `src/api/pipeline.py`)**:
+   - Added `CREATED_AT TIMESTAMP DEFAULT CURRENT_TIMESTAMP` to `SERVICES_PIPELINE` to permanently record event creation timestamps separately from `LAST_UPDATED`.
+   - Included in `SYSTEM_RESERVED_COLUMNS` and system column ordering.
+2. **Universal Delta Polling (`src/core/scheduler.py`)**:
+   - Scheduler evaluates `SELECT MAX(CREATED_AT) as latest FROM SERVICES_PIPELINE WHERE PIPELINE_KEY LIKE ?` for the active service.
+   - Paged polling stops immediately once a page contains records with timestamps older than or equal to `MAX(CREATED_AT)` (or already in DB), ensuring single-request speed during steady state without redundant history queries.
+3. **Ascending Chronological Ingestion (`src/core/scheduler.py`)**:
+   - Candidate records are sorted chronologically ascending (oldest to newest) prior to insertion.
+   - Ingested 1 by 1 so the oldest item receives the lowest ID and the newest item receives the highest ID.
+   - Preserves natural top-of-table positioning for recent events under `ORDER BY ID DESC`.
+
+### Files Modified
+- `src/core/database.py`
+- `src/api/pipeline.py`
+- `src/core/scheduler.py`
+- `frontend/src/features/pipeline/PipelineTable.js`
+- `src/static/index.html`
+- `src/static/assets/index-*.js`
+- `PROJECT_LOG.md`
