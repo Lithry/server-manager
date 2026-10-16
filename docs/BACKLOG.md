@@ -37,6 +37,8 @@
 | **SBX-01** | **P2 (Medium)** | WebUI / Tooling | API Sandbox Architectural Debate, Payload Inspector & Visual Refactor | Phase 1 (`v0.1.9`) | **PLANNED 📅** |
 | **LOG-01** | **P1 (High)** | WebUI / Observability | Dedicated Error Log View & Type Incompatibility Alerts | Phase 1 (`v0.1.9`) | **PLANNED 📅** |
 | **UX-03** | **P3 (Polish)** | WebUI / Tooling | Discrete Multi-Variable Context Inputs for Transformer Test Harness | Phase 1 (`v0.1.9`) | **PLANNED 📅** |
+| **CORE-04** | **P2 (Medium)** | Core / Storage | Accumulative JSON List Merging & Deduplication | Phase 1 (`v0.1.9`) | **PLANNED 📅** |
+| **STG-04** | **P2 (Medium)** | Core / WebUI | Stage-Scoped Field Mapping Selection & Granular Column Execution | Phase 1 (`v0.1.9`) | **PLANNED 📅** |
 | **CORE-02** | **P1 (High)** | Core / Engine | Multi-Pipeline Dynamic Registry & Scoped DAG Progression Engine | Phase 2 (`v0.2.0`) | **PLANNED 📅** |
 | **API-01** | **P2 (Medium)** | Core / Presets | Shoko Server Verified API Schema & Presets | Phase 1 (`v0.1.6`) | **COMPLETED ✓** |
 | **API-02** | **P2 (Medium)** | LLM / Telemetry | Tier 3 Guided Remediation API (`/api/v1/meta/remediate`) | Phase 4 (`v0.4.0`) | **PLANNED 📅** |
@@ -82,14 +84,19 @@
 
 ### 3.3 SBX-01: API Sandbox Architectural Debate, Payload Inspector & Visual Refactor (`v0.1.9`)
 - **Objective**: Overhaul the developer API Sandbox into an ergonomic, visually consistent testing environment for upstream services and enrichment chains prior to multi-pipeline expansion.
-- **Tasks**:
-  1. **Architectural Analysis & Design Debate**:
-     - Evaluate testing workflow: sample record selection, multi-endpoint enrichment chaining, and transformer live-preview.
-     - Establish requirements for step-by-step request/response inspection and schema extraction.
-  2. **Visual & UX Refactor (`SandboxPage.js`)**:
-     - Redesign panel layout with responsive split-pane architecture (Request Configurator on left, Response & Mappings Inspector on right).
+- **Problem Statement**: The current API Sandbox is tightly coupled to the local database `SERVICES_PIPELINE` table (requiring an existing record ID). If a service payload attribute (such as `episodeId`) was not already mapped into a dedicated SQLite column, the record context lacks the variable, causing endpoint template tests to fail with "Missing placeholder".
+- **Architectural Solution & Tasks**:
+  1. **Database Decoupling & Upstream Payload Sampling**:
+     - Untether the Sandbox from requiring an existing `SERVICES_PIPELINE` row ID.
+     - Allow testing secondary enrichment endpoints against live upstream service samples (e.g. fetching the latest record from `/api/v3/history` or pasting arbitrary sample JSON).
+  2. **Upstream Attribute Explorer & Placeholder Verification**:
+     - Provide a dedicated payload inspector displaying all real upstream keys and dot-notation paths (`episodeId`, `seriesId`, `data.importedPath`, etc.).
+     - Allow operators to test placeholder replacements (`{episodeId}`, `{seriesId}`) directly against the raw upstream payload before saving field mappings.
+  3. **Visual & Split-Pane Refactor (`SandboxPage.js`)**:
+     - Retain split-pane UI (Request Configurator on left, Response & Mappings Inspector on right).
      - Fix CSS styling inconsistencies, card borders, contrast ratios, and dark theme alignment.
      - Implement structured tree visualizer for nested JSON payloads with one-click path copying (e.g. `series.title`, `data.id`).
+     - Direct "+ Map to Column" action shortcuts from discovered attributes into Field Mappings.
      - Integrate live feedback for predicate and transformer evaluation directly inside the sandbox view.
 
 ---
@@ -121,7 +128,34 @@
 
 ---
 
-### 3.6 CORE-02: Multi-Pipeline Dynamic Registry & Scoped DAG Progression Engine (`v0.2.0` - Phase 2)
+### 3.6 CORE-04: Accumulative JSON List Merging & Deduplication (`v0.1.9`)
+- **Objective**: Support appending single scalar values or lists into existing JSON array columns without overwriting existing data, automatically filtering duplicates.
+- **Problem Statement**: Currently, `merge_field_value` only merges when both incoming and existing values are already JSON lists. If an incoming value is a single scalar (e.g. an individual title string `"Title 2"`), it overwrites the existing list `'["Title 1"]'` instead of appending to it.
+- **Tasks**:
+  1. **Universal List Coercion in `merge_field_value`**:
+     - When target column holds a JSON list (e.g. `'["item1"]'`), treat incoming scalar values as single-item lists `[new_val]` and append them to the existing array.
+     - Apply case-insensitive deduplication across all items and serialize back to clean JSON array string.
+  2. **Explicit Accumulative / Set Mapping Option**:
+     - Provide an option or data type (e.g. `JSON_LIST` or "Accumulate (Set)") in `MappingModal.js` so single values from recurring events can accumulate into a persistent set rather than replacing previous entries.
+
+---
+
+### 3.7 STG-04: Stage-Scoped Field Mapping Selection & Granular Column Execution (`v0.1.9`)
+- **Objective**: Allow stages to select and execute specific subsets of a service's field mappings rather than applying all service mappings indiscriminately.
+- **Problem Statement**: Currently, when a service is assigned to a stage via `service_ids`, the scheduler executes all of that service's field mappings. If an operator wants to define multiple stages using the same service (e.g. an initial recognition stage versus a downstream status or deletion update stage), there is no way to restrict which columns are updated in which stage, leading to unintended overwrites or inability to target specific columns in specific lifecycle stages.
+- **Tasks**:
+  1. **Stage Configuration Schema Enhancement (`src/core/config.py`)**:
+     - Update `StageConfig` to support granular service mapping scopes: e.g. `service_mapping_scopes: Dict[str, list[str]] = Field(default_factory=dict)` mapping `service_id` to an optional list of allowed `target_column`s for that stage (empty or unset = all mappings allowed).
+  2. **Granular Mapping Evaluation in Scheduler (`src/core/scheduler.py`)**:
+     - In `_update_mapped_values_for_stage` and `_execute_consumer_enrichment`, accept the active stage's allowed mapping scope for the service.
+     - Filter `service_cfg.field_mappings` so that only mappings whose `target_column` is in the stage's scope are evaluated and merged.
+  3. **WebUI Granular Scope Selector (`frontend/src/features/settings/ui/StageModal.js`)**:
+     - When a service is checked in `StageModal.js`, render a collapsible/expandable checklist showing all configured field mappings of that service.
+     - Allow operators to check/uncheck which specific mapped columns should update in this stage.
+
+---
+
+### 3.8 CORE-02: Multi-Pipeline Dynamic Registry & Scoped DAG Progression Engine (`v0.2.0` - Phase 2)
 - **Objective**: Upgrade from single `SERVICES_PIPELINE` to multi-pipeline dynamic architecture.
 - **Dependencies**: Requires stabilization of single-pipeline stage mechanics (`STG-01` through `STG-03`) and developer sandbox tooling (`SBX-01`).
 - **Tasks**:
@@ -142,7 +176,7 @@
 
 ---
 
-### 3.7 VIEW-01: Dual-Mode Table & View Builder (`v0.3.0` - Phase 3)
+### 3.9 VIEW-01: Dual-Mode Table & View Builder (`v0.3.0` - Phase 3)
 - **Objective**: Allow operators to create both virtual SQL views and persistent materialized destination tables.
 - **Tasks**:
   1. Support two dataset types:
@@ -152,7 +186,7 @@
 
 ---
 
-### 3.8 API-02: Tier 3 Guided Remediation API (`v0.4.0` - Phase 4)
+### 3.10 API-02: Tier 3 Guided Remediation API (`v0.4.0` - Phase 4)
 - **Objective**: Complete Tier 3 LLM tool suite for LibreChat / Ollama with safe remediation handoff.
 - **Tasks**:
   1. Implement `POST /api/v1/meta/remediate`:
@@ -164,7 +198,7 @@
 
 ---
 
-### 3.9 UX-02 & CFG-01: Guided Setup Flow & Out-of-the-Box Presets (`v0.5.0` - Phase 5)
+### 3.11 UX-02 & CFG-01: Guided Setup Flow & Out-of-the-Box Presets (`v0.5.0` - Phase 5)
 - **Objective**: Enable zero-friction initial setup for new installations.
 - **Tasks**:
   1. Add built-in service presets for Sonarr, Radarr, Shoko, and Jellyfin with pre-configured endpoints and mappings.
@@ -172,7 +206,7 @@
 
 ---
 
-### 3.10 DB-01: Granular Ingestion Log Audit & Telemetry Timing (`v0.6.0` - Phase 6)
+### 3.12 DB-01: Granular Ingestion Log Audit & Telemetry Timing (`v0.6.0` - Phase 6)
 - **Objective**: Ingestion performance observability.
 - **Tasks**:
   1. Record execution duration in milliseconds for each service loop and secondary enrichment query.
@@ -180,7 +214,7 @@
 
 ---
 
-### 3.11 Production MVP Release Gate (`v1.0.0`)
+### 3.13 Production MVP Release Gate (`v1.0.0`)
 - **Criteria**:
   - All Phases 1 through 6 completed and verified.
   - 100% test pass rate with automated integration suites.

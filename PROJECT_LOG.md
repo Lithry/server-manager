@@ -575,4 +575,53 @@ This log maintains cross-session operational continuity, recording architectural
 - `src/core/scheduler.py`
 - `PROJECT_LOG.md`
 
+---
+
+## Session Milestone: 2026-10-16 — DOC-06: Backlog Synchronization for SBX-01 Upstream Decoupling & CORE-04 Accumulative JSON Lists
+
+### Role & Agent Assignment
+- **Technical Documentation Specialist (`Role 5`)**: Synchronized canonical project backlog in `docs/BACKLOG.md` reflecting operator directives for SBX-01 (API Sandbox database decoupling and raw payload attribute explorer) and CORE-04 (Accumulative JSON list merging and deduplication).
+
+### Documentation Decisions & Changes Applied
+1. **API Sandbox Decoupling & Upstream Inspection (`docs/BACKLOG.md` - Section 3.3 SBX-01)**:
+   - Formulated explicit problem statement detailing Sandbox coupling to `SERVICES_PIPELINE` row IDs and missing placeholder errors when upstream attributes (e.g. `episodeId`) are not pre-mapped into SQLite columns.
+   - Expanded task breakdown:
+     * Untethering the sandbox from mandatory `SERVICES_PIPELINE` rows and enabling live upstream sample testing (e.g. `/api/v3/history`) or manual JSON pasting.
+     * Incorporating an Upstream Attribute Explorer displaying real keys and dot-notation paths with direct placeholder replacement tests.
+     * Split-pane visual refactor in `SandboxPage.js` with direct "+ Map to Column" shortcuts.
+2. **Accumulative JSON List Merging & Deduplication (`docs/BACKLOG.md` - Table 2 & Section 3.6 CORE-04)**:
+   - Registered `CORE-04` in Priority Overview Matrix under `P2 (Medium)`, targeting Phase 1 (`v0.1.9`).
+   - Defined detailed work package `3.6 CORE-04: Accumulative JSON List Merging & Deduplication (v0.1.9)`:
+     * Universal list coercion in `merge_field_value` when target column holds a JSON list, treating scalar values as single-item lists `[new_val]` and appending them with case-insensitive deduplication.
+     * Explicit accumulative / set mapping option in `MappingModal.js`.
+   - Incrementally renumbered subsequent Phase 2–6 packages (`3.7` through `3.12`).
+
+### Files Modified
+- `docs/BACKLOG.md`
+- `PROJECT_LOG.md`
+
+---
+
+## Session Milestone: 2026-10-16 — DOC-07: Backlog Synchronization for STG-04 Granular Stage-Scoped Field Mappings
+
+### Role & Agent Assignment
+- **Technical Documentation Specialist (`Role 5`)**: Synchronized canonical project backlog in `docs/BACKLOG.md` reflecting architectural requirements for `STG-04` (Stage-Scoped Field Mapping Selection & Granular Column Execution).
+
+### Documentation Decisions & Changes Applied
+1. **Priority Overview Matrix Update (`docs/BACKLOG.md` - Table 2)**:
+   - Registered `STG-04` under Phase 1 (`v0.1.9`) with priority `P2 (Medium)` in the Core / WebUI domain, status `PLANNED 📅`.
+2. **Detailed Work Package (`docs/BACKLOG.md` - Section 3.7 STG-04)**:
+   - Defined work package `3.7 STG-04: Stage-Scoped Field Mapping Selection & Granular Column Execution (v0.1.9)`.
+   - Documented explicit problem statement regarding indiscriminate execution of all service field mappings within stages and column overwrite hazards across multi-stage lifecycles.
+   - Specified tasks:
+     * Stage configuration schema enhancement (`src/core/config.py`): `service_mapping_scopes` dictionary mapping service IDs to permitted target columns.
+     * Granular mapping evaluation in scheduler (`src/core/scheduler.py`): stage-scoped filtering in `_update_mapped_values_for_stage` and `_execute_consumer_enrichment`.
+     * WebUI granular scope selector (`frontend/src/features/settings/ui/StageModal.js`): collapsible mapping checklist per checked service.
+   - Incrementally renumbered subsequent packages `3.7` through `3.12` to `3.8` through `3.13`.
+
+### Files Modified
+- `docs/BACKLOG.md`
+- `PROJECT_LOG.md`
+
+
 
