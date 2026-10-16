@@ -623,5 +623,40 @@ This log maintains cross-session operational continuity, recording architectural
 - `docs/BACKLOG.md`
 - `PROJECT_LOG.md`
 
+---
+
+## Session Milestone: 2026-10-16 — CORE-04: Accumulative JSON List Extraction, Merging, and Type Safety (v0.1.9)
+
+### Role & Agent Assignment
+- **Backend Systems Engineer (`Role 2`)**: Implemented mandatory `[*]` syntax for array traversal, terminal scalar wrapping `[*]` in `extract_dotted_value`, JSON list detection helper `is_json_list`, strict type-boundary validation and case-insensitive deduplication in `merge_field_value`, and list pre-coercion in ingestion and consumer loops (`src/core/scheduler.py`). Updated `flatten_json_keys` in `src/api/pipeline.py` to annotate array paths with `[*]`.
+- **QA & Integration Tester (`Role 4`)**: Authored comprehensive 9-case test suite (`tests/test_core04_list_merging.py`) validating list extraction, intermediate projection, scalar wrapping, deduplication, and rejection of type-mismatched updates.
+- **Technical Documentation Specialist (`Role 5`)**: Updated `PROJECT_LOG.md`, `docs/BACKLOG.md`, `docs/ARCHITECTURE.md`, and `docs/BACKEND_SPEC.md` to reflect system-wide canonical alignment.
+
+### Architectural Decisions & Changes Applied
+1. **Mandatory Array Traversal Syntax (`src/core/scheduler.py` - `extract_dotted_value`)**:
+   - Disallowed implicit list traversal. Extracting nested properties through list structures now strictly requires explicit `[*]` syntax (e.g. `tags[*].name`, `objeto[*].data`). Traversing arrays without explicit `[*]` or numeric index returns `None` to prevent unintended projections.
+   - Preserved zero-based integer index projection (e.g., `tags[0].name`, `tags.1.name`).
+2. **Terminal Scalar-to-List Wrapping (`src/core/scheduler.py` - `extract_dotted_value`)**:
+   - Added support for terminal `[*]` notation (e.g., `episode.title[*]`). When evaluated against scalar values (strings, integers, floats, booleans), automatically wraps the value into a single-element list `[val]`. If the source field is already a list, preserves it as-is. Returns `None` if the source field is missing or null.
+   - Enforced list pre-coercion across ingestion and consumer loops (`_poll_and_ingest()` and `_execute_consumer_enrichment()`) when a mapping ends with `[*]`, ensuring values enter storage as JSON lists.
+3. **Strict Type-Safe Merging & Deduplication (`src/core/scheduler.py` - `merge_field_value`, `is_json_list`)**:
+   - Added `is_json_list(val)` helper recognizing Python lists and JSON-encoded array strings.
+   - Enforced strict type preservation: prevents scalar values from overwriting existing list columns and prevents list values from overwriting existing scalar columns. Mismatches are safely rejected, retaining existing database values and emitting informative terminal warnings (`[!] Error: Field '{col_name}' for item '{item_id}' requires a list, but received incompatible scalar value: '{new_val}'. Update rejected.`).
+   - For list-to-list merging, performs exact, stripped-whitespace, and case-insensitive deduplication while preserving element insertion order and existing item formatting.
+4. **Upstream Schema Inspection Alignment (`src/api/pipeline.py` - `flatten_json_keys`)**:
+   - Updated JSON key flattener to format array paths with `[*]` notation (e.g. `tags[*].name`, `genres[*]`, `empty_list[*]`), synchronizing the WebUI attribute explorer with scheduler path syntax.
+5. **Automated Verification (`tests/test_core04_list_merging.py`)**:
+   - Developed and executed 9 unit tests covering terminal wrapping, intermediate projection, omission of `[*]`, `is_json_list` identification, list merging with case deduplication, scalar-into-list rejection, list-into-scalar rejection, scalar replacement, and key flattening. All 9 tests passed cleanly.
+
+### Files Modified & Created
+- `src/core/scheduler.py`
+- `src/api/pipeline.py`
+- `tests/test_core04_list_merging.py` (Created)
+- `docs/BACKLOG.md`
+- `docs/ARCHITECTURE.md`
+- `docs/BACKEND_SPEC.md`
+- `PROJECT_LOG.md`
+
+
 
 

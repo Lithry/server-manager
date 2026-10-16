@@ -166,12 +166,14 @@ src/
   - Scheduler fetches `/api/v3/tag` from upstream and caches `{id: label}` for 10 minutes.
   - Automatically resolves numeric tags to string labels (`['anime']`) during payload flattening.
 - **Nested List Projection (`extract_dotted_value`)**:
-  - Traverses nested objects and projects arrays (e.g. `movie.alternateTitles.title` $\rightarrow$ `["Sousou no Frieren", "Frieren: Beyond Journey's End"]`).
+  - Traverses nested objects and projects arrays using mandatory `[*]` syntax (e.g. `movie.alternateTitles[*].title` $\rightarrow$ `["Sousou no Frieren", "Frieren: Beyond Journey's End"]`). Traversal over arrays without explicit `[*]` or numeric index returns `None`.
+  - Supports terminal `[*]` syntax (e.g. `episode.title[*]`) to wrap scalar values into single-item lists `[val]` for accumulative list columns.
 - **Data Sanitization (`sanitize_and_serialize`)**:
   - Null normalization: empty lists (`[]`), empty strings (`""`), and whitespace convert to `NULL`.
   - Non-empty lists are deduplicated and serialized as JSON arrays.
 - **Cross-Service Array Merging (`merge_field_value`)**:
-  - Seamlessly merges downstream service array attributes into existing rows without clobbering prior values.
+  - Enforces strict type boundaries via `is_json_list` helper: safely rejects scalar updates into list columns and list updates into scalar columns with diagnostic error logging.
+  - Merges list-to-list with exact, stripped, and case-insensitive deduplication while preserving element insertion order.
 - **Stage Progression Engine (`reconcile_stages`)**:
   - **Grace Period Check**: Verifies if Stage 1 items have matured beyond `grace_period_minutes`.
   - **Watchdog Check**: Detects intermediate rows stalled longer than `timeout_minutes` and inserts `WARN_PIPELINE_STALLED` into `SYSTEM_INCIDENTS`.

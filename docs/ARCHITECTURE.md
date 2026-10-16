@@ -146,7 +146,9 @@ Primary events from services like Sonarr or Radarr (e.g., `/api/v3/history`) fre
 - This eliminates attribute collisions (such as `series.title` vs `episode.title`).
 
 ### 4.3 Generic Dotted-Path List Projection (`extract_dotted_value`)
-- Nested structures and arrays of objects are extracted using standard dotted paths (e.g., `movie.alternateTitles.title` or `[*]`).
+- Nested structures and arrays of objects are extracted using mandatory `[*]` array traversal syntax (e.g., `movie.alternateTitles[*].title`, `tags[*].name`, `genres[*]`). Traversal over arrays without explicit `[*]` returns `None` to prevent accidental projections.
+- Explicit index traversal (e.g., `tags[0].name` or `tags.1.name`) remains supported for specific element access.
+- Terminal `[*]` notation (e.g., `episode.title[*]`) deterministically coerces single scalar values into single-element lists (`[val]`), enabling safe ingestion into accumulative array columns.
 - The extractor projects across collections, producing clean scalar lists without intermediate scripts.
 
 ### 4.4 In-Memory Tag Cache
@@ -156,7 +158,7 @@ Primary events from services like Sonarr or Radarr (e.g., `/api/v3/history`) fre
 
 ### 4.5 Clean Database Principle & Cross-Service Array Merging
 - **Null Normalization**: Empty strings, empty lists, empty dictionaries, and whitespace strings normalize to SQL `NULL`, preventing `"[]"` or `""` dead rows.
-- **Cross-Service Deduplication**: Downstream consumer stages accumulating array data (e.g., alternative titles from Sonarr merged with Japanese titles from Shoko) use `merge_field_value` to deduplicate and store a unified JSON array.
+- **Type-Safe Merging & Deduplication**: Downstream consumer stages accumulating array data (e.g., alternative titles from Sonarr merged with Japanese titles from Shoko) use `merge_field_value` to deduplicate and store a unified JSON array. Strict type boundaries are enforced: scalar-to-list and list-to-scalar cross-updates are safely rejected with error telemetry, while list-to-list updates deduplicate with case-insensitive and stripped-whitespace matching while preserving insertion order.
 
 ---
 

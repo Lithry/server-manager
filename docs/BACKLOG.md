@@ -37,7 +37,7 @@
 | **SBX-01** | **P2 (Medium)** | WebUI / Tooling | API Sandbox Architectural Debate, Payload Inspector & Visual Refactor | Phase 1 (`v0.1.9`) | **PLANNED 📅** |
 | **LOG-01** | **P1 (High)** | WebUI / Observability | Dedicated Error Log View & Type Incompatibility Alerts | Phase 1 (`v0.1.9`) | **PLANNED 📅** |
 | **UX-03** | **P3 (Polish)** | WebUI / Tooling | Discrete Multi-Variable Context Inputs for Transformer Test Harness | Phase 1 (`v0.1.9`) | **PLANNED 📅** |
-| **CORE-04** | **P2 (Medium)** | Core / Storage | Accumulative JSON List Merging & Deduplication | Phase 1 (`v0.1.9`) | **PLANNED 📅** |
+| **CORE-04** | **P2 (Medium)** | Core / Storage | Accumulative JSON List Merging & Deduplication | Phase 1 (`v0.1.9`) | **COMPLETED ✓** |
 | **STG-04** | **P2 (Medium)** | Core / WebUI | Stage-Scoped Field Mapping Selection & Granular Column Execution | Phase 1 (`v0.1.9`) | **PLANNED 📅** |
 | **CORE-02** | **P1 (High)** | Core / Engine | Multi-Pipeline Dynamic Registry & Scoped DAG Progression Engine | Phase 2 (`v0.2.0`) | **PLANNED 📅** |
 | **API-01** | **P2 (Medium)** | Core / Presets | Shoko Server Verified API Schema & Presets | Phase 1 (`v0.1.6`) | **COMPLETED ✓** |
@@ -128,15 +128,23 @@
 
 ---
 
-### 3.6 CORE-04: Accumulative JSON List Merging & Deduplication (`v0.1.9`)
-- **Objective**: Support appending single scalar values or lists into existing JSON array columns without overwriting existing data, automatically filtering duplicates.
-- **Problem Statement**: Currently, `merge_field_value` only merges when both incoming and existing values are already JSON lists. If an incoming value is a single scalar (e.g. an individual title string `"Title 2"`), it overwrites the existing list `'["Title 1"]'` instead of appending to it.
-- **Tasks**:
-  1. **Universal List Coercion in `merge_field_value`**:
-     - When target column holds a JSON list (e.g. `'["item1"]'`), treat incoming scalar values as single-item lists `[new_val]` and append them to the existing array.
-     - Apply case-insensitive deduplication across all items and serialize back to clean JSON array string.
-  2. **Explicit Accumulative / Set Mapping Option**:
-     - Provide an option or data type (e.g. `JSON_LIST` or "Accumulate (Set)") in `MappingModal.js` so single values from recurring events can accumulate into a persistent set rather than replacing previous entries.
+### 3.6 CORE-04: Accumulative JSON List Extraction, Merging, and Type Safety (`v0.1.9`) [COMPLETED ✓]
+- **Objective**: Support extracting nested JSON array attributes, appending scalar values into accumulative list columns, and merging lists with deduplication and strict type boundaries.
+- **Architectural Solution & Implemented Changes**:
+  1. **Mandatory Array Traversal Syntax (`extract_dotted_value`)**:
+     - Enforce explicit `[*]` syntax (e.g., `tags[*].name`, `objeto[*].data`) for array projection; implicit array traversal without `[*]` returns `None` to prevent accidental projections.
+     - Retain zero-based numeric indexing (e.g., `tags[0].name`, `tags.1.name`).
+  2. **Terminal Scalar-to-List Wrapping (`[*]`)**:
+     - Support terminal `[*]` syntax on scalar paths (e.g., `episode.title[*]`) to wrap scalar values into single-item lists `[val]`.
+     - Ensures list pre-coercion in both root ingestion (`_poll_and_ingest`) and consumer enrichment (`_execute_consumer_enrichment`) when field mappings declare terminal `[*]`.
+  3. **JSON List Detection & Strict Type Integrity (`merge_field_value` & `is_json_list`)**:
+     - Implemented `is_json_list` helper detecting native Python lists and JSON-encoded array strings.
+     - Rejects scalar updates into list columns and list updates into scalar columns, preserving existing column values and emitting structured error diagnostics.
+     - Merges list-to-list with exact, whitespace-stripped, and case-insensitive deduplication while preserving element insertion order.
+  4. **Upstream Schema Inspection (`flatten_json_keys`)**:
+     - Formats discovered array paths with `[*]` notation (e.g., `tags[*].name`, `genres[*]`) in `src/api/pipeline.py`.
+  5. **Automated Test Suite**:
+     - Validated via 9 unit tests in `tests/test_core04_list_merging.py`.
 
 ---
 

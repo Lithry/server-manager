@@ -36,43 +36,72 @@ def _parse_timestamp(val: Any) -> Optional[datetime.datetime]:
 
 
 def extract_dotted_value(data: dict, path: str) -> Any:
-    """Extract nested value using dot notation, supporting list projection and numeric indexing."""
+    """Extract nested value using dot notation, supporting explicit list projection '[*]' and numeric indexing."""
     if not path or not isinstance(data, dict):
         return None
 
-    normalized_path = path.strip().replace("[*]", "")
-    parts = [p for p in normalized_path.split(".") if p]
+    clean_path = path.strip()
+    is_terminal_star = clean_path.endswith("[*]")
+    if is_terminal_star:
+        clean_path = clean_path[:-3].rstrip(".")
+
+    tokens: List[str] = []
+    if clean_path:
+        for m in re.finditer(r"\[\*\]|\[(\d+)\]|([^\.\[\]]+)", clean_path):
+            if m.group(0) == "[*]":
+                tokens.append("[*]")
+            elif m.group(1) is not None:
+                tokens.append(m.group(1))
+            else:
+                tokens.append(m.group(2))
 
     def _resolve(curr: Any, remaining: List[str]) -> Any:
         if not remaining:
             return curr
 
-        part = remaining[0]
+        token = remaining[0]
         rest = remaining[1:]
 
         if isinstance(curr, dict):
-            if part in curr:
-                return _resolve(curr[part], rest)
+            if token == "[*]":
+                return None
+            if token in curr:
+                return _resolve(curr[token], rest)
             return None
 
         elif isinstance(curr, list):
-            if part.isdigit():
-                idx = int(part)
+            if token == "[*]":
+                if not rest:
+                    return curr
+                projected = []
+                for item in curr:
+                    res = _resolve(item, rest)
+                    if res is not None:
+                        projected.append(res)
+                return projected if projected else None
+            elif token.isdigit():
+                idx = int(token)
                 if 0 <= idx < len(curr):
                     return _resolve(curr[idx], rest)
                 return None
             else:
-                # Project over all items in the list
-                projected = []
-                for item in curr:
-                    res = _resolve(item, [part] + rest)
-                    if res is not None:
-                        projected.append(res)
-                return projected if projected else None
+                # Do not project automatically across a list without explicit '[*]' or numeric index
+                return None
 
         return None
 
-    return _resolve(data, parts)
+    res = _resolve(data, tokens) if tokens else None
+
+    if is_terminal_star:
+        if res is None:
+            return None
+        if isinstance(res, list):
+            return res
+        if isinstance(res, (str, int, float, bool)):
+            return [res]
+        return [res]
+
+    return res
 
 
 def sanitize_and_serialize(val: Any) -> Any:
@@ -108,11 +137,34 @@ def sanitize_and_serialize(val: Any) -> Any:
     return val
 
 
-def merge_field_value(existing_val: Any, new_val: Any) -> Any:
-    """Merge an incoming field value into an existing database value.
-    If new_val is empty, preserves existing_val.
-    If both are lists/JSON arrays, merges them deduplicating items.
+def is_json_list(v: Any) -> tuple[bool, Optional[List[Any]]]:
+    """Helper that returns (True, list_obj) if v is a Python list or a string
+    starting with '[' and ending with ']' that successfully parses as a JSON list.
+    Otherwise returns (False, None).
     """
+    if isinstance(v, list):
+        return (True, v)
+    if isinstance(v, str):
+        stripped = v.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            try:
+                parsed = json.loads(stripped)
+                if isinstance(parsed, list):
+                    return (True, parsed)
+            except Exception:
+                pass
+    return (False, None)
+
+
+def merge_field_value(existing_val: Any, new_val: Any, col_name: str = "", item_id: str = "") -> Any:
+    """Merge an incoming field value into an existing database value with type safety.
+    Preserves existing_val if new_val is None.
+    Accepts new_val if existing_val is None.
+    Enforces list/scalar type integrity and merges JSON lists deduplicating items.
+    """
+    if new_val is None:
+        return existing_val
+
     sanitized_new = sanitize_and_serialize(new_val)
     if sanitized_new is None:
         return existing_val
@@ -120,34 +172,40 @@ def merge_field_value(existing_val: Any, new_val: Any) -> Any:
     if existing_val is None:
         return sanitized_new
 
-    def _to_list(v: Any) -> Optional[List[Any]]:
-        if isinstance(v, list):
-            return v
-        if isinstance(v, str) and v.startswith("[") and v.endswith("]"):
-            try:
-                parsed = json.loads(v)
-                if isinstance(parsed, list):
-                    return parsed
-            except Exception:
-                pass
-        return None
+    existing_is_list, existing_list_items = is_json_list(existing_val)
+    new_is_list, new_list_items = is_json_list(new_val)
 
-    existing_list = _to_list(existing_val)
-    new_list = _to_list(sanitized_new)
+    if existing_is_list:
+        if not new_is_list:
+            print(f"[!] Error: Field '{col_name}' for item '{item_id}' requires a list, but received incompatible scalar value: '{new_val}'. Update rejected.")
+            return existing_val
 
-    if existing_list is not None and new_list is not None:
         seen = set()
         merged = []
-        for item in existing_list + new_list:
-            if item is None or (isinstance(item, str) and not item.strip()):
+        for item in (existing_list_items or []) + (new_list_items or []):
+            if item is None:
                 continue
-            key = item.strip().lower() if isinstance(item, str) else str(item)
-            if key not in seen:
-                seen.add(key)
-                merged.append(item.strip() if isinstance(item, str) else item)
+            if isinstance(item, str):
+                cleaned = item.strip()
+                if not cleaned:
+                    continue
+                key = cleaned.lower()
+                if key not in seen:
+                    seen.add(key)
+                    merged.append(cleaned)
+            else:
+                key = str(item)
+                if key not in seen:
+                    seen.add(key)
+                    merged.append(item)
         return json.dumps(merged, ensure_ascii=False) if merged else None
 
-    return sanitized_new
+    else:
+        # existing_val is a scalar
+        if new_is_list:
+            print(f"[!] Error: Field '{col_name}' for item '{item_id}' is a scalar, but received incompatible list value. Update rejected.")
+            return existing_val
+        return sanitized_new
 
 
 def coerce_value_to_type(val: Any, data_type: str, col_name: str = "", item_identifier: str = "") -> tuple[bool, Any]:
@@ -563,6 +621,9 @@ class TaskScheduler:
                             except Exception:
                                 pass
 
+                        if mapping.source_field.strip().endswith("[*]") and val is not None and not isinstance(val, list):
+                            val = [val]
+
                         data_type = getattr(mapping, "data_type", "TEXT") or "TEXT"
                         ok, coerced_val = coerce_value_to_type(val, data_type, col_name=col_name, item_identifier=pipeline_key)
                         if not ok:
@@ -572,7 +633,7 @@ class TaskScheduler:
                             existing_val = existing_row.get(col_name)
                             if existing_val is None:
                                 existing_val = existing_row.get(col_name.lower())
-                            merged_val = merge_field_value(existing_val, coerced_val)
+                            merged_val = merge_field_value(existing_val, coerced_val, col_name=col_name, item_id=pipeline_key)
                             mapped_fields[col_name] = merged_val
                         else:
                             mapped_fields[col_name] = coerced_val
@@ -699,6 +760,9 @@ class TaskScheduler:
                 except Exception:
                     pass
 
+            if mapping.source_field.strip().endswith("[*]") and val is not None and not isinstance(val, list):
+                val = [val]
+
             existing_val = row_dict.get(col_name)
             data_type = getattr(mapping, "data_type", "TEXT") or "TEXT"
             item_id = str(row_dict.get("PIPELINE_KEY") or row_dict.get("ID"))
@@ -706,7 +770,7 @@ class TaskScheduler:
             if not ok:
                 continue
 
-            mapped_fields[col_name] = merge_field_value(existing_val, coerced_val)
+            mapped_fields[col_name] = merge_field_value(existing_val, coerced_val, col_name=col_name, item_id=item_id)
 
         has_changes = any(row_dict.get(k) != v for k, v in mapped_fields.items())
         if mapped_fields and has_changes:
