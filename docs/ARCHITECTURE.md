@@ -1,6 +1,6 @@
 # ServerManager Platform Architecture & System Blueprint
 
-**Document Version:** `v0.1.7`  
+**Document Version:** `v0.1.9`  
 **Appliance Port:** `8099`  
 **Primary Architecture:** Containerized FastAPI + SQLite WAL + Modular ES / `lit-html` WebUI  
 **Status:** Living Architectural Specification  
@@ -227,6 +227,14 @@ Predicates and conditional transformers are parsed and evaluated using Python's 
   Prevents downstream stages from processing files while they are still being unpacked or transferred.
 - **Stage Watchdog Timeout (`timeout_minutes`, default 30m)**:
   If a row remains in `PENDING` state within an intermediate stage longer than the configured timeout, the watchdog emits a normalized `WARN_PIPELINE_STALLED` incident.
+
+### 5.5 Granular Stage-Scoped Field Mapping Selection (`service_mapping_scopes`)
+Stages can selectively restrict which field mappings of an assigned service are evaluated during execution, preventing unintended column overwrites across different lifecycle stages sharing the same service.
+- **Scope Model**: Configured via `service_mapping_scopes: Dict[str, list[str]]` on `StageConfig`, mapping `service_id` to a list of allowed uppercase column names (`target_column`).
+- **Default Fallback**: If a service key is omitted or contains an empty list, the engine evaluates all configured mappings for that service.
+- **Root Ingestion Scoping**: During initial root stage polling (`trigger_now`), only mapped attributes whose destination column is included in the active root stage's scope are inserted; unscoped columns remain `NULL`.
+- **Consumer Enrichment Scoping**: During intermediate enrichment (`_update_mapped_values_for_stage` and `_execute_consumer_enrichment`), secondary endpoint placeholders are resolved, but only fields matching the stage's allowed scope are calculated, coerced, merged, and updated in the database. Unscoped columns are skipped and preserved.
+- **Schema Sanitization & Rename Propagation**: When settings are saved, orphaned service keys and unmapped columns are automatically pruned from scopes. When an operator renames a target column in service settings, the rename is propagated into all referencing stage scopes automatically.
 
 ---
 

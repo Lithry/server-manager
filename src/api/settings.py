@@ -100,6 +100,16 @@ async def update_settings(settings: Settings) -> Settings:
                 new_target = (new_map.target_column or "").strip().upper()
 
                 if old_target and new_target and old_target != new_target:
+                    # Update matching column names inside stage.service_mapping_scopes for all stages
+                    for stage in settings.stages:
+                        if stage.service_mapping_scopes:
+                            for scope_sid, cols in list(stage.service_mapping_scopes.items()):
+                                if cols and (old_target in cols or any(isinstance(c, str) and c.strip().upper() == old_target for c in cols)):
+                                    stage.service_mapping_scopes[scope_sid] = [
+                                        new_target if (isinstance(c, str) and (c == old_target or c.strip().upper() == old_target)) else c
+                                        for c in cols
+                                    ]
+
                     if old_target not in all_new_targets and old_target in existing_table_cols:
                         try:
                             if new_target not in existing_table_cols:
@@ -115,7 +125,35 @@ async def update_settings(settings: Settings) -> Settings:
                         except Exception as e:
                             print(f"[!] Warning auto-migrating column {old_target} -> {new_target}: {e}")
 
-    # 4. Auto-ensure dynamic columns in SERVICES_PIPELINE for all field mappings
+    # 4. Sanitize stage service mapping scopes before saving
+    for stage in settings.stages:
+        if stage.service_mapping_scopes:
+            sanitized_scopes: Dict[str, list[str]] = {}
+            for s_key, cols in list(stage.service_mapping_scopes.items()):
+                if s_key not in stage.service_ids or s_key not in services_dict:
+                    continue
+
+                valid_cols = {
+                    (m.target_column or "").strip().upper()
+                    for m in services_dict[s_key].field_mappings
+                    if m.target_column
+                }
+                cleaned_cols: list[str] = []
+                seen_cols: set[str] = set()
+                for c in cols or []:
+                    if not c or not isinstance(c, str):
+                        continue
+                    c_norm = c.strip().upper()
+                    if c_norm in valid_cols and c_norm not in seen_cols:
+                        seen_cols.add(c_norm)
+                        cleaned_cols.append(c_norm)
+
+                if cleaned_cols:
+                    sanitized_scopes[s_key] = cleaned_cols
+
+            stage.service_mapping_scopes = sanitized_scopes
+
+    # 5. Auto-ensure dynamic columns in SERVICES_PIPELINE for all field mappings
     await db_manager.sync_dynamic_columns(services_dict)
 
     updated = await config_manager.update_settings(settings)

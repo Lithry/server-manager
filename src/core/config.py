@@ -17,6 +17,7 @@ class StageConfig(BaseModel):
     grace_period_minutes: int = 10
     timeout_minutes: int = 30
     service_ids: list[str] = Field(default_factory=list)  # Assigned service IDs (M:N)
+    service_mapping_scopes: Dict[str, list[str]] = Field(default_factory=dict)
     enabled: bool = False
     last_activated_at: str | None = None  # ISO timestamp recorded when stage is toggled active
 

@@ -516,6 +516,12 @@ class TaskScheduler:
             for active_stage in active_root_stages:
                 stage_activated_dt = _parse_timestamp(active_stage.last_activated_at) if active_stage.last_activated_at else None
 
+                allowed_cols: Optional[set[str]] = None
+                if getattr(active_stage, "service_mapping_scopes", None) and service_id in active_stage.service_mapping_scopes:
+                    raw_scope = active_stage.service_mapping_scopes[service_id]
+                    if raw_scope:
+                        allowed_cols = {c.strip().upper() for c in raw_scope if c and c.strip()}
+
                 for rec in records:
                     if not isinstance(rec, dict):
                         continue
@@ -611,6 +617,9 @@ class TaskScheduler:
                         if col_name in SYSTEM_RESERVED_COLUMNS or col_name not in table_cols:
                             continue
 
+                        if allowed_cols is not None and col_name not in allowed_cols:
+                            continue
+
                         val = extract_dotted_value(context_dict, mapping.source_field)
                         if val is None:
                             val = context_dict.get(mapping.source_field)
@@ -680,7 +689,12 @@ class TaskScheduler:
             return self._status[service_id]
 
     async def _execute_consumer_enrichment(
-        self, service_cfg: Any, row_dict: Dict[str, Any], table_cols: set, service_id: Optional[str] = None
+        self,
+        service_cfg: Any,
+        row_dict: Dict[str, Any],
+        table_cols: set,
+        service_id: Optional[str] = None,
+        allowed_columns: Optional[set[str]] = None,
     ) -> bool:
         """Execute enrichment endpoints and apply field mappings for an existing row."""
         endpoints_to_query: Dict[str, str] = dict(service_cfg.enrichment_endpoints or {})
@@ -750,6 +764,9 @@ class TaskScheduler:
             if col_name in SYSTEM_RESERVED_COLUMNS or col_name not in table_cols:
                 continue
 
+            if allowed_columns is not None and col_name not in allowed_columns:
+                continue
+
             val = extract_dotted_value(context_dict, mapping.source_field)
             if val is None:
                 val = context_dict.get(mapping.source_field)
@@ -797,6 +814,12 @@ class TaskScheduler:
             if not service_cfg or not service_cfg.enabled:
                 continue
 
+            allowed_cols: Optional[set[str]] = None
+            if getattr(stage, "service_mapping_scopes", None) and s_id in stage.service_mapping_scopes:
+                raw_scope = stage.service_mapping_scopes[s_id]
+                if raw_scope:
+                    allowed_cols = {c.strip().upper() for c in raw_scope if c and c.strip()}
+
             try:
                 # Re-query row to ensure latest mapped columns are available for subsequent services
                 current_rows = await db_manager.query(
@@ -806,7 +829,9 @@ class TaskScheduler:
                 if not current_rows:
                     break
                 row_dict = dict(current_rows[0])
-                updated = await self._execute_consumer_enrichment(service_cfg, row_dict, table_cols, service_id=s_id)
+                updated = await self._execute_consumer_enrichment(
+                    service_cfg, row_dict, table_cols, service_id=s_id, allowed_columns=allowed_cols
+                )
                 if updated:
                     updated_any = True
             except Exception as enrich_err:

@@ -2,7 +2,7 @@
 
 **Appliance:** `server-manager` (Universal Telemetry & Cross-Service Pipeline)  
 **Tracking Repository:** `Lithry/server-manager.git`  
-**Current Baseline Version:** `v0.1.8`  
+**Current Baseline Version:** `v0.1.9`  
 **Status:** Living Technical Backlog  
 **Language Standard:** English (Universal Codebase Standard)
 
@@ -38,7 +38,7 @@
 | **LOG-01** | **P1 (High)** | WebUI / Observability | Dedicated Error Log View & Type Incompatibility Alerts | Phase 1 (`v0.1.9`) | **PLANNED 📅** |
 | **UX-03** | **P3 (Polish)** | WebUI / Tooling | Discrete Multi-Variable Context Inputs for Transformer Test Harness | Phase 1 (`v0.1.9`) | **PLANNED 📅** |
 | **CORE-04** | **P2 (Medium)** | Core / Storage | Accumulative JSON List Merging & Deduplication | Phase 1 (`v0.1.9`) | **COMPLETED ✓** |
-| **STG-04** | **P2 (Medium)** | Core / WebUI | Stage-Scoped Field Mapping Selection & Granular Column Execution | Phase 1 (`v0.1.9`) | **PLANNED 📅** |
+| **STG-04** | **P2 (Medium)** | Core / WebUI | Stage-Scoped Field Mapping Selection & Granular Column Execution | Phase 1 (`v0.1.9`) | **COMPLETED ✓** |
 | **CORE-02** | **P1 (High)** | Core / Engine | Multi-Pipeline Dynamic Registry & Scoped DAG Progression Engine | Phase 2 (`v0.2.0`) | **PLANNED 📅** |
 | **API-01** | **P2 (Medium)** | Core / Presets | Shoko Server Verified API Schema & Presets | Phase 1 (`v0.1.6`) | **COMPLETED ✓** |
 | **API-02** | **P2 (Medium)** | LLM / Telemetry | Tier 3 Guided Remediation API (`/api/v1/meta/remediate`) | Phase 4 (`v0.4.0`) | **PLANNED 📅** |
@@ -148,18 +148,24 @@
 
 ---
 
-### 3.7 STG-04: Stage-Scoped Field Mapping Selection & Granular Column Execution (`v0.1.9`)
+### 3.7 STG-04: Stage-Scoped Field Mapping Selection & Granular Column Execution (`v0.1.9`) [COMPLETED ✓]
 - **Objective**: Allow stages to select and execute specific subsets of a service's field mappings rather than applying all service mappings indiscriminately.
-- **Problem Statement**: Currently, when a service is assigned to a stage via `service_ids`, the scheduler executes all of that service's field mappings. If an operator wants to define multiple stages using the same service (e.g. an initial recognition stage versus a downstream status or deletion update stage), there is no way to restrict which columns are updated in which stage, leading to unintended overwrites or inability to target specific columns in specific lifecycle stages.
-- **Tasks**:
+- **Architectural Solution & Implemented Changes**:
   1. **Stage Configuration Schema Enhancement (`src/core/config.py`)**:
-     - Update `StageConfig` to support granular service mapping scopes: e.g. `service_mapping_scopes: Dict[str, list[str]] = Field(default_factory=dict)` mapping `service_id` to an optional list of allowed `target_column`s for that stage (empty or unset = all mappings allowed).
-  2. **Granular Mapping Evaluation in Scheduler (`src/core/scheduler.py`)**:
-     - In `_update_mapped_values_for_stage` and `_execute_consumer_enrichment`, accept the active stage's allowed mapping scope for the service.
-     - Filter `service_cfg.field_mappings` so that only mappings whose `target_column` is in the stage's scope are evaluated and merged.
-  3. **WebUI Granular Scope Selector (`frontend/src/features/settings/ui/StageModal.js`)**:
-     - When a service is checked in `StageModal.js`, render a collapsible/expandable checklist showing all configured field mappings of that service.
-     - Allow operators to check/uncheck which specific mapped columns should update in this stage.
+     - Extended `StageConfig` with `service_mapping_scopes: Dict[str, list[str]] = Field(default_factory=dict)` mapping `service_id` to allowed `target_column` names for that stage.
+     - Guaranteed empty dictionary default behavior ensuring full backward compatibility for unconfigured stages (empty or omitted scope = all field mappings active). [✓ COMPLETED]
+  2. **Granular Execution Engine in Scheduler (`src/core/scheduler.py`)**:
+     - In `trigger_now` (root ingestion), resolves `allowed_cols` for each active root stage and restricts incoming payload mapping strictly to scoped columns; unscoped columns remain `NULL`. [✓ COMPLETED]
+     - In `_update_mapped_values_for_stage` and `_execute_consumer_enrichment`, resolves `allowed_cols` per service and passes `allowed_columns` to consumer enrichment. Only scoped columns are evaluated, type-coerced, merged, and updated via SQL `UPDATE`; unscoped columns remain untouched. [✓ COMPLETED]
+  3. **Settings API Normalization, Scope Sanitization & Rename Propagation (`src/api/settings.py`)**:
+     - Automatically propagates column renames into `service_mapping_scopes` whenever a service mapping's `target_column` is edited. [✓ COMPLETED]
+     - Sanitizes scopes during save: prunes unassigned services or non-existent columns, uppercase-normalizes and deduplicates column names, and removes empty scopes so stages fall back cleanly to all-columns execution. [✓ COMPLETED]
+  4. **Modular WebUI Scope Selector (`ServiceScopeSelector.js` & `StageModal.js`)**:
+     - Extracted standalone `ServiceScopeSelector.js` (<120 lines) to preserve component boundaries (<250 lines in `StageModal.js`). [✓ COMPLETED]
+     - Renders native `<details>` accordions with Select All / Clear All controls, scoped column badges (`${checkedCount} of ${totalCount} active` or `All fields active by default`), and operator guidance. [✓ COMPLETED]
+     - Implemented `collectServiceMappingScopes` with clean default fallback (omits service key if 0 or all columns checked) and non-blocking modal UX. [✓ COMPLETED]
+  5. **Automated Verification**:
+     - Authored and verified 5 isolated unit and integration test cases in `tests/test_stg04_stage_mapping_scopes.py` (all 15 project tests passing cleanly in `0.43s`). [✓ COMPLETED]
 
 ---
 

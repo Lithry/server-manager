@@ -1,6 +1,6 @@
 # ServerManager Backend Architecture & Technical Specification
 
-**Current Version:** `v0.1.7`  
+**Current Version:** `v0.1.9`  
 **Runtime:** Python 3.12+ (Slim Container)  
 **Framework:** FastAPI + Uvicorn (ASGI)  
 **Database:** SQLite 3 in WAL Mode (`aiosqlite`)  
@@ -15,7 +15,7 @@
 
 ```
 src/
-├── __init__.py           # Package version definition (__version__ = "0.1.7")
+├── __init__.py           # Package version definition (__version__ = "0.1.9")
 ├── main.py               # Application entry point, lifespan management & routing
 ├── core/
 │   ├── __init__.py       # Core package marker
@@ -49,7 +49,7 @@ src/
   ```http
   GET /health
   ```
-  Returns `{ "status": "healthy", "app": "server-manager", "version": "0.1.7", "scheduler_running": true }`.
+  Returns `{ "status": "healthy", "app": "server-manager", "version": "0.1.9", "scheduler_running": true }`.
 
 ---
 
@@ -66,6 +66,7 @@ src/
     - `grace_period_minutes`: File stabilization delay before completing stage 1 (default: 10m).
     - `timeout_minutes`: Watchdog threshold before emitting `WARN_PIPELINE_STALLED` (default: 30m).
     - `service_ids`: List of assigned service keys (M:N mapping).
+    - `service_mapping_scopes`: Dictionary mapping `service_id` to a list of allowed `target_column`s for that stage (default: `{}`). Empty or omitted service key defaults to evaluating all mappings.
     - `enabled`: Stage activation toggle.
     - `last_activated_at`: ISO timestamp recorded when stage is toggled active.
   - `FieldMapping`:
@@ -86,6 +87,9 @@ src/
     - `channel`: `ntfy` or `webhook`.
     - `target_url`, `topic`, `priority`, `tags`, `message_template`.
   - `Settings`: Root configuration aggregate with retention, polling, stages, and services.
+- **Settings Normalization & Scope Sanitization (`src/api/settings.py`)**:
+  - Automatically synchronizes column renames into `service_mapping_scopes` across all stages when a target column is edited.
+  - Prunes unassigned services or non-existent columns during settings update, uppercase-normalizing and deduplicating entries. Removes empty scopes so stages fall back cleanly to all-columns execution.
 
 ---
 
@@ -174,6 +178,9 @@ src/
 - **Cross-Service Array Merging (`merge_field_value`)**:
   - Enforces strict type boundaries via `is_json_list` helper: safely rejects scalar updates into list columns and list updates into scalar columns with diagnostic error logging.
   - Merges list-to-list with exact, stripped, and case-insensitive deduplication while preserving element insertion order.
+- **Stage-Scoped Field Mapping Execution (`service_mapping_scopes`)**:
+  - **Root Stage Scoping (`trigger_now`)**: Extracts `allowed_cols = active_stage.service_mapping_scopes.get(service_id)`. If defined and non-empty, restricts evaluated field mappings to columns in `allowed_cols`. Unscoped attributes are not mapped, preserving `NULL`.
+  - **Consumer Enrichment Scoping (`_update_mapped_values_for_stage` & `_execute_consumer_enrichment`)**: Resolves `allowed_cols` per service from `stage.service_mapping_scopes` and passes `allowed_columns=allowed_cols` to consumer enrichment. Only scoped columns are computed, merged, and updated in SQLite. Unscoped columns are skipped and untouched.
 - **Stage Progression Engine (`reconcile_stages`)**:
   - **Grace Period Check**: Verifies if Stage 1 items have matured beyond `grace_period_minutes`.
   - **Watchdog Check**: Detects intermediate rows stalled longer than `timeout_minutes` and inserts `WARN_PIPELINE_STALLED` into `SYSTEM_INCIDENTS`.

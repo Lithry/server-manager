@@ -1,6 +1,6 @@
 # ServerManager Modular Frontend Architecture & Technical Specification
 
-**Current Version:** `v0.1.7` (REF-01 Phase Complete & Validated)  
+**Current Version:** `v0.1.9` (REF-01 Phase Complete & Validated)  
 **Core Technologies:** Native ES Modules + `lit-html` (v3.1.2) + Vite 5 + LightningCSS  
 **Self-Hosted Typography:** `@fontsource/inter` + `@fontsource/jetbrains-mono`  
 **Build Target:** `src/static/` (Delivered natively via FastAPI StaticFiles)  
@@ -48,7 +48,7 @@ frontend/
     │   ├── incidents/        # IncidentTable, CatalogTable, ReportIncidentModal, AddErrorModal
     │   ├── overview/         # OverviewPanel, telemetry cards & metrics
     │   ├── pipeline/         # PipelineTable, ManageColumnsModal, cell renderers
-    │   ├── settings/         # ServiceModal, StageModal, MappingModal, NotificationTriggerModal
+    │   ├── settings/         # ServiceModal, StageModal, ServiceScopeSelector, MappingModal, NotificationTriggerModal
     │   ├── tools/            # ToolList & live streaming ToolRunnerModal
     │   └── views/            # ViewList & dynamic SQL view query modal
     ├── pages/                # Page route views connecting features to layout
@@ -92,6 +92,14 @@ All UI elements utilize predefined styles and components rather than arbitrary a
 - **`DataTable`**: Universal responsive table component with sortable headers, column visibility toggling, pagination controls, and empty/loading states.
 - **`ConsoleOutput`**: ANSI-compatible live console runner for streaming Custom Tools output with auto-scrolling and lightweight status icons.
 - **`ConfirmDialog`**: Standardized confirmation prompt replacing native blocking `window.confirm()`.
+
+### 3.4 Feature Subcomponents & Modular Modals
+- **`ServiceScopeSelector` (`features/settings/ui/ServiceScopeSelector.js`)**:
+  - Standalone presentation and selection component (<120 lines) extracted to maintain the strict ~250 lines per module boundary in `StageModal.js`.
+  - Integrates native HTML5 `<details>` / `<summary>` accordions per assigned service.
+  - Dynamically computes and displays status badges: `(${checkedCount} of ${totalCount} active)` if scoped, or `All fields active by default` when unscoped.
+  - Controls: "Select All" and "Clear All" buttons, with inline guidance for operators.
+  - Exports `collectServiceMappingScopes` with clean default fallback: omits the service key from the resulting dictionary if 0 or all columns are checked, preserving the backend engine's default all-columns behavior without blocking alerts.
 
 ---
 

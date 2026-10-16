@@ -4,6 +4,7 @@ import { createStore } from '../../../shared/lib/lib.js';
 import { Modal } from '../../../shared/ui/organisms/Modal/Modal.js';
 import { queryCache } from '../../../shared/api/index.js';
 import { settingsKeys } from '../api.js';
+import { renderServiceListWithScopes, collectServiceMappingScopes } from './ServiceScopeSelector.js';
 
 // Local state for the modal to handle sink/root toggles
 const localStore = createStore({ isSink: false, isRoot: false });
@@ -54,11 +55,15 @@ export function createStageModal(store) {
         }
       }
 
+      const selectedServices = Array.from(document.querySelectorAll('input[name="stage-service"]:checked')).map(el => el.value);
+      const serviceMappingScopes = collectServiceMappingScopes(selectedServices, servicesData);
+
       const newStage = {
         id: stageId,
         name: document.getElementById('stage-name').value.trim() || stageId,
         description: document.getElementById('stage-desc').value.trim(),
-        service_ids: Array.from(document.querySelectorAll('input[name="stage-service"]:checked')).map(el => el.value),
+        service_ids: selectedServices,
+        service_mapping_scopes: serviceMappingScopes,
         start_condition: isRoot ? null : (document.getElementById('stage-start')?.value.trim() || null),
         complete_condition: isSink ? null : (document.getElementById('stage-complete')?.value.trim() || null),
         grace_period_minutes: parseInt(document.getElementById('stage-grace').value) || 0,
@@ -101,16 +106,9 @@ export function createStageModal(store) {
     </div>
 
     <div class="form-group u-mb-3">
-      <label>Assigned Services</label>
-      <div class="services-checkbox-grid" style="display: flex; gap: var(--space-3); flex-wrap: wrap; background: var(--color-bg-subtle); padding: var(--space-3); border-radius: var(--radius-sm); border: 1px solid var(--color-border);">
-        ${allServiceIds.length === 0 ? html`<span class="u-text-muted u-text-sm">No services configured.</span>` : allServiceIds.map(sid => html`
-          <label class="form-checkbox" style="cursor: pointer; padding: 4px 8px; background: var(--color-bg-card); border-radius: var(--radius-sm); border: 1px solid var(--color-border);">
-            <input type="checkbox" name="stage-service" value=${sid} ?checked=${editingStage?.service_ids?.includes(sid)}>
-            <span class="u-text-sm font-mono">${sid}</span>
-          </label>
-        `)}
-      </div>
-      <small class="u-text-muted">Select services operating within this pipeline stage.</small>
+      <label>Assigned Services & Field Scopes</label>
+      ${renderServiceListWithScopes(allServiceIds, servicesData, editingStage)}
+      <small class="u-text-muted u-mt-1" style="display: block;">Select services operating within this pipeline stage and optionally restrict mapped fields.</small>
     </div>
 
     <div style="background: var(--color-bg-subtle); padding: var(--space-3); border-radius: var(--radius-md); border: 1px solid var(--color-border);" class="u-mb-3">

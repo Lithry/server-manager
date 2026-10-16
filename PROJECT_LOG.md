@@ -683,6 +683,176 @@ This log maintains cross-session operational continuity, recording architectural
 - `src/static/assets/index-*.js`
 - `PROJECT_LOG.md`
 
+---
+
+## Session Milestone: 2026-10-16 — ARCH-04: Architectural Blueprint & Impact Analysis for STG-04 (Stage-Scoped Field Mappings)
+
+### Role & Agent Assignment
+- **Systems Architect & Governance (`Role 1`)**: Executed comprehensive pre-change impact analysis and authored end-to-end architectural specification for workpackage `STG-04` (Stage-Scoped Field Mapping Selection & Granular Column Execution).
+
+### Architectural Decisions & System Blueprint
+1. **Schema & Model Contract (`src/core/config.py` - `StageConfig`)**:
+   - Added `service_mapping_scopes: Dict[str, list[str]] = Field(default_factory=dict)` to `StageConfig`.
+   - Backward-compatibility contract: If a service is assigned in `service_ids` but omitted from `service_mapping_scopes` or declared with an empty list `[]`/`None`, the scheduler defaults to executing all configured field mappings for that service.
+   - Column identifiers within scopes are normalized to uppercase (`^[A-Z0-9_]+$`) ensuring exact matching against SQLite column identifiers.
+2. **Scheduler Execution Filtering (`src/core/scheduler.py`)**:
+   - Traced and specified exact filtering logic in both ingestion paths:
+     * **Root Stage Ingestion (`trigger_now`)**: For each active root stage, resolves `allowed_cols = active_stage.service_mapping_scopes.get(service_id)`. If present and non-empty, restricts mapping loop to columns in `allowed_cols`.
+     * **Consumer Stage Enrichment (`_update_mapped_values_for_stage` & `_execute_consumer_enrichment`)**: Resolves `allowed_cols` for each service from `stage.service_mapping_scopes.get(s_id)`. Passes `allowed_columns=allowed_cols` into `_execute_consumer_enrichment()`. Only scoped columns are computed, type-coerced, merged, and updated via SQL `UPDATE`. Unscoped columns remain intact.
+3. **Frontend Modularity & Subcomponent Extraction (`frontend/src/features/settings/`)**:
+   - Extracted `ServiceScopeSelector.js` (~95 lines) under `features/settings/ui/` to guarantee `StageModal.js` remains strictly under the ~250 lines per module boundary (Invariant 6).
+   - Utilizes native HTML5 `<details>` / `<summary>` tags for lightweight, zero-JS collapsible accordions under each assigned service.
+   - Supports Select All / Clear toggles and visual badges indicating scoped vs total columns (`N of M active`).
+   - Integrated validation in `handleSave` preventing assigned services from being saved with 0 columns selected.
+4. **Settings API Normalization & Orphan Cleanup (`src/api/settings.py`)**:
+   - In `update_settings`, added validation pass that prunes unassigned service keys and non-existent column names from `service_mapping_scopes`.
+   - Synchronizes column renames across `service_mapping_scopes` when a field mapping's target column is modified in service settings.
+
+### Canonical Documentation Alignment
+- Architectural specification ready for handoff to `backend-engineer` and `frontend-specialist`.
+
+### Files Modified
+- `PROJECT_LOG.md`
+
+---
+
+## Session Milestone: 2026-10-16 — STG-04: Backend Implementation of Stage-Scoped Field Mapping Selection & Granular Column Execution
+
+### Role & Agent Assignment
+- **Backend Systems Engineer (`Role 2`)**: Implemented backend schema extension, granular execution engine filtering in root ingestion and consumer enrichment, scope sanitization, and column rename synchronization.
+
+### Architectural Decisions & Changes Applied
+1. **Pydantic Schema Extension (`src/core/config.py`)**:
+   - Added `service_mapping_scopes: Dict[str, list[str]] = Field(default_factory=dict)` to `StageConfig`.
+   - Guaranteed empty dictionary default behavior ensuring full backward compatibility for unconfigured stages.
+2. **Granular Execution Engine Filtering (`src/core/scheduler.py`)**:
+   - **Root Stage Ingestion (`trigger_now`)**:
+     * Resolves `allowed_cols = active_stage.service_mapping_scopes.get(service_id)` per active root stage.
+     * Evaluates only scoped columns in `service_cfg.field_mappings` during payload ingestion; unscoped columns remain `NULL`.
+     * Defaults to all mappings if the service key is absent or list is empty.
+   - **Consumer Stage Enrichment (`_update_mapped_values_for_stage` & `_execute_consumer_enrichment`)**:
+     * Resolves `allowed_cols` for each service from `stage.service_mapping_scopes.get(s_id)` and passes `allowed_columns=allowed_cols` to `_execute_consumer_enrichment`.
+     * In `_execute_consumer_enrichment`, skips mappings whose `target_column` is not present in `allowed_columns`.
+     * Generates SQL `UPDATE` clauses strictly for the allowed columns, leaving other table columns untouched.
+3. **Settings API Normalization, Orphan Cleanup & Rename Sync (`src/api/settings.py`)**:
+   - **Column Rename Synchronization**: When a service target column is renamed (`old_target != new_target`), automatically propagates the new column name into all matching entries within `stage.service_mapping_scopes`.
+   - **Scope Sanitization & Pruning**:
+     * Prunes any service key not present in `stage.service_ids` or not registered in `settings.services`.
+     * Validates column names against `services_dict[s_id].field_mappings`, pruning unmapped columns.
+     * Normalizes all column names to uppercase and deduplicates entries.
+     * Deletes any service key whose column list resolves to empty, cleanly falling back to default all-columns execution.
+4. **Automated Verification & Test Suite (`tests/test_stg04_stage_mapping_scopes.py`)**:
+   - Authored 5 new test cases covering `StageConfig` defaults, scope sanitization and pruning, column rename propagation, consumer enrichment filtering, and root stage ingestion scoping.
+   - Validated complete test suite: 15 passing tests (`0.426s`), 0 failures, 0 syntax/lint errors.
+
+### Files Modified & Created
+- `src/core/config.py`
+- `src/core/scheduler.py`
+- `src/api/settings.py`
+- `tests/test_stg04_stage_mapping_scopes.py` (Created)
+- `PROJECT_LOG.md`
+
+---
+
+## Session Milestone: 2026-10-16 — STG-04: Frontend Implementation of Stage-Scoped Field Mapping Selection & WebUI Granular Column Execution
+
+### Role & Agent Assignment
+- **Frontend & WebUI Specialist (`Role 3`)**: Implemented WebUI component for stage-scoped field mapping selection (`ServiceScopeSelector.js`), integrated into `StageModal.js`, verified clean default semantics, and compiled production assets via Vite.
+
+### Architectural Decisions & Changes Applied
+1. **ServiceScopeSelector Subcomponent Extraction (`frontend/src/features/settings/ui/ServiceScopeSelector.js`)**:
+   - Created decoupled standalone UI component (119 lines, adhering to strict <250 lines module invariant and <120 lines target).
+   - Exports `renderServiceListWithScopes(allServiceIds, servicesData, editingStage)`:
+     * Renders service checkbox for pipeline stage assignment.
+     * When field mappings exist for a service, embeds a collapsible `<details>` accordion (automatically open if stage is custom scoped).
+     * Displays a dynamic status badge in the summary bar: `(${checkedCount} of ${totalCount} active)` if scoped, or `(All fields active by default)` if unscoped (0 or all checked).
+     * Includes atomic `Button` controls for "Select All" and "Clear All".
+     * Provides operator guidance: *"Leaving columns unselected updates all mapped fields for this service. Check specific columns to restrict updates for this stage."*
+     * Formats grid of field mapping checkboxes with uppercase `target_column` and muted `source_field`.
+   - Exports `collectServiceMappingScopes(selectedServiceIds, servicesData)`:
+     * Gathers checked column mappings for assigned services.
+     * Enforces execution semantics: if 0 columns or all columns are checked, omits the service key from `scopes` dictionary so the backend execution engine defaults cleanly to all mapped fields.
+2. **StageModal Integration (`frontend/src/features/settings/ui/StageModal.js`)**:
+   - Integrated `renderServiceListWithScopes` into modal template.
+   - Updated `handleSave` to serialize `service_mapping_scopes` alongside `service_ids`.
+   - Maintained clean, non-blocking UX: zero blocking alerts when saving with 0 columns checked.
+   - Maintained compact file footprint at 226 lines.
+3. **Vite Production Compilation & Static Artifact Deployment**:
+   - Executed `npm run build` in `frontend/` generating updated bundle in `src/static/` (built in 875ms, 0 errors).
+
+### Files Modified & Created
+- `frontend/src/features/settings/ui/ServiceScopeSelector.js` (Created)
+- `frontend/src/features/settings/ui/StageModal.js` (Modified)
+- `src/static/assets/index-BvdhWyUj.js` (Compiled artifact)
+- `src/static/index.html` (Compiled artifact)
+- `PROJECT_LOG.md` (Updated)
+
+---
+
+## Session Milestone: 2026-10-16 — STG-04: Canonical Documentation Synchronization & Version Alignment (`v0.1.9`)
+
+### Role & Agent Assignment
+- **Technical Documentation Specialist (`Role 4` / `docs-specialist`)**: Synchronized canonical documentation suite, roadmap status, and semantic version headers across all project specifications following the successful completion and verification of workpackage STG-04.
+
+### Documentation Updates & Architectural Alignment
+1. **Backlog & Phased Roadmap (`docs/BACKLOG.md`)**:
+   - Updated baseline version to `v0.1.9` matching `src/__init__.py`.
+   - Marked `STG-04` (Stage-Scoped Field Mapping Selection & Granular Column Execution) as `COMPLETED ✓` in Priority Overview Matrix (Section 2) and Work Packages (Section 3.7).
+   - Documented completed tasks: `StageConfig.service_mapping_scopes` schema, granular engine execution in `trigger_now` and `_execute_consumer_enrichment`, settings API scope sanitization and column rename synchronization, modular `ServiceScopeSelector.js` WebUI component, and test validation suite.
+2. **Platform Architecture Blueprint (`docs/ARCHITECTURE.md`)**:
+   - Synchronized document version to `v0.1.9`.
+   - Added Section 5.5 "Granular Stage-Scoped Field Mapping Selection (`service_mapping_scopes`)" documenting scope data models, default fallback behavior, root ingestion and consumer enrichment filtering semantics, and settings rename/pruning synchronization.
+3. **Backend Technical Specification (`docs/BACKEND_SPEC.md`)**:
+   - Synchronized specification version to `v0.1.9` across header, inventory, and health probe.
+   - Documented `service_mapping_scopes` in `StageConfig` schema (Section 2.2).
+   - Documented settings scope sanitization and automatic rename propagation in `src/api/settings.py` (Section 2.2).
+   - Documented stage-scoped field mapping execution during root ingestion (`trigger_now`) and consumer enrichment (`_update_mapped_values_for_stage` / `_execute_consumer_enrichment`) in `src/core/scheduler.py` (Section 2.5).
+4. **Modular Frontend Specification (`docs/FRONTEND_SPEC.md`)**:
+   - Synchronized specification version to `v0.1.9`.
+   - Documented `ServiceScopeSelector.js` in directory structure under `features/settings/`.
+   - Added Section 3.4 documenting `ServiceScopeSelector.js` design: native `<details>` accordions, status badges, Select All / Clear All controls, and `collectServiceMappingScopes` serialization semantics.
+5. **Project Overview (`README.md`)**:
+   - Synchronized version badge and specification links to `v0.1.9`.
+   - Added Granular Stage-Scoped Field Mapping Selection (`service_mapping_scopes`) under Core Features.
+
+### Files Modified
+- `docs/BACKLOG.md`
+- `docs/ARCHITECTURE.md`
+- `docs/BACKEND_SPEC.md`
+- `docs/FRONTEND_SPEC.md`
+- `README.md`
+- `PROJECT_LOG.md`
+
+---
+
+## Session Milestone: 2026-10-16 — STG-04 Frontend Bugfix: Lit-html ChildPart DOM Mutation in ServiceScopeSelector
+
+### Role & Agent Assignment
+- **Frontend & WebUI Specialist (`Role 3` / `frontend-specialist`)**: Resolved Lit-html `ChildPart` DOM mutation crash in `ServiceScopeSelector.js` and recompiled production assets via Vite.
+
+### Architectural Decisions & Changes Applied
+1. **Elimination of Destructive `.textContent` Mutations on Lit Part Containers**:
+   - In `ServiceScopeSelector.js`, `stage-scope-status-${sid}` previously rendered `${initialStatus}` as an interpolated child node.
+   - When checkbox interactions invoked `updateScopeStatus(sid, total)`, setting `statusEl.textContent` removed all inner nodes, wiping out Lit-html's internal comment markers (`ChildPart`).
+   - Consequently, when saving changes or closing the modal, Lit's template teardown threw: `Error: This ChildPart has no parentNode and therefore cannot accept a value`.
+2. **CSS `attr(data-status)` Architecture**:
+   - Refactored `stage-scope-status-${sid}` to render an empty span with `data-status="${initialStatus}"` attribute and class `stage-scope-status-badge`.
+   - Added scoped CSS rule `.stage-scope-status-badge::after { content: attr(data-status); }`.
+   - Updated `updateScopeStatus(sid, total)` to mutate `statusEl.setAttribute('data-status', text)`, preserving complete DOM node hierarchy and Lit's internal tree integrity.
+3. **Vite Production Compilation**:
+   - Rebuilt frontend bundles with `npm run build` in `frontend/`.
+   - Generated updated assets in `src/static/` with zero errors.
+
+### Files Modified
+- `frontend/src/features/settings/ui/ServiceScopeSelector.js`
+- `PROJECT_LOG.md`
+- Production static bundle (`src/static/index.html`, `src/static/assets/index-CxxlFXEb.js`)
+
+
+
+
+
+
 
 
 

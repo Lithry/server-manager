@@ -1,4 +1,4 @@
-# server-manager — Universal Pipeline, Monitoring & Telemetry Appliance (`v0.1.7`)
+# server-manager — Universal Pipeline, Monitoring & Telemetry Appliance (`v0.1.9`)
 
 `server-manager` is an autonomous, containerized administration and telemetry platform designed for homelab and media server environments (`cubi-server`). It operates on port **8099** with a native FastAPI backend, SQLite in WAL mode, and a responsive vanilla WebUI.
 
@@ -9,9 +9,9 @@
 Complete architectural specifications, backend contracts, and technical roadmaps are maintained in the [`docs/`](docs/) directory:
 
 - [System Architecture & Platform Blueprint](docs/ARCHITECTURE.md): Container boundaries, dynamic schema mapper, tri-state DAG stages, and Tier 3 LLM meta-tools.
-- [Backend Technical Specification (v0.1.7)](docs/BACKEND_SPEC.md): Module inventory, SQLite WAL schema, scheduler loops, and REST API contract.
+- [Backend Technical Specification (v0.1.9)](docs/BACKEND_SPEC.md): Module inventory, SQLite WAL schema, scheduler loops, and REST API contract.
 - [Modular Frontend Architecture & Audit](docs/FRONTEND_SPEC.md): Feature-Sliced design, `lit-html` rendering, Vite pipeline, and legacy defect remediation matrix.
-- [Technical Backlog & Phased Roadmap](docs/BACKLOG.md): Priority matrix, work packages, and semantic versioning gates from `v0.1.7` through `v1.0.0`.
+- [Technical Backlog & Phased Roadmap](docs/BACKLOG.md): Priority matrix, work packages, and semantic versioning gates from `v0.1.9` through `v1.0.0`.
 - [Project Engineering Log](PROJECT_LOG.md): Activity log and cross-session continuity ledger.
 
 ---
@@ -34,6 +34,8 @@ Complete architectural specifications, backend contracts, and technical roadmaps
      - **Root Producer (`start_condition IS NULL`)**: Autonomously ingests new rows into `SERVICES_PIPELINE` from upstream APIs (Sonarr, Radarr). Multiple root producers can exist for different services and stages. Initial state: `STAGE = order, STATUS = 'PENDING' -> 'COMPLETED'`.
      - **Consumer Stage (`start_condition != NULL` & `complete_condition != NULL`)**: Forward-only intermediate processing stage. Promotes rows with `STATUS = 'COMPLETED'` from earlier stages (`STAGE < target_stage`). Assigned services query enrichment endpoints resolving `{COLUMN}` placeholders from row data and apply field mappings. Once `complete_condition` passes, marks `STATUS = 'COMPLETED'`.
      - **Sink Stage (`start_condition != NULL` & `complete_condition IS NULL`)**: Collector / terminal end-state (e.g. archived, discarded, or permanent library items). Promotes qualifying rows directly to `STATUS = 'SINK'` rendered with an orange visual badge. Terminal state prevents any further stage transitions.
+   - **Granular Stage-Scoped Field Mapping Selection (`service_mapping_scopes`)**:
+     - Stages can selectively restrict assigned service field mappings to specific target columns. Unscoped columns are skipped and preserved, preventing unintended overwrites across different stages utilizing the same upstream service.
    - **Unidirectional Progression**: Progresses strictly forward (`order > current_stage`). Stages cannot transition backward or jump to Root Producers. Enables dynamic skipping of stages based on predicates (e.g. anime routes to Shoko recognition, while non-anime skips directly to downstream stages or sinks).
    - **Context-Aware Predicate Evaluation**: Injects row columns, numeric stage indicators (`STAGE`, `stage`), and stage completion flags (`stage.<id>.completed = True`) into AST evaluation context.
    - **Stability & Watchdogs**:
