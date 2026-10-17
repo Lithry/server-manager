@@ -73,7 +73,8 @@ export function createMappingModal(store) {
         Leave empty to store direct value. The payload data is in <code>value</code>.<br>
         <strong>Syntax examples:</strong><br>
         • Direct boolean: <code>'anime' in value</code> or <code>value == 'anime'</code><br>
-        • Explicit condition: <code>if 'anime' in value then 1 else 0</code><br>
+        • Condition: <code>if 'anime' in value then 1 else 0</code><br>
+        • Multi-branch: <code>if EVENT == 'DELETED' then 'DELETED' else if SHOKO_ID is not None then 'RECOGNIZED' else 'UNRECOGNIZED'</code><br>
         • Functions: <code>lower(value)</code> or <code>len(value) &gt; 0</code>
       </div>
       

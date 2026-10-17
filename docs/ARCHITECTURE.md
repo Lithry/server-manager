@@ -124,7 +124,8 @@ The core data structure is the dynamic pipeline table (`SERVICES_PIPELINE`), des
   - `PIPELINE_KEY`: Unique tracking identifier across services (e.g. `sonarr:1284`).
   - `STAGE`: Current progression stage semantic slug (TEXT, immutable identifier).
   - `STATUS`: Progression state (`PENDING`, `COMPLETED`, `SINK`).
-  - `LAST_UPDATED`: Current ISO timestamp.
+  - `CREATED_AT`: Immutable item creation timestamp established upon initial ingestion.
+  - `LAST_UPDATED`: Current ISO timestamp, updated strictly upon verified column value modifications.
 - **Automated DDL Evolution**: Saving field mappings automatically triggers non-destructive SQLite migrations:
   ```sql
   ALTER TABLE SERVICES_PIPELINE ADD COLUMN "<COLUMN_NAME>" <DATA_TYPE>;
@@ -223,12 +224,18 @@ stateDiagram-v2
 - Stages cannot transition backward.
 - Dynamic branching: items can skip intermediate consumer stages if their predicates do not match. For example, a non-anime item (`IS_ANIME == 0`) skips the Shoko recognition consumer stage and qualifies directly for downstream sink stages.
 
-### 5.3 AST-Based Safe Expression Evaluation
-Predicates and conditional transformers are parsed and evaluated using Python's standard `ast` module.
-- Zero arbitrary code execution (`eval` is strictly forbidden for predicates).
-- Supports boolean operators (`AND`, `OR`, `NOT`), comparisons (`==`, `!=`, `<`, `<=`, `>`, `>=`), and inclusion (`IN`, `NOT IN`).
-- Normalizes SQL-style keywords (`IS NULL`, `IS NOT NULL`, `TRUE`, `FALSE`) into Python-compatible AST tokens.
-- Context injection: row column values, stage indicators (`STAGE`), and stage completion flags (`stage.<slug>.completed`) are resolved dynamically in a case-insensitive manner.
+### 5.3 AST-Based Safe Expression Evaluation & Transformer Engine
+Predicates and conditional transformers are parsed and evaluated using Python's standard `ast` module and sandboxed execution environments.
+- **Predicates (`src/core/predicates.py`)**:
+  - Zero arbitrary code execution (`eval` is strictly forbidden for predicates).
+  - Supports boolean operators (`AND`, `OR`, `NOT`), comparisons (`==`, `!=`, `<`, `<=`, `>`, `>=`), and inclusion (`IN`, `NOT IN`).
+  - Normalizes SQL-style keywords (`IS NULL`, `IS NOT NULL`, `TRUE`, `FALSE`) into Python-compatible AST tokens.
+  - Context injection: row column values, stage indicators (`STAGE`), and stage completion flags (`stage.<slug>.completed`) are resolved dynamically in a case-insensitive manner.
+- **Single-Line Multi-Branch Transformers (`src/core/transformers.py`)**:
+  - Evaluates field mapping transformers using single-line human-friendly branching (`if ... then ... else if ... then ... else ...`), `elif`, and `return` syntaxes.
+  - Employs string literal masking (`_mask_strings`) to protect quoted values from regex token collision.
+  - Normalizes expressions into nested Python ternary expressions and validates syntax via `ast.parse(..., mode="eval")`.
+  - Runs in a restricted sandbox (`safe_globals = {"__builtins__": {}}`) with safe injected helpers (`str`, `int`, `bool`, `len`, `lower`, `upper`, `merge`) and case-insensitive `SafeContext`.
 
 ### 5.4 Grace Periods & Watchdog Timeouts
 - **Ingestion Grace Period (`grace_period_minutes`, default 10m)**:

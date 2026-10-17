@@ -1,18 +1,18 @@
 import { html, nothing } from 'lit-html';
 import { Badge } from '../../../shared/ui/atoms/Badge/Badge.js';
 import { Icon } from '../../../shared/ui/atoms/Icon/Icon.js';
+import { JsonTreeView } from './JsonTreeView.js';
 
-const TYPE_TONES = { int: 'info', float: 'info', bool: 'success', list: 'accent', dict: 'warning' };
+const TYPE_TONES = {
+  int: 'info',
+  float: 'info',
+  bool: 'success',
+  list: 'accent',
+  dict: 'warning',
+  str: 'neutral',
+  string: 'neutral'
+};
 const getTypeTone = (t) => TYPE_TONES[t?.toLowerCase()] || 'neutral';
-
-function resolvePath(obj, path) {
-  if (!path || !obj) return undefined;
-  try {
-    return path.split('.').reduce((acc, part) => (acc && acc[part] !== undefined ? acc[part] : undefined), obj);
-  } catch (e) {
-    return undefined;
-  }
-}
 
 export function PayloadInspector({
   flattenedKeys = [],
@@ -22,19 +22,17 @@ export function PayloadInspector({
   activeTab = 'keys',
   filterQuery = '',
   copiedPath = null,
-  testVariable = '',
   onTabChange,
   onFilterChange,
   onCopyPath,
-  onInsertPlaceholder,
-  onTestVariableChange
+  onInsertPlaceholder
 }) {
   const query = (filterQuery || '').toLowerCase().trim();
   const filteredKeys = flattenedKeys.filter((k) => (
     !query ||
     k.path.toLowerCase().includes(query) ||
     (k.type && k.type.toLowerCase().includes(query)) ||
-    (k.sample && String(k.sample).toLowerCase().includes(query))
+    (k.sample !== undefined && String(k.sample).toLowerCase().includes(query))
   ));
 
   const renderTabBtn = (tabId, label) => {
@@ -42,8 +40,8 @@ export function PayloadInspector({
     return html`
       <button
         type="button"
-        class="u-text-xs u-font-mono"
-        style="background: ${isActive ? 'color-mix(in srgb, var(--color-accent) 15%, transparent)' : 'transparent'}; border: 1px solid ${isActive ? 'var(--color-accent)' : 'var(--color-border)'}; color: ${isActive ? 'var(--color-accent)' : 'var(--color-text-secondary)'}; padding: 3px var(--space-2); border-radius: var(--radius-xs); cursor: pointer;"
+        class="tab-btn u-font-mono ${isActive ? 'is-active' : ''}"
+        style="padding: 3px var(--space-2); font-size: var(--font-size-xs);"
         @click=${() => onTabChange?.(tabId)}
       >
         ${label}
@@ -56,8 +54,7 @@ export function PayloadInspector({
       <div class="u-flex u-items-center u-justify-between" style="padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-border); background: var(--color-bg-surface); flex-shrink: 0; gap: var(--space-2); flex-wrap: wrap;">
         <div class="u-flex u-items-center u-gap-2">
           ${renderTabBtn('keys', `Discovered Keys (${flattenedKeys.length})`)}
-          ${renderTabBtn('response', 'Endpoint Result')}
-          ${renderTabBtn('context', 'Cumulative Context')}
+          ${renderTabBtn('tree', 'Payload Tree')}
           ${renderTabBtn('logs', `Logs (${logs.length})`)}
         </div>
         ${activeTab === 'keys' && flattenedKeys.length > 0 ? html`
@@ -67,11 +64,10 @@ export function PayloadInspector({
         ` : nothing}
       </div>
 
-      <div style="flex: 1; min-height: 0; overflow-y: auto;">
-        ${activeTab === 'keys' ? renderKeysView({ filteredKeys, totalCount: flattenedKeys.length, copiedPath, onCopyPath, onInsertPlaceholder }) : nothing}
-        ${activeTab === 'response' ? renderResponseView({ response, testVariable, onTestVariableChange }) : nothing}
-        ${activeTab === 'context' ? renderPreView(rawContext, 'No cumulative context data available.') : nothing}
-        ${activeTab === 'logs' ? renderLogsView(logs) : nothing}
+      <div style="flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden;">
+        ${activeTab === 'keys' ? html`<div style="flex: 1; overflow-y: auto;">${renderKeysView({ filteredKeys, totalCount: flattenedKeys.length, copiedPath, onCopyPath, onInsertPlaceholder })}</div>` : nothing}
+        ${activeTab === 'tree' ? JsonTreeView({ data: rawContext || response, copiedPath, onCopyPath }) : nothing}
+        ${activeTab === 'logs' ? html`<div style="flex: 1; overflow-y: auto;">${renderLogsView(logs)}</div>` : nothing}
       </div>
     </div>
   `;
@@ -95,20 +91,24 @@ function renderKeysView({ filteredKeys, totalCount, copiedPath, onCopyPath, onIn
       ${filteredKeys.map((item) => {
         const isCopied = copiedPath === item.path;
         return html`
-          <div class="u-flex u-items-center u-justify-between u-gap-2" style="padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-border); font-size: var(--font-size-xs);">
+          <div class="u-flex u-items-center u-justify-between u-gap-3" style="padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-border); font-family: var(--font-mono);">
             <div class="u-flex u-flex-col u-gap-1" style="min-width: 0; flex: 1;">
               <div class="u-flex u-items-center u-gap-2">
-                <span class="u-font-mono u-truncate" style="color: var(--color-accent); font-weight: var(--font-weight-medium); cursor: pointer;" title="Click to copy: ${item.path}" @click=${() => onCopyPath?.(item.path)}>${item.path}</span>
+                <span class="u-truncate" style="font-size: var(--font-size-sm); color: var(--color-accent); font-weight: 500; cursor: pointer;" title="Click to copy: ${item.path}" @click=${() => onCopyPath?.(item.path)}>${item.path}</span>
                 ${Badge({ label: item.type || 'unknown', tone: getTypeTone(item.type), mono: true })}
               </div>
-              ${item.sample ? html`<span class="u-font-mono u-truncate u-text-muted" style="font-size: 0.7rem;" title=${item.sample}>sample: ${item.sample}</span>` : nothing}
+              ${item.sample !== undefined && item.sample !== null ? html`
+                <div class="u-truncate" style="font-size: var(--font-size-xs); color: var(--color-text-secondary); line-height: 1.4;" title=${item.sample}>
+                  <span style="color: var(--color-text-muted); font-size: var(--font-size-2xs);">sample: </span>${String(item.sample)}
+                </div>
+              ` : nothing}
             </div>
             <div class="u-flex u-items-center u-gap-1" style="flex-shrink: 0;">
-              <button type="button" class="u-flex u-items-center u-gap-1 u-text-2xs u-font-mono" title="Copy path to clipboard" style="padding: 3px 6px; background: ${isCopied ? 'var(--color-success)' : 'var(--color-bg-surface)'}; border: 1px solid ${isCopied ? 'var(--color-success)' : 'var(--color-border)'}; color: ${isCopied ? '#fff' : 'var(--color-text-secondary)'}; border-radius: var(--radius-xs); cursor: pointer;" @click=${() => onCopyPath?.(item.path)}>
+              <button type="button" class="u-flex u-items-center u-gap-1 u-font-mono" title="Copy path to clipboard" style="padding: 3px 8px; font-size: 0.72rem; background: ${isCopied ? 'var(--color-success)' : 'var(--color-bg-surface)'}; border: 1px solid ${isCopied ? 'var(--color-success)' : 'var(--color-border-strong)'}; color: ${isCopied ? '#fff' : 'var(--color-text)'}; border-radius: var(--radius-xs); cursor: pointer;" @click=${() => onCopyPath?.(item.path)}>
                 ${Icon({ name: isCopied ? 'check' : 'copy', size: 12 })}
                 <span>${isCopied ? 'Copied' : 'Copy'}</span>
               </button>
-              <button type="button" class="u-flex u-items-center u-gap-1 u-text-2xs u-font-mono" title="Insert placeholder {${item.path}} into endpoint" style="padding: 3px 6px; background: var(--color-bg-surface); border: 1px solid var(--color-border); color: var(--color-accent); border-radius: var(--radius-xs); cursor: pointer;" @click=${() => onInsertPlaceholder?.(item.path)}>
+              <button type="button" class="u-flex u-items-center u-gap-1 u-font-mono" title="Insert placeholder {${item.path}} into endpoint" style="padding: 3px 8px; font-size: 0.72rem; background: var(--color-bg-surface); border: 1px solid var(--color-border-strong); color: var(--color-accent); border-radius: var(--radius-xs); cursor: pointer;" @click=${() => onInsertPlaceholder?.(item.path)}>
                 ${Icon({ name: 'plus', size: 12 })}
                 <span>Insert</span>
               </button>
@@ -120,35 +120,13 @@ function renderKeysView({ filteredKeys, totalCount, copiedPath, onCopyPath, onIn
   `;
 }
 
-function renderResponseView({ response, testVariable, onTestVariableChange }) {
-  if (!response) {
-    return html`<div style="padding: var(--space-4); text-align: center; color: var(--color-text-muted); font-size: var(--font-size-sm);">No endpoint response data. Execute a test request to inspect output.</div>`;
+function renderLogsView(logs) {
+  if (!logs || logs.length === 0) {
+    return html`<div style="padding: var(--space-4); text-align: center; color: var(--color-text-muted); font-size: var(--font-size-sm);">No server execution logs recorded.</div>`;
   }
-  const evaluatedVar = testVariable.trim() ? resolvePath(response, testVariable.trim()) : undefined;
   return html`
-    <div class="u-flex u-flex-col" style="height: 100%;">
-      <div class="u-flex u-flex-col u-gap-2" style="padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-border); background: var(--color-bg-surface);">
-        <div class="u-flex u-gap-2 u-items-center">
-          <span style="color: var(--color-text-muted); font-size: var(--font-size-xs);">Test Path:</span>
-          <input type="text" class="form-input u-font-mono u-text-xs" placeholder="e.g. List.0.ID or title" .value=${testVariable} @input=${(e) => onTestVariableChange?.(e.target.value)} style="flex: 1; height: 26px;" />
-        </div>
-        ${testVariable.trim() ? html`
-          <div style="padding: var(--space-2); background: var(--color-bg-base); color: ${evaluatedVar !== undefined ? 'var(--color-success)' : 'var(--color-danger)'}; font-family: var(--font-mono); font-size: var(--font-size-xs); max-height: 120px; overflow: auto; border-radius: var(--radius-xs); border: 1px solid var(--color-border);">
-            <pre style="margin: 0; white-space: pre-wrap;">${evaluatedVar !== undefined ? JSON.stringify(evaluatedVar, null, 2) : 'undefined'}</pre>
-          </div>
-        ` : nothing}
-      </div>
-      <pre class="u-font-mono u-text-xs" style="margin: 0; padding: var(--space-3); color: var(--color-console-text); background: var(--color-bg-base); white-space: pre-wrap; overflow-x: auto; line-height: 1.4; flex: 1;">${JSON.stringify(response, null, 2)}</pre>
+    <div class="u-font-mono" style="padding: var(--space-3); font-size: 0.85rem; color: var(--color-console-text); background: var(--color-bg-base); min-height: 100%; line-height: 1.5; white-space: pre-wrap;">
+      ${logs.map((log) => html`<div>${log}</div>`)}
     </div>
   `;
-}
-
-function renderPreView(data, emptyMsg) {
-  if (!data) return html`<div style="padding: var(--space-4); text-align: center; color: var(--color-text-muted); font-size: var(--font-size-sm);">${emptyMsg}</div>`;
-  return html`<pre class="u-font-mono u-text-xs" style="margin: 0; padding: var(--space-3); color: var(--color-console-text); background: var(--color-bg-base); white-space: pre-wrap; overflow-x: auto; line-height: 1.4;">${JSON.stringify(data, null, 2)}</pre>`;
-}
-
-function renderLogsView(logs) {
-  if (!logs || logs.length === 0) return html`<div style="padding: var(--space-4); text-align: center; color: var(--color-text-muted); font-size: var(--font-size-sm);">No server execution logs recorded.</div>`;
-  return html`<div class="u-font-mono u-text-xs" style="padding: var(--space-3); color: var(--color-console-text); background: var(--color-bg-base); min-height: 100%; line-height: 1.5; white-space: pre-wrap;">${logs.map((log) => html`<div>${log}</div>`)}</div>`;
 }

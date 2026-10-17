@@ -1093,3 +1093,384 @@ This log maintains cross-session operational continuity, recording architectural
 - `frontend/src/pages/SandboxPage.js`
 - `src/static/*` (Compiled production bundle)
 - `PROJECT_LOG.md`
+
+---
+
+## Session Milestone: 2026-10-17 — API Sandbox Visual Polish & JsonTreeView Integration
+
+### Role & Agent Assignment
+- **Frontend & WebUI Specialist (`Role 3` / `frontend-specialist`)**: Designed and implemented the interactive `JsonTreeView` component, overhauled `PayloadInspector` tab architecture and contrast hierarchy, cleaned up legacy state, and recompiled production assets.
+
+### Key Changes Implemented
+1. **Interactive Collapsible `JsonTreeView` Component (`frontend/src/features/sandbox/ui/JsonTreeView.js`)**:
+   - Engineered native collapsible/expandable JSON hierarchy using `<details>` and `<summary>` elements with zero framework overhead.
+   - Smooth level expansion/collapsing with custom `▼` / `►` markers.
+   - Header toolbar with "Expand All", "Collapse All" (preserving root open), and dynamic item count summary (`countSummary`).
+   - High-contrast visual styling:
+     - Typography: `var(--font-mono)`, `font-size: 0.85rem` (13.6px), `line-height: 1.5` ensuring crystal-clear character distinction (e.g. dotted-zero '0' vs '8').
+     - Keys: luminous cyan (`#38bdf8`) with hover feedback and one-click path copying (`e.stopPropagation()` + `e.preventDefault()`).
+     - Strings: bright emerald (`#34d399`) with safe JSON stringification.
+     - Numbers: vibrant sky blue (`#38bdf8`).
+     - Booleans: amber (`#fbbf24`).
+     - Null: soft rose/red (`#f87171`).
+     - Indentation guides: `border-left: 1px solid rgba(255, 255, 255, 0.08)`.
+   - Maintained at 156 lines (strictly under 250-line limit).
+2. **PayloadInspector Tab Consolidation & Contrast Uplift (`frontend/src/features/sandbox/ui/PayloadInspector.js`)**:
+   - Consolidated tabs from 4 down to 3:
+     1. `Discovered Keys (${flattenedKeys.length})` (`keys`)
+     2. `Payload Tree` (`tree`)
+     3. `Logs (${logs.length})` (`logs`)
+   - Completely eliminated redundant raw text dump views and legacy `testVariable` path evaluator.
+   - Discovered Keys contrast elevation:
+     - Paths elevated to `0.85rem` in `#38bdf8`.
+     - Sample text elevated to `0.82rem` in luminous `#e2e8f0` (replacing dark-gray `#64748b`).
+     - Buttons and badges enhanced with high-contrast borders and surfaces.
+   - Maintained at 125 lines (strictly under 250-line limit).
+3. **Legacy Dead Code Cleanup (`sandboxStore.js` & `SandboxPage.js`)**:
+   - Removed unused `testVariable` state property from `sandboxStore.js` (192 lines).
+   - Removed `testVariable` and `onTestVariableChange` prop pass-through in `SandboxPage.js` (121 lines).
+4. **Vite Production Compilation & Verification**:
+   - Executed `npm run build` in `frontend/`.
+   - Transformed 85 modules with 0 errors in 892ms; generated updated production bundles in `src/static/assets/`.
+
+### Files Modified & Created
+- `frontend/src/features/sandbox/ui/JsonTreeView.js` (Created, 156 lines)
+- `frontend/src/features/sandbox/ui/PayloadInspector.js` (Modified, 125 lines)
+- `frontend/src/features/sandbox/model/sandboxStore.js` (Modified, 192 lines)
+- `frontend/src/pages/SandboxPage.js` (Modified, 121 lines)
+- `src/static/*` (Compiled production bundle)
+- `PROJECT_LOG.md` (Updated)
+
+---
+
+## Session Milestone: 2026-10-17 — SBX-01: Decoupled Sample Context Hygiene & Synthetic Wrapper Removal
+
+### Role & Agent Assignment
+- **Backend Systems Engineer (`Role 2` / `backend-engineer`)**: Refactored `sandbox_enrichment` in `src/api/pipeline.py` to eliminate synthetic `"sample"` wrapper dictionaries and maintain clean root context parity.
+
+### Key Changes Implemented
+1. **Direct Root Context Unpacking (`src/api/pipeline.py`)**:
+   - Removed artificial wrapper dictionary assignments (`sample_dict["sample"] = s_json` and `sample_dict["sample"] = {"List": s_json}`) inside `sandbox_enrichment`.
+   - Incoming sample payloads (`s_json`) and their first record extracts (`records`, `Items`, `files`, or direct lists) are unpacked directly into `sample_dict` without creating a redundant `"sample"` dictionary branch.
+   - Ensures `context_data` (and the frontend Payload Tree) reflects exact attribute paths (`totalRecords`, `episodeId`, `seriesId`, `eventType`, etc.) aligning 1:1 with `flattened_keys`.
+2. **Test Suite Modernization (`tests/test_sbx01_sandbox_decoupling.py`)**:
+   - Updated `test_sandbox_enrichment_with_direct_sample_endpoint` to assert `result["context_data"]["sourceTitle"]` directly at the root.
+   - Added assertion `self.assertNotIn("sample", result["context_data"])` to verify absence of synthetic wrapper namespaces.
+3. **Verification**:
+   - Verified module compilation via `.venv\Scripts\python.exe -m py_compile`.
+   - Executed full unit test suite via `.venv\Scripts\python.exe -m unittest discover -s tests`: all 19 tests passed cleanly.
+
+### Files Modified
+- `src/api/pipeline.py` (Modified, 625 lines)
+- `tests/test_sbx01_sandbox_decoupling.py` (Modified, 162 lines)
+- `PROJECT_LOG.md` (Updated)
+
+---
+
+## Session Milestone: 2026-10-17 — UI-01: Global Design System Tokens & View Architecture Harmonization
+
+### Role & Agent Assignment
+- **Frontend & WebUI Specialist (`Role 3` / `frontend-specialist`)**: Established global design system tokens for color contrast, typography scale, and interaction states, refactored views to consume standard patterns, and recompiled production assets.
+
+### Key Changes Implemented
+1. **Design Tokens Elevation (`frontend/src/shared/styles/tokens.css`)**:
+   - Elevated text contrast tokens:
+     - `--color-text`: `#f8fafc` (primary luminous text)
+     - `--color-text-secondary`: `#cbd5e1` (accessible secondary text, elevated from `#94a3b8`)
+     - `--color-text-muted`: `#94a3b8` (accessible muted text, elevated from `#64748b`)
+     - `--color-console-text`: `#e2e8f0` (luminous monospace console text)
+   - Raised typography scale floor to eliminate unreadable text and character ambiguity:
+     - `--font-size-2xs`: `0.75rem` (12px accessible minimum floor)
+     - `--font-size-xs`: `0.82rem` (~13.1px)
+     - `--font-size-sm`: `0.875rem` (14px)
+     - `--font-size-base`: `1rem` (16px base)
+     - `--font-size-md`: `1.125rem` (18px)
+     - `--font-size-lg`: `1.25rem` (20px)
+     - `--font-size-xl`: `1.5rem` (24px)
+   - Added global interaction state tokens:
+     - `--opacity-disabled`: `0.45`
+     - `--opacity-dimmed`: `0.65`
+     - `--color-accent-subtle`: `color-mix(in srgb, var(--color-accent) 15%, transparent)`
+     - `--color-accent-subtle-hover`: `color-mix(in srgb, var(--color-accent) 25%, transparent)`
+     - `--color-surface-hover`: `color-mix(in srgb, var(--color-text) 6%, var(--color-bg-surface))`
+     - `--color-card-hover`: `color-mix(in srgb, var(--color-text) 6%, var(--color-bg-card))`
+     - Inactive & Active state tokens (`--color-state-inactive-text`, `--color-state-inactive-bg`, `--color-state-inactive-border`, `--color-state-active-text`, `--color-state-active-bg`, `--color-state-active-border`).
+2. **Utilities & Reusable Pattern Architecture (`frontend/src/shared/styles/utilities.css`)**:
+   - Added universal form and textarea placeholder contrast rule (`opacity: 0.85`, `color: var(--color-text-muted)`).
+   - Added standard state utility classes `.is-disabled` and `.is-dimmed`.
+   - Standardized `.tab-btn` and `.tab-btn.is-active` component pattern for all tab navigations.
+   - Standardized `.selectable-item` and `.selectable-item.is-selected` component pattern for interactive list items.
+3. **View Architecture Refactoring**:
+   - `frontend/src/pages/SettingsPage.js`: Refactored `renderTabButton` to eliminate inline CSS and consume standard `.tab-btn ${isActive ? 'is-active' : ''}`.
+   - `frontend/src/features/sandbox/ui/PayloadInspector.js`: Refactored `renderTabBtn` to use standard `.tab-btn` and `.is-active`. Refactored Discovered Keys to consume `var(--color-accent)` and `var(--color-text-secondary)` with `var(--font-size-xs)`. Converted log viewer to consume `var(--color-console-text)`.
+   - `frontend/src/features/sandbox/ui/SavedEndpointsList.js`: Replaced inline item styles with standard `.selectable-item ${isActive ? 'is-selected' : ''}`. Subtitles now use `var(--font-size-xs)` and `var(--color-text-secondary)`. Badges now adhere to `var(--font-size-2xs)`.
+   - `frontend/src/pages/SandboxPage.js`: Standardized endpoint template textarea and header labels to use `var(--font-size-sm)` and `var(--color-text-secondary)` without custom inline color formulas.
+   - `frontend/src/features/sandbox/ui/ContextSourceControls.js`: Adjusted Record ID input container to `min-width: 120px; max-width: 140px; flex: 1;` with clean `placeholder="Record ID"` preventing text clipping.
+4. **Vite Production Compilation & Verification**:
+   - Executed `npm run build` in `frontend/`. Transformed 85 modules with 0 errors in 935ms, compiling production bundle into `src/static/assets/`.
+   - Verified modularity invariant: every module remains strictly under 250 lines (all under 210 lines).
+
+### Files Modified
+- `frontend/src/shared/styles/tokens.css` (Modified, 114 lines)
+- `frontend/src/shared/styles/utilities.css` (Modified, 157 lines)
+- `frontend/src/pages/SettingsPage.js` (Modified, 167 lines)
+- `frontend/src/features/sandbox/ui/PayloadInspector.js` (Modified, 133 lines)
+- `frontend/src/features/sandbox/ui/SavedEndpointsList.js` (Modified, 75 lines)
+- `frontend/src/pages/SandboxPage.js` (Modified, 132 lines)
+- `frontend/src/features/sandbox/ui/ContextSourceControls.js` (Modified, 209 lines)
+- `src/static/*` (Compiled production bundle)
+- `PROJECT_LOG.md` (Updated)
+
+---
+
+## Session Milestone: 2026-10-17 — Global Textarea Resize Disabling & Design System Alignment
+
+### Role & Agent Assignment
+- **Frontend & WebUI Specialist (`Role 3`)**: Globally disabled manual textarea resizing, removed ad-hoc resize handles across component views, and compiled production assets.
+
+### Architectural Decisions & Changes Applied
+1. **Global CSS Reset (`frontend/src/shared/styles/reset.css`)**:
+   - Added global `textarea { resize: none; }` rule directly in `reset.css` to enforce fixed, deterministic layout and eliminate unwanted manual resize handles across all existing and future modal forms and inputs.
+2. **Component Template Inline Style Cleanup**:
+   - `frontend/src/pages/SandboxPage.js`: Replaced `resize: vertical;` with `resize: none;` on the endpoint templates textarea.
+   - `frontend/src/features/sandbox/ui/ContextSourceControls.js`: Replaced `resize: vertical;` with `resize: none;` on the custom JSON context textarea.
+3. **Modularity & Verification**:
+   - Verified that all modified files strictly respect the 250-line limit:
+     - `frontend/src/shared/styles/reset.css`: 79 lines
+     - `frontend/src/pages/SandboxPage.js`: 131 lines
+     - `frontend/src/features/sandbox/ui/ContextSourceControls.js`: 208 lines
+   - Executed `npm run build` in `frontend/`: successfully transformed 85 modules into `src/static/` with 0 build errors.
+
+### Files Modified
+- `frontend/src/shared/styles/reset.css` (Modified, 79 lines)
+- `frontend/src/pages/SandboxPage.js` (Modified, 131 lines)
+- `frontend/src/features/sandbox/ui/ContextSourceControls.js` (Modified, 208 lines)
+- `src/static/*` (Production bundle recompiled)
+- `PROJECT_LOG.md` (Updated)
+
+---
+
+## Session Milestone: 2026-10-17 — Reorder Arrow Characters Unification & Accessibility
+
+### Role & Agent Assignment
+- **Frontend & WebUI Specialist (`Role 3`)**: Unified reorder arrow symbols and accessibility labels in `StagesPanel.js` to match Design System standards across panels and modals.
+
+### Architectural Decisions & Changes Applied
+1. **Design System Consistency & Accessibility (`StagesPanel.js`)**:
+   - Replaced linear unicode arrows (`↑` and `↓`) with solid triangle glyphs (`▲` and `▼`) to match `MappingsPanel.js` and `ManageColumnsModal.js`.
+   - Added explicit accessibility attributes (`ariaLabel: 'Move Up'` and `ariaLabel: 'Move Down'`) on the `Button` components for screen reader compliance.
+2. **Modularity & Vite Build Verification**:
+   - `frontend/src/features/settings/ui/StagesPanel.js`: 121 lines (strictly under the 250-line modularity threshold).
+   - Executed `npm run build` in `frontend/`: 85 modules transformed, 0 errors, compiled production bundle in `src/static/`.
+
+### Files Modified
+- `frontend/src/features/settings/ui/StagesPanel.js` (Modified, 121 lines)
+- `src/static/*` (Production bundle recompiled)
+- `PROJECT_LOG.md` (Updated)
+
+---
+
+## Session Milestone: 2026-10-17 — MappingModal Multi-Branch Transformer Syntax Examples
+
+### Role & Agent Assignment
+- **Frontend & WebUI Specialist (`Role 3`)**: Updated transformer syntax helper text in `MappingModal.js` to illustrate single-line multi-branch expressions (`then`, `else if`, `elif`) while retaining single-line text input ergonomics.
+
+### Architectural Decisions & Changes Applied
+1. **Single-Line Multi-Branch Guidance (`MappingModal.js`)**:
+   - Preserved single-line text input (`<input type="text">`) per user preference (no `<textarea>`).
+   - Updated helper text syntax examples to demonstrate multi-branch syntax:
+     - `• Condition: if 'anime' in value then 1 else 0`
+     - `• Multi-branch: if EVENT == 'DELETED' then 'DELETED' else if SHOKO_ID is not None then 'RECOGNIZED' else 'UNRECOGNIZED'`
+2. **Modularity & Vite Build Verification**:
+   - `frontend/src/features/settings/ui/MappingModal.js`: 131 lines (strictly under the 250-line modularity threshold).
+   - Executed `npm run build` in `frontend/`: 85 modules transformed, 0 errors, compiled production bundle in `src/static/`.
+
+### Files Modified
+- `frontend/src/features/settings/ui/MappingModal.js` (Modified, 131 lines)
+- `src/static/*` (Production bundle recompiled)
+- `PROJECT_LOG.md` (Updated)
+---
+
+## Session Milestone: 2026-10-17 — Single-Line Multi-Branch Transformer Engine (`src/core/transformers.py`)
+
+### Role & Agent Assignment
+- **Backend Systems Engineer (`Role 2`)**: Implemented the single-line multi-branch transformer engine in `src/core/transformers.py` and decoupled it from `src/core/predicates.py`.
+
+### Architectural Decisions & Changes Applied
+1. **Multi-Branch Syntax Normalization & Evaluator Engine (`src/core/transformers.py`)**:
+   - Implemented `SafeContext(dict)` with case-insensitive identifier resolution and safe `None` fallback on missing keys.
+   - Built `TransformerEvaluator.normalize_transformer_syntax(expr)`:
+     - Implemented string literal masking/unmasking (`_mask_strings` / `_unmask_strings`) to prevent keyword collisions inside quoted strings (e.g. `'DELETED'`, `'something else return'`).
+     - Normalized `else return` -> `else` and `(if|elif|else if) ... return` -> `\1 ... then`.
+     - Tokenized clauses across `elif`, `else if`, and `else` outside quotes.
+     - Extracted clauses `('if', cond, val)`, `('elif', cond, val)`, and `('else', None, val)`.
+     - Chained clauses backwards from the `else` expression into nested Python ternaries: `({val}) if ({cond}) else ({current_expr})`.
+     - Handled 2-state `if <cond> then <val_true> else <val_false>` yielding `({val_true}) if ({cond}) else ({val_false})`.
+     - Direct pass-through for native Python ternaries and non-if expressions.
+   - Built `TransformerEvaluator.validate_syntax(expr)` returning `(bool, str)` via AST validation.
+   - Built `TransformerEvaluator.evaluate(expr, value, context, raise_errors)` with AST-safe execution environment (`safe_globals = {"__builtins__": {}}`) and built-in helper functions (`lower`, `upper`, `len`, `str`, `int`, `bool`, `merge`).
+2. **Modular Architecture & Predicates Decoupling (`src/core/predicates.py`)**:
+   - Extracted `TransformerEvaluator` and `SafeContext` into `src/core/transformers.py` (152 lines).
+   - Re-exported `TransformerEvaluator` and `SafeContext` in `src/core/predicates.py` (162 lines) to maintain 100% backward compatibility for existing consumers (`src/api/settings.py`, `src/core/scheduler.py`).
+   - Removed unused `import json` in `predicates.py`.
+   - Both modules remain strictly below the 250-line threshold.
+3. **Comprehensive Unit Testing Suite (`tests/test_transformers.py`)**:
+   - Added 10 automated test cases covering:
+     - 2-state `if ... then ... else ...`
+     - 3-state with `else if` chaining
+     - 3-state with `elif` chaining
+     - 3-state with `return` syntax
+     - Native Python ternary expressions
+     - `SafeContext` case-insensitivity and `None` fallback
+     - `validate_syntax` on valid and invalid syntax
+     - Backwards-compatible re-exports from `src.core.predicates`
+     - Error handling and `raise_errors` flag behavior
+     - Built-in helpers (`lower`, `upper`, `len`, `merge`)
+   - Executed full test suite: 29 tests passed cleanly in 0.28s.
+
+### Verification Results
+- `src/core/transformers.py`: 152 lines, compiled cleanly with `py_compile`.
+- `src/core/predicates.py`: 162 lines, compiled cleanly with `py_compile`.
+- `tests/test_transformers.py`: 213 lines, 10 test cases passed.
+- Entire test suite: `python -m unittest discover -s tests` -> 29 tests passed, 0 failures.
+
+### Files Created / Modified
+- `src/core/transformers.py` (Created, 152 lines)
+- `src/core/predicates.py` (Modified, 162 lines)
+- `tests/test_transformers.py` (Created, 213 lines)
+- `PROJECT_LOG.md` (Updated)
+
+---
+
+## Session Milestone: 2026-10-17 — Canonical Documentation Synchronization: Multi-Branch Transformer Engine
+
+### Role & Agent Assignment
+- **Technical Documentation Specialist (`Role 5`)**: Synchronized canonical technical specifications, backlog, and architecture documents following the extraction and implementation of the single-line multi-branch transformer engine in `src/core/transformers.py` and helper syntax documentation in `MappingModal.js`.
+
+### Documentation Updates & Systemic Alignment Applied
+1. **Backend Specification (`docs/BACKEND_SPEC.md`)**:
+   - Updated module inventory in Section 1 to include `src/core/transformers.py`.
+   - Updated Section 2.4 (`src/core/predicates.py`) to reflect backward-compatible re-exports of `TransformerEvaluator` and `SafeContext`.
+   - Added Section 2.5 (`src/core/transformers.py`) specifying `SafeContext`, string literal masking (`_mask_strings` / `_unmask_strings`), single-line multi-branch syntax normalization (`if ... then ... else if ... then ... else ...`, `elif`, `return`), AST validation (`validate_syntax`), and sandboxed evaluation (`evaluate`) with injected helpers (`lower`, `upper`, `len`, `merge`).
+   - Renumbered subsequent core module sections (2.6 `scheduler.py`, 2.7 `gitops.py`, 2.8 `pipeline.py`).
+2. **Frontend Specification (`docs/FRONTEND_SPEC.md`)**:
+   - Updated Section 3.4 to document `MappingModal.js` (<135 lines): single-line text input preservation, multi-branch syntax guide (`then`, `else if`, `elif`, `return`), and interactive test harness integration against `POST /api/v1/settings/test-transformer`.
+3. **Architecture Blueprint (`docs/ARCHITECTURE.md`)**:
+   - Updated Section 5.3 ("AST-Based Safe Expression Evaluation & Transformer Engine") detailing the decoupled responsibilities of `PredicateEvaluator` in `src/core/predicates.py` and `TransformerEvaluator` in `src/core/transformers.py`.
+4. **Technical Backlog (`docs/BACKLOG.md`)**:
+   - Added `TRANS-01` to the Section 2 Priority Overview Matrix (`v0.1.9`, High Priority, COMPLETED ✓).
+   - Added Section 3.8 documenting package `TRANS-01` (objectives, decoupled architecture, string masking, syntax normalization, WebUI guidance, and 10 unit test validations).
+   - Renumbered subsequent backlog packages (3.9 `CORE-02` through 3.14 `Production MVP Release Gate`).
+
+### Verification & Version Integrity
+- Verified single source of truth version: `src/__init__.py` (`__version__ = "0.1.9"`).
+- Confirmed version badges across all updated specifications match `v0.1.9`.
+- Verified 100% English language compliance across all documents.
+
+### Files Modified
+- `docs/BACKEND_SPEC.md` (Modified)
+- `docs/FRONTEND_SPEC.md` (Modified)
+- `docs/ARCHITECTURE.md` (Modified)
+- `docs/BACKLOG.md` (Modified)
+- `PROJECT_LOG.md` (Updated)
+
+---
+
+## Session Milestone: 2026-10-17 — UI-04: Change-Tracking Modification Array & Accurate isDirty Reactivity in SettingsPage
+
+### Role & Agent Assignment
+- **Frontend & WebUI Specialist (`Role 3`)**: Implemented modification tracking array architecture in `frontend/src/pages/SettingsPage.js`, canonical deep equality comparison, reactive `isDirty` state derivation, and rollback restoration. Compiled production assets via Vite with zero errors.
+
+### Architectural Decisions & Changes Applied
+1. **Change-Tracking Modification Array Architecture (`frontend/src/pages/SettingsPage.js`)**:
+   - Implemented `pendingModifications = []` tracking array storing `{ key, oldValue, newValue }` entries.
+   - Initialized `baseline` from server settings snapshot upon page mount / query resolution.
+   - Built canonical `deepEqual(a, b)` comparison algorithm handling nested dictionaries, arrays (order-sensitive), and primitives without external dependencies.
+   - Implemented `trackModification(key, oldValue, newValue)`:
+     - When `deepEqual(oldValue, newValue)` is `true`: removes the entry from `pendingModifications` via `splice`.
+     - When `deepEqual(oldValue, newValue)` is `false`: creates or updates the entry in `pendingModifications`.
+   - Built `evaluateModifications(current)`:
+     - Evaluates all keys across baseline, current snapshot, and active pending keys.
+     - Granularly tracks upstream services (`services.<id>`), notification triggers, pipeline stages, and engine retention / global polling cadences.
+2. **Accurate `isDirty` Reactivity & Store Synchronization**:
+   - Intercepted `store.set` to continuously evaluate current cache data against `baseline` and derive `isDirty = pendingModifications.length > 0`.
+   - When inputs or configurations are modified, `pendingModifications.length > 0` enables "Save All Settings" and displays the red `!` badge.
+   - When modifications are undone, reverted, or newly added items deleted, `pendingModifications.length === 0` automatically resets `isDirty = false`, disabling the Save button and hiding the badge.
+3. **Atomic Save & Verified Baseline Rollback**:
+   - On successful `POST /api/v1/settings`: updates `baseline` to the newly confirmed settings, clears `pendingModifications = []`, and resets `isDirty = false`.
+   - On save error: restores `queryCache` from `baseline`, clears `pendingModifications = []`, and alerts the operator of rollback.
+   - On unmount with unsaved changes left behind: safely rolls back `queryCache` to `baseline` to prevent dirty state contamination across routes.
+4. **Strict Module Boundary & Vite Production Compilation**:
+   - Refactored `frontend/src/pages/SettingsPage.js` to 214 lines (strictly below the 250-line boundary).
+   - Executed `npm run build` in `frontend/`: successfully compiled production bundle into `src/static/` in 996ms with 0 errors.
+
+### Files Modified
+- `frontend/src/pages/SettingsPage.js` (214 lines)
+- `src/static/assets/index-kd8sVkwV.js`
+- `PROJECT_LOG.md` (Updated)
+
+
+
+---
+
+## Session Milestone: 2026-10-17 — SCHED-02: Global Ingestion Watermark, Immutable CREATED_AT, Source None Skip & Accurate LAST_UPDATED
+
+### Role & Agent Assignment
+- **Backend Systems Engineer (`Role 2`)**: Refined the scheduler ingestion watermark, immutable `CREATED_AT`, None source values skipping, and change-conditioned `LAST_UPDATED` updates in `src/core/scheduler.py`.
+
+### Architectural Decisions & Changes Applied
+1. **Global Ingestion Watermark (`src/core/scheduler.py`)**:
+   - In `poll_service`: Updated watermark query to `SELECT MAX(CREATED_AT) as latest FROM SERVICES_PIPELINE` globally across the entire table without filtering by service (`PIPELINE_KEY LIKE ?`).
+   - Added fallback to root stage activation timestamp (`active_root_stages[0].last_activated_at`) when the table is empty or `latest` is `None`.
+   - In pagination evaluation: Strictly evaluated events greater than (`>`) `latest_dt`. Any event where `r_dt <= latest_dt` marks `is_older = True`, which is skipped and halts pagination early when all records on the page are seen.
+2. **Immutable `CREATED_AT`**:
+   - Reaffirmed that `CREATED_AT` is set once on record insertion (`NEW_ENTRY`) and is strictly omitted from dynamic field mappings (protected via `SYSTEM_RESERVED_COLUMNS`) and all in-place SQL updates.
+3. **Skip `None` Source Values in Field Mappings (`src/core/scheduler.py`)**:
+   - In root stage ingestion mapping loop: If `val is None` after dotted path and direct key extraction, immediately `continue`, skipping transformer evaluation and preventing `None` from overwriting columns.
+   - In consumer stage reconciliation (`_execute_consumer_enrichment`): If `val is None`, immediately `continue`, avoiding unnecessary evaluation and column writes.
+4. **`LAST_UPDATED` Modified Exclusively on Real Row Changes (`src/core/scheduler.py`)**:
+   - In root stage in-place updates: Added `has_changes = any(existing_row.get(k) != v and existing_row.get(k.lower()) != v for k, v in mapped_fields.items())`. SQL `UPDATE` and `LAST_UPDATED = CURRENT_TIMESTAMP` are executed only if `mapped_fields` has values and `has_changes` is `True`.
+   - In consumer stage reconciliation (`_execute_consumer_enrichment`): Maintained the strict `has_changes` check before executing SQL `UPDATE`, guaranteeing `LAST_UPDATED` is updated only when real data differences exist.
+
+### Verification Results
+- **Syntax Compilation**: Verified with `.venv\Scripts\python.exe -m py_compile src\core\scheduler.py` (0 errors).
+- **Test Suite**: Executed `.venv\Scripts\python.exe -m unittest discover -s tests` (Ran 29 tests in 0.317s, 100% passed cleanly).
+
+### Files Modified
+- `src/core/scheduler.py` (Modified)
+- `PROJECT_LOG.md` (Updated)
+
+---
+
+## Session Milestone: 2026-10-17 — Technical Documentation Synchronization (SCHED-02 & UI-04)
+
+### Role & Agent Assignment
+- **Technical Documentation Specialist (`Role 5`)**: Synchronized canonical technical specifications (`docs/BACKEND_SPEC.md`, `docs/FRONTEND_SPEC.md`, `docs/ARCHITECTURE.md`, `docs/BACKLOG.md`) to reflect the completion and validation of `SCHED-02` (scheduler global ingestion watermark, immutable CREATED_AT, None source field skipping, conditional LAST_UPDATED updates) and `UI-04` (SettingsPage modification array dirty tracking and reactive isDirty state).
+
+### Documentation Updates & Systemic Alignment Applied
+1. **Backend Specification (`docs/BACKEND_SPEC.md`)**:
+   - Updated Section 2.6 (`src/core/scheduler.py`):
+     - Documented global ingestion watermark query (`SELECT MAX(CREATED_AT) as latest FROM SERVICES_PIPELINE`) without service filter, root stage activation fallback (`active_root_stages[0].last_activated_at`), strict `r_dt > latest_dt` cutoff, and early pagination termination.
+     - Documented `CREATED_AT` immutability established once upon initial insertion (`NEW_ENTRY`) and protected from dynamic mapping overwrites.
+     - Documented conditional `LAST_UPDATED` execution: SQL `UPDATE` and `LAST_UPDATED = CURRENT_TIMESTAMP` execute in root in-place updates and consumer stage reconciliation strictly when `has_changes` is `True`.
+     - Documented immediate skipping (`continue`) of `None` source values in both root ingestion and consumer enrichment loops, preventing transformer evaluation and column overwrites when incoming data is absent.
+2. **Frontend Specification (`docs/FRONTEND_SPEC.md`)**:
+   - Updated Section 4.3 to specify `SettingsPage.js` change-tracking modification array (`pendingModifications = []`), baseline snapshotting, recursive `deepEqual` validation, automatic reversion splicing, reactive `isDirty` state derivation driving the "Save All Settings" button state and red `!` badge, navigation guards (`beforeNavigate`, `beforeunload`), and verified baseline rollback.
+3. **Platform Architecture (`docs/ARCHITECTURE.md`)**:
+   - Updated Section 4.1 system reserved columns list to explicitly document `CREATED_AT` (immutable initial timestamp) and `LAST_UPDATED` (updated strictly upon verified row modifications).
+4. **Technical Backlog (`docs/BACKLOG.md`)**:
+   - Added `SCHED-02` and `UI-04` to Section 2 Priority Overview Matrix (`v0.1.9`, COMPLETED ✓).
+   - Added detailed work packages for Section 3.9 (`SCHED-02`) and Section 3.10 (`UI-04`).
+   - Renumbered subsequent backlog work packages (3.11 `CORE-02` through 3.16 `Production MVP Release Gate`).
+
+### Verification & Version Integrity
+- Verified single source of truth version: `src/__init__.py` (`__version__ = "0.1.9"`).
+- Confirmed version badges across all canonical documents match `v0.1.9`.
+- Verified 100% English language compliance across all technical documentation.
+
+### Files Modified
+- `docs/BACKEND_SPEC.md` (Modified)
+- `docs/FRONTEND_SPEC.md` (Modified)
+- `docs/ARCHITECTURE.md` (Modified)
+- `docs/BACKLOG.md` (Modified)
+- `PROJECT_LOG.md` (Updated)

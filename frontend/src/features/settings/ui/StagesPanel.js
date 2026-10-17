@@ -76,17 +76,19 @@ export function createStagesPanel(store, stagesData = []) {
                     })}
                     <div class="u-flex u-gap-1 u-ml-2">
                       ${Button({
-                        label: '↑',
+                        label: '▲',
                         variant: 'ghost',
                         size: 'sm',
                         disabled: i === 0,
+                        ariaLabel: 'Move Up',
                         onClick: () => handleMoveStage(i, -1)
                       })}
                       ${Button({
-                        label: '↓',
+                        label: '▼',
                         variant: 'ghost',
                         size: 'sm',
                         disabled: i === stagesData.length - 1,
+                        ariaLabel: 'Move Down',
                         onClick: () => handleMoveStage(i, 1)
                       })}
                       ${Button({ label: 'Edit', variant: 'ghost', size: 'sm', onClick: () => store.set(s => ({ ...s, isStageModalOpen: true, editingStageId: stage.id })) })}

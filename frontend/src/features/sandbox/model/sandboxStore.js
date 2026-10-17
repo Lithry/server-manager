@@ -17,7 +17,6 @@ export function createSandboxStore() {
     inspectorTab: 'keys',
     inspectorFilter: '',
     copiedPath: null,
-    testVariable: '',
     logs: [],
     isLoading: false,
     error: null,

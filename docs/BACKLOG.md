@@ -39,6 +39,9 @@
 | **UX-03** | **P3 (Polish)** | WebUI / Tooling | Discrete Multi-Variable Context Inputs for Transformer Test Harness | Phase 1 (`v0.1.9`) | **PLANNED 📅** |
 | **CORE-04** | **P2 (Medium)** | Core / Storage | Accumulative JSON List Merging & Deduplication | Phase 1 (`v0.1.9`) | **COMPLETED ✓** |
 | **STG-04** | **P2 (Medium)** | Core / WebUI | Stage-Scoped Field Mapping Selection & Granular Column Execution | Phase 1 (`v0.1.9`) | **COMPLETED ✓** |
+| **TRANS-01** | **P1 (High)** | Core / Engine | Single-Line Multi-Branch Transformer Engine & Syntax Normalization | Phase 1 (`v0.1.9`) | **COMPLETED ✓** |
+| **SCHED-02** | **P1 (High)** | Core / Ingestion | Ingestion Watermark, Immutable CREATED_AT & Accurate LAST_UPDATED | Phase 1 (`v0.1.9`) | **COMPLETED ✓** |
+| **UI-04** | **P2 (Medium)** | WebUI / Settings | Change-Tracking Modification Array & Accurate isDirty Reactivity | Phase 1 (`v0.1.9`) | **COMPLETED ✓** |
 | **CORE-02** | **P1 (High)** | Core / Engine | Multi-Pipeline Dynamic Registry & Scoped DAG Progression Engine | Phase 2 (`v0.2.0`) | **PLANNED 📅** |
 | **API-01** | **P2 (Medium)** | Core / Presets | Shoko Server Verified API Schema & Presets | Phase 1 (`v0.1.6`) | **COMPLETED ✓** |
 | **API-02** | **P2 (Medium)** | LLM / Telemetry | Tier 3 Guided Remediation API (`/api/v1/meta/remediate`) | Phase 4 (`v0.4.0`) | **PLANNED 📅** |
@@ -173,12 +176,87 @@
      - Extracted standalone `ServiceScopeSelector.js` (<120 lines) to preserve component boundaries (<250 lines in `StageModal.js`). [✓ COMPLETED]
      - Renders native `<details>` accordions with Select All / Clear All controls, scoped column badges (`${checkedCount} of ${totalCount} active` or `All fields active by default`), and operator guidance. [✓ COMPLETED]
      - Implemented `collectServiceMappingScopes` with clean default fallback (omits service key if 0 or all columns checked) and non-blocking modal UX. [✓ COMPLETED]
-  5. **Automated Verification**:
-     - Authored and verified 5 isolated unit and integration test cases in `tests/test_stg04_stage_mapping_scopes.py` (all 15 project tests passing cleanly in `0.43s`). [✓ COMPLETED]
+   5. **Automated Verification**:
+      - Authored and verified 5 isolated unit and integration test cases in `tests/test_stg04_stage_mapping_scopes.py` (all 15 project tests passing cleanly in `0.43s`). [✓ COMPLETED]
 
 ---
 
-### 3.8 CORE-02: Multi-Pipeline Dynamic Registry & Scoped DAG Progression Engine (`v0.2.0` - Phase 2)
+### 3.8 TRANS-01: Single-Line Multi-Branch Transformer Engine & Syntax Normalization (`v0.1.9`) [COMPLETED ✓]
+- **Objective**: Provide operators with an expressive, human-friendly single-line multi-branch syntax (`if ... then ... else if ... then ... else ...`) for field transformations without multiline textarea layout disruptions.
+- **Architectural Solution & Implemented Changes**:
+  1. **Decoupled Architecture (`src/core/transformers.py`)**:
+     - Extracted `TransformerEvaluator` and `SafeContext` from `src/core/predicates.py` into dedicated `src/core/transformers.py` (<160 lines), isolating transformation processing from stage progression predicates.
+     - Re-exported both classes in `src/core/predicates.py` for 100% backward compatibility across callers.
+  2. **String Literal Masking Engine (`_mask_strings` & `_unmask_strings`)**:
+     - Replaces string literals matching single- and double-quotes with placeholder tokens (`__STR_LIT_{idx}__`) before regex parsing.
+     - Prevents token collisions when keywords (e.g. `then`, `else`, `return`, `if`) appear inside string values.
+  3. **Multi-Branch Syntax Normalization (`normalize_transformer_syntax`)**:
+     - Normalizes `else return <val>` to `else <val>` and `(if|elif|else if) <cond> return <val>` to `\1 <cond> then <val>`.
+     - Normalizes human-friendly single-line branching syntax into nested Python ternary expressions:
+       - 2-State: `if <cond> then <val1> else <val2>` $\rightarrow$ `(<val1>) if (<cond>) else (<val2>)`
+       - Multi-Branch: `if <cond1> then <val1> else if <cond2> then <val2> else <default>` (or with `elif`) $\rightarrow$ chained backwards from `else` into `(<val1>) if (<cond1>) else ((<val2>) if (<cond2>) else (<default>))`.
+       - Pure Python ternaries (e.g., `'DELETED' if EVENT == 'DELETED' else 'ACTIVE'`) pass through unmodified.
+  4. **Syntax Validation & Safe Context Evaluation (`validate_syntax` & `evaluate`)**:
+     - Pre-validates syntax using `ast.parse(norm, mode="eval")`.
+     - `SafeContext` resolves missing keys to `None` and looks up identifiers case-insensitively.
+     - Sandboxed evaluation environment with empty built-ins (`safe_globals = {"__builtins__": {}}`) and safe injected helpers (`str`, `int`, `bool`, `len`, `lower`, `upper`, `merge`).
+  5. **Modular WebUI Guidance (`MappingModal.js`)**:
+     - Retained single-line text input ergonomics.
+     - Updated syntax help to illustrate direct booleans, 2-state conditionals, multi-branch conditionals (`if EVENT == 'DELETED' then 'DELETED' else if SHOKO_ID is not None then 'RECOGNIZED' else 'UNRECOGNIZED'`), and utility helpers.
+     - Compiled production bundle cleanly via Vite to `src/static/`.
+  6. **Automated Verification**:
+     - Implemented 10 comprehensive unit tests in `tests/test_transformers.py` covering multi-branch chaining, keyword masking, case-insensitivity, syntax validation, and backward compatibility (all 29 project tests passing).
+
+---
+
+### 3.9 SCHED-02: Global Ingestion Watermark, Immutable CREATED_AT, Source None Skip & Accurate LAST_UPDATED (`v0.1.9`) [COMPLETED ✓]
+- **Objective**: Establish robust ingestion cutoff boundaries, preserve item creation timestamps immutably, prevent unmapped None value overwrites, and eliminate false `LAST_UPDATED` timestamp churn.
+- **Architectural Solution & Implemented Changes**:
+  1. **Global Ingestion Watermark (`src/core/scheduler.py`)**: [✓ COMPLETED]
+     - Updated polling watermark query to `SELECT MAX(CREATED_AT) as latest FROM SERVICES_PIPELINE` globally across the entire table without service key filtering (`PIPELINE_KEY LIKE ?`).
+     - Added fallback to root stage activation timestamp (`active_root_stages[0].last_activated_at`) when the table is empty or `latest` is `None`.
+     - In pagination evaluation, strictly evaluates events newer than (`>`) `latest_dt`. Any event with `r_dt <= latest_dt` is flagged as `is_older = True`, skipped, and halts pagination early when all records on a page have been processed.
+  2. **Immutable `CREATED_AT`**: [✓ COMPLETED]
+     - Reaffirmed that `CREATED_AT` is established strictly upon initial row insertion (`NEW_ENTRY`) using upstream event timestamp or UTC now.
+     - Protected via `SYSTEM_RESERVED_COLUMNS`, excluded from dynamic mapping targets, and strictly omitted from all in-place SQL updates.
+  3. **Skip `None` Source Values in Field Mappings (`src/core/scheduler.py`)**: [✓ COMPLETED]
+     - In root stage ingestion mapping loop: if `val is None` after dotted path and direct key extraction, immediately `continue`, skipping transformer evaluation and preventing `None` from overwriting columns.
+     - In consumer stage reconciliation (`_execute_consumer_enrichment`): if `val is None`, immediately `continue`, avoiding unnecessary evaluation and column writes.
+  4. **`LAST_UPDATED` Modified Exclusively on Real Row Changes (`src/core/scheduler.py`)**: [✓ COMPLETED]
+     - In root stage in-place updates: added `has_changes = any(existing_row.get(k) != v and existing_row.get(k.lower()) != v for k, v in mapped_fields.items())`. SQL `UPDATE` and `LAST_UPDATED = CURRENT_TIMESTAMP` execute only if `mapped_fields` has values and `has_changes` is `True`.
+     - In consumer stage reconciliation (`_execute_consumer_enrichment`): maintained the strict `has_changes` check before executing SQL `UPDATE`, guaranteeing `LAST_UPDATED` updates only when real data differences exist.
+  5. **Automated Verification**: [✓ COMPLETED]
+     - Verified with `.venv\Scripts\python.exe -m py_compile src\core\scheduler.py` (0 errors).
+     - Executed full test suite: 29 tests passing cleanly in 0.317s.
+
+---
+
+### 3.10 UI-04: Change-Tracking Modification Array & Accurate isDirty Reactivity in SettingsPage (`v0.1.9`) [COMPLETED ✓]
+- **Objective**: Implement robust dirty state tracking, deep equality comparison, accurate button/badge reactivity, and unsaved changes navigation guards in `SettingsPage.js`.
+- **Architectural Solution & Implemented Changes**:
+  1. **Change-Tracking Modification Array Architecture (`frontend/src/pages/SettingsPage.js`)**: [✓ COMPLETED]
+     - Implemented `pendingModifications = []` tracking array storing `{ key, oldValue, newValue }` records.
+     - Initialized `baseline` from server settings snapshot upon page mount / query resolution.
+     - Built canonical `deepEqual(a, b)` comparison algorithm handling nested dictionaries, order-sensitive arrays, and primitives without external dependencies.
+     - Implemented `trackModification(key, oldValue, newValue)`:
+       - When `deepEqual(oldValue, newValue)` is `true`: removes the entry from `pendingModifications` via `splice`.
+       - When `deepEqual(oldValue, newValue)` is `false`: creates or updates the entry in `pendingModifications`.
+     - Built `evaluateModifications(current)` to granularly track upstream services (`services.<id>`), notification triggers, pipeline stages, and engine retention / global polling.
+  2. **Accurate `isDirty` Reactivity & Store Synchronization**: [✓ COMPLETED]
+     - Intercepted `store.set` to continuously evaluate current cache data against `baseline` and derive `isDirty = pendingModifications.length > 0`.
+     - When inputs or configurations are modified, `pendingModifications.length > 0` enables "Save All Settings" and displays the red `!` badge.
+     - When modifications are undone, reverted, or newly added items deleted, `pendingModifications.length === 0` automatically resets `isDirty = false`, disabling the Save button and hiding the badge.
+  3. **Atomic Save & Verified Baseline Rollback**: [✓ COMPLETED]
+     - On successful `POST /api/v1/settings`: updates `baseline` to confirmed settings, clears `pendingModifications = []`, and resets `isDirty = false`.
+     - On save error: restores `queryCache` from `baseline`, clears `pendingModifications = []`, and alerts the operator of rollback.
+     - On unmount with unsaved changes left behind: safely rolls back `queryCache` to `baseline` to prevent dirty state contamination across routes.
+  4. **Strict Module Boundary & Vite Production Compilation**: [✓ COMPLETED]
+     - Refactored `frontend/src/pages/SettingsPage.js` to 215 lines (strictly below the 250-line boundary).
+     - Executed `npm run build` in `frontend/`: successfully compiled production bundle into `src/static/` in 996ms with 0 errors.
+
+---
+
+### 3.11 CORE-02: Multi-Pipeline Dynamic Registry & Scoped DAG Progression Engine (`v0.2.0` - Phase 2)
 - **Objective**: Upgrade from single `SERVICES_PIPELINE` to multi-pipeline dynamic architecture.
 - **Dependencies**: Requires stabilization of single-pipeline stage mechanics (`STG-01` through `STG-03`) and developer sandbox tooling (`SBX-01`).
 - **Tasks**:
@@ -199,7 +277,7 @@
 
 ---
 
-### 3.9 VIEW-01: Dual-Mode Table & View Builder (`v0.3.0` - Phase 3)
+### 3.12 VIEW-01: Dual-Mode Table & View Builder (`v0.3.0` - Phase 3)
 - **Objective**: Allow operators to create both virtual SQL views and persistent materialized destination tables.
 - **Tasks**:
   1. Support two dataset types:
@@ -209,7 +287,7 @@
 
 ---
 
-### 3.10 API-02: Tier 3 Guided Remediation API (`v0.4.0` - Phase 4)
+### 3.13 API-02: Tier 3 Guided Remediation API (`v0.4.0` - Phase 4)
 - **Objective**: Complete Tier 3 LLM tool suite for LibreChat / Ollama with safe remediation handoff.
 - **Tasks**:
   1. Implement `POST /api/v1/meta/remediate`:
@@ -221,7 +299,7 @@
 
 ---
 
-### 3.11 UX-02 & CFG-01: Guided Setup Flow & Out-of-the-Box Presets (`v0.5.0` - Phase 5)
+### 3.14 UX-02 & CFG-01: Guided Setup Flow & Out-of-the-Box Presets (`v0.5.0` - Phase 5)
 - **Objective**: Enable zero-friction initial setup for new installations.
 - **Tasks**:
   1. Add built-in service presets for Sonarr, Radarr, Shoko, and Jellyfin with pre-configured endpoints and mappings.
@@ -229,7 +307,7 @@
 
 ---
 
-### 3.12 DB-01: Granular Ingestion Log Audit & Telemetry Timing (`v0.6.0` - Phase 6)
+### 3.15 DB-01: Granular Ingestion Log Audit & Telemetry Timing (`v0.6.0` - Phase 6)
 - **Objective**: Ingestion performance observability.
 - **Tasks**:
   1. Record execution duration in milliseconds for each service loop and secondary enrichment query.
@@ -237,7 +315,7 @@
 
 ---
 
-### 3.13 Production MVP Release Gate (`v1.0.0`)
+### 3.16 Production MVP Release Gate (`v1.0.0`)
 - **Criteria**:
   - All Phases 1 through 6 completed and verified.
   - 100% test pass rate with automated integration suites.

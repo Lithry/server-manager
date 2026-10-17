@@ -101,6 +101,11 @@ All UI elements utilize predefined styles and components rather than arbitrary a
   - Dynamically computes and displays status badges: `(${checkedCount} of ${totalCount} active)` if scoped, or `All fields active by default` when unscoped.
   - Controls: "Select All" and "Clear All" buttons, with inline guidance for operators.
   - Exports `collectServiceMappingScopes` with clean default fallback: omits the service key from the resulting dictionary if 0 or all columns are checked, preserving the backend engine's default all-columns behavior without blocking alerts.
+- **`MappingModal` (`features/settings/ui/MappingModal.js`)**:
+  - Field mapping and transformer configuration dialog (<135 lines).
+  - Single-line text input for transformer expressions, maintaining operator ergonomics and avoiding multiline layout shifts.
+  - Live syntax guide documenting direct boolean expressions (`'anime' in value`), 2-state conditional expressions (`if 'anime' in value then 1 else 0`), single-line multi-branch expressions (`if EVENT == 'DELETED' then 'DELETED' else if SHOKO_ID is not None then 'RECOGNIZED' else 'UNRECOGNIZED'`), and built-in helper functions (`lower(value)`, `len(value) > 0`).
+  - Integrated interactive transformer testing harness executing against `POST /api/v1/settings/test-transformer`, supporting both scalar sample values and structured JSON mock context dictionaries.
 - **Developer API Sandbox Feature Slice (`features/sandbox/`)**:
   - **`PayloadInspector` (`features/sandbox/ui/PayloadInspector.js`)**:
     - Four-tab inspection view (<155 lines): `Discovered Keys`, `Endpoint Result`, `Cumulative Context`, and `Logs`.
@@ -129,9 +134,26 @@ All UI elements utilize predefined styles and components rather than arbitrary a
 - **Security Rule**: API keys and secrets returned by `GET /api/v1/settings` are stored **strictly in memory** and never written to `localStorage`.
 - Visibility-aware polling: automatically pauses background fetching when the browser tab is hidden or backgrounded.
 
-### 4.3 Settings Store with Optimistic Rollback
-- Settings are modified in memory and committed as an atomic payload to `POST /api/v1/settings`.
-- In the event of network failure or schema rejection, the store rolls back to the prior server-verified state, preventing UI divergence.
+### 4.3 Settings Store, Change-Tracking Modification Array & Reactive `isDirty` Reactivity (`SettingsPage.js`)
+- **Server Baseline Snapshotting**:
+  - Captured upon page mount or initial query cache resolution via `baseline = JSON.parse(JSON.stringify(snapshot.data))`.
+  - Guarantees an immutable reference snapshot representing the verified server state.
+- **Change-Tracking Modification Array Architecture (`pendingModifications = []`)**:
+  - Replaces volatile flags with an explicit tracking array storing discrete modification records: `{ key, oldValue, newValue }`.
+  - Canonical `deepEqual(a, b)` Comparison: Recursively validates primitives, order-sensitive arrays, and nested objects without external dependencies.
+  - Granular Path Tracking: Evaluates edits across upstream services (`services.<id>`), notification triggers (`notification_triggers`), pipeline stages (`stages`), and engine retention/polling cadences.
+  - Reversion Detection & Splicing: Whenever an operator edits a field, `trackModification` inspects the state. If `deepEqual(oldValue, newValue)` evaluates to `true` (e.g. reverting an edited string back to its baseline value, or deleting an unsaved item), the modification is spliced out (`splice`) from `pendingModifications`.
+- **Reactive `isDirty` State & UI Binding**:
+  - Store update interceptor continuously evaluates current cache against baseline, deriving `isDirty = pendingModifications.length > 0`.
+  - Directly drives the "Save All Settings" button state (`disabled: !isDirty`) and toggles the red `!` notification badge.
+  - Reverting all changes back to baseline automatically clears all pending modifications and sets `isDirty = false`, disabling the Save button and hiding the alert badge without requiring a page refresh.
+- **Navigation Safety & Unsaved Changes Guard**:
+  - Intercepts client-side routing via `router.setBeforeNavigateHook()`: when `pendingModifications.length > 0`, displays an asynchronous `ConfirmDialog` warning before navigation.
+  - Attaches browser `beforeunload` listener to prevent accidental page refresh or tab close.
+- **Atomic Persistence & Verified Baseline Rollback**:
+  - On successful `POST /api/v1/settings`: updates `baseline` to the confirmed configuration, flushes `pendingModifications = []`, and resets `isDirty = false`.
+  - On network error or schema rejection: restores `queryCache` to `baseline`, clears `pendingModifications = []`, and displays an informative alert explaining the rollback.
+  - On page unmount with unsaved changes left behind: safely rolls back `queryCache` to `baseline` to prevent dirty configuration leakage into other application routes.
 
 ---
 

@@ -1,11 +1,10 @@
 import { html, nothing } from 'lit-html';
 import { settingsApi, settingsKeys } from '../features/settings/api.js';
-import { queryCache } from '../shared/api/index.js';
+import { queryCache, http } from '../shared/api/index.js';
 import { createStore } from '../shared/lib/lib.js';
 import { Button } from '../shared/ui/atoms/Button/Button.js';
 import { Icon } from '../shared/ui/atoms/Icon/Icon.js';
 import { ConfirmDialog } from '../shared/ui/organisms/ConfirmDialog/ConfirmDialog.js';
-import { http } from '../shared/api/index.js';
 
 import { createServicesPanel } from '../features/settings/ui/ServicesPanel.js';
 import { createServiceModal } from '../features/settings/ui/ServiceModal.js';
@@ -19,23 +18,67 @@ import { createNotificationTriggerModal } from '../features/settings/ui/Notifica
 import { createEnginePanel } from '../features/settings/ui/EnginePanel.js';
 import { createSandboxPage } from './SandboxPage.js';
 
+function deepEqual(a, b) {
+  if (a === b) return true;
+  if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a)) {
+    if (a.length !== b.length) return false;
+    return a.every((item, i) => deepEqual(item, b[i]));
+  }
+  const keysA = Object.keys(a), keysB = Object.keys(b);
+  if (keysA.length !== keysB.length) return false;
+  return keysA.every(k => Object.prototype.hasOwnProperty.call(b, k) && deepEqual(a[k], b[k]));
+}
+
 export function createSettingsPage(router) {
   const sandboxPanel = createSandboxPage();
+  let baseline = null, pendingModifications = [], unsubState, unsubData;
+
+  function trackModification(key, oldValue, newValue) {
+    const idx = pendingModifications.findIndex(m => m.key === key);
+    if (deepEqual(oldValue, newValue)) {
+      if (idx !== -1) pendingModifications.splice(idx, 1);
+    } else if (idx !== -1) {
+      pendingModifications[idx].newValue = newValue;
+    } else {
+      pendingModifications.push({ key, oldValue, newValue });
+    }
+  }
+
+  function evaluateModifications(cur) {
+    if (!baseline || !cur) return;
+    const allKeys = new Set([...Object.keys(baseline), ...Object.keys(cur), ...pendingModifications.map(m => m.key.split('.')[0])]);
+    for (const key of allKeys) {
+      if (key === 'services') {
+        const sKeys = new Set([...Object.keys(baseline.services || {}), ...Object.keys(cur.services || {}), ...pendingModifications.filter(m => m.key.startsWith('services.')).map(m => m.key.slice(9))]);
+        for (const sKey of sKeys) trackModification(`services.${sKey}`, baseline.services?.[sKey], cur.services?.[sKey]);
+      } else if (key === 'notification_triggers' || key === 'triggers') {
+        trackModification('notification_triggers', baseline.notification_triggers ?? baseline.triggers ?? [], cur.notification_triggers ?? cur.triggers ?? []);
+      } else {
+        trackModification(key, baseline[key], cur[key]);
+      }
+    }
+  }
+
   const store = createStore({ 
-    activeTab: 'services', 
-    saving: false,
-    isDirty: false,
-    isServiceModalOpen: false,
-    isStageModalOpen: false,
-    isMappingModalOpen: false,
-    isSampleApiModalOpen: false,
-    isNotificationModalOpen: false,
-    selectedMappingService: ''
+    activeTab: 'services', saving: false, isDirty: false,
+    isServiceModalOpen: false, isStageModalOpen: false, isMappingModalOpen: false,
+    isSampleApiModalOpen: false, isNotificationModalOpen: false, selectedMappingService: ''
   });
-  let unsubState, unsubData;
+
+  const rawSet = store.set;
+  store.set = (updater) => {
+    rawSet((prev) => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      const curData = queryCache.read(settingsKeys.all)?.data;
+      if (baseline && curData) evaluateModifications(curData);
+      return { ...next, isDirty: pendingModifications.length > 0 };
+    });
+  };
 
   const handleBeforeUnload = (e) => {
-    if (store.get().isDirty) {
+    if (pendingModifications.length > 0) {
       e.preventDefault();
       e.returnValue = '';
     }
@@ -44,22 +87,37 @@ export function createSettingsPage(router) {
   return {
     mount(onUpdate) {
       unsubState = store.subscribe(() => onUpdate());
-      unsubData = queryCache.subscribe(settingsKeys.all, () => onUpdate());
+      unsubData = queryCache.subscribe(settingsKeys.all, (snapshot) => {
+        if (snapshot?.data) {
+          if (!baseline) {
+            baseline = JSON.parse(JSON.stringify(snapshot.data));
+            pendingModifications = [];
+          } else {
+            evaluateModifications(snapshot.data);
+          }
+          store.set(s => ({ ...s, isDirty: pendingModifications.length > 0 }));
+        }
+        onUpdate();
+      });
+
+      const cached = queryCache.read(settingsKeys.all);
+      if (cached?.data && !baseline) {
+        baseline = JSON.parse(JSON.stringify(cached.data));
+        pendingModifications = [];
+      }
+
       settingsApi.getSettings();
       sandboxPanel.mount(onUpdate);
-      
       window.addEventListener('beforeunload', handleBeforeUnload);
       if (router) {
-        router.setBeforeNavigateHook(async (hash) => {
-          if (store.get().isDirty) {
-            return await ConfirmDialog({
-              title: 'Unsaved Changes',
-              message: 'You have unsaved changes. Are you sure you want to leave this page without saving?',
-              confirmLabel: 'Leave without saving',
-              tone: 'danger'
-            });
-          }
-          return true;
+        router.setBeforeNavigateHook(async () => {
+          if (pendingModifications.length === 0) return true;
+          return await ConfirmDialog({
+            title: 'Unsaved Changes',
+            message: 'You have unsaved changes. Are you sure you want to leave this page without saving?',
+            confirmLabel: 'Leave without saving',
+            tone: 'danger'
+          });
         });
       }
     },
@@ -69,6 +127,11 @@ export function createSettingsPage(router) {
       sandboxPanel.unmount();
       window.removeEventListener('beforeunload', handleBeforeUnload);
       if (router) router.setBeforeNavigateHook(null);
+      if (baseline && pendingModifications.length > 0) {
+        queryCache.setData(settingsKeys.all, () => JSON.parse(JSON.stringify(baseline)));
+      }
+      baseline = null;
+      pendingModifications = [];
     },
     view() {
       const state = store.get();
@@ -79,31 +142,16 @@ export function createSettingsPage(router) {
       if (status === 'loading' && !data) return html`<p class="u-text-muted">Loading settings...</p>`;
       if (status === 'error' && !data) return html`<p class="u-text-danger">Error: ${error?.message}</p>`;
 
-      const config = {
-        retention_days: data?.retention_days || 30,
-        global_poll_interval_seconds: data?.global_poll_interval_seconds || 300
-      };
-      const servicesData = data?.services || {};
-      const stagesData = data?.stages || [];
-      const globalPoll = config.global_poll_interval_seconds;
+      const isDirty = pendingModifications.length > 0;
+      const config = { retention_days: data?.retention_days || 30, global_poll_interval_seconds: data?.global_poll_interval_seconds || 300 };
+      const servicesData = data?.services || {}, stagesData = data?.stages || [], globalPoll = config.global_poll_interval_seconds;
 
-      const renderTabButton = (id, icon, label) => {
-        const isActive = activeTab === id;
-        const color = isActive ? 'var(--color-accent)' : 'var(--color-text-muted)';
-        const border = isActive ? '1px solid var(--color-accent)' : '1px solid var(--color-border)';
-        const bg = isActive ? 'color-mix(in srgb, var(--color-accent) 15%, transparent)' : 'var(--color-bg-card)';
-        
-        return html`
-          <button 
-            class="u-flex u-items-center u-gap-2 u-text-sm"
-            style="background: ${bg}; border: ${border}; border-radius: var(--radius-sm); padding: var(--space-2) var(--space-3); color: ${color}; cursor: pointer; transition: all 0.2s;"
-            @click=${() => store.set(s => ({ ...s, activeTab: id }))}
-          >
-            ${Icon({ name: icon, size: 16 })}
-            <span>${label}</span>
-          </button>
-        `;
-      };
+      const renderTabButton = (id, icon, label) => html`
+        <button type="button" class="tab-btn ${activeTab === id ? 'is-active' : ''}" @click=${() => store.set(s => ({ ...s, activeTab: id }))}>
+          ${Icon({ name: icon, size: 16 })}
+          <span>${label}</span>
+        </button>
+      `;
 
       return html`
         <div class="u-flex u-flex-col u-gap-4">
@@ -118,35 +166,31 @@ export function createSettingsPage(router) {
             </div>
             <div class="u-flex u-items-center u-gap-3">
               <div style="position: relative; display: inline-block;">
-              ${Button({ 
-                label: 'Save All Settings', 
-              variant: 'save', 
-              size: 'sm', 
-              loading: saving, 
-              disabled: !state.isDirty,
-              onClick: async () => {
-                const snapshot = queryCache.read(settingsKeys.all);
-                if (!snapshot || !snapshot.data) return;
-                
-                // Backup snapshot for rollback
-                const prevSnapshotData = JSON.parse(JSON.stringify(snapshot.data));
-                store.set(s => ({ ...s, saving: true }));
-                
-                try {
-                  const updatedData = await http.post('/api/v1/settings', snapshot.data);
-                  queryCache.setData(settingsKeys.all, () => updatedData);
-                  store.set(s => ({ ...s, isDirty: false, saving: false }));
-                  alert('✓ Settings saved successfully, schema migrated, and scheduler refreshed.');
-                } catch (err) {
-                  // Rollback on failure
-                  queryCache.setData(settingsKeys.all, () => prevSnapshotData);
-                  store.set(s => ({ ...s, isDirty: false, saving: false }));
-                  alert('Failed to save settings: ' + err.message + '\nRolled back to previous verified configuration.');
-                }
-              } 
-            })}
-              ${state.isDirty ? html`<div title="Unsaved modifications" style="position: absolute; top: -6px; right: -6px; display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; background: var(--color-danger); color: white; border-radius: 50%; font-weight: bold; font-size: 11px; cursor: help; pointer-events: none; z-index: 10;">!</div>` : nothing}
-            </div>
+                ${Button({ 
+                  label: 'Save All Settings', variant: 'save', size: 'sm', loading: saving, disabled: !isDirty,
+                  onClick: async () => {
+                    const snap = queryCache.read(settingsKeys.all);
+                    if (!snap || !snap.data) return;
+                    const backup = baseline ? JSON.parse(JSON.stringify(baseline)) : JSON.parse(JSON.stringify(snap.data));
+                    store.set(s => ({ ...s, saving: true }));
+                    try {
+                      const updatedData = await http.post('/api/v1/settings', snap.data);
+                      queryCache.setData(settingsKeys.all, () => updatedData);
+                      baseline = JSON.parse(JSON.stringify(updatedData));
+                      pendingModifications = [];
+                      store.set(s => ({ ...s, isDirty: false, saving: false }));
+                      alert('✓ Settings saved successfully, schema migrated, and scheduler refreshed.');
+                    } catch (err) {
+                      queryCache.setData(settingsKeys.all, () => backup);
+                      baseline = backup;
+                      pendingModifications = [];
+                      store.set(s => ({ ...s, isDirty: false, saving: false }));
+                      alert('Failed to save settings: ' + err.message + '\nRolled back to previous verified configuration.');
+                    }
+                  } 
+                })}
+                ${isDirty ? html`<div title="Unsaved modifications" style="position: absolute; top: -6px; right: -6px; display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; background: var(--color-danger); color: white; border-radius: 50%; font-weight: bold; font-size: 11px; cursor: help; pointer-events: none; z-index: 10;">!</div>` : nothing}
+              </div>
             </div>
           </div>
           

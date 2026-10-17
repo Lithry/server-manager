@@ -413,10 +413,11 @@ class TaskScheduler:
             # 2. SECOND: Root stage ingestion for new incoming records (NEW_ENTRY)
             if active_root_stages:
                 max_created_res = await db_manager.query(
-                    "SELECT MAX(CREATED_AT) as latest FROM SERVICES_PIPELINE WHERE PIPELINE_KEY LIKE ?",
-                    (f"{service_id}:%",)
+                    "SELECT MAX(CREATED_AT) as latest FROM SERVICES_PIPELINE"
                 )
                 latest_created_at = max_created_res[0]["latest"] if max_created_res and max_created_res[0]["latest"] else None
+                if not latest_created_at and active_root_stages:
+                    latest_created_at = active_root_stages[0].last_activated_at
                 latest_dt = _parse_timestamp(latest_created_at) if latest_created_at else None
 
                 poll_ep = getattr(service_cfg, "poll_endpoint", None) or "/api/v3/history?pageSize=100&sortKey=date&sortDirection=descending"
@@ -623,6 +624,8 @@ class TaskScheduler:
                         val = extract_dotted_value(context_dict, mapping.source_field)
                         if val is None:
                             val = context_dict.get(mapping.source_field)
+                        if val is None:
+                            continue
 
                         if mapping.transformer:
                             try:
@@ -650,8 +653,9 @@ class TaskScheduler:
                     # Authoritative Mermaid Lifecycle: In-Place UPDATE or NEW_ENTRY INSERT
                     if existing_row:
                         # Perform in-place UPDATE
-                        set_clauses = [f"{col} = ?" for col in mapped_fields.keys()]
-                        if set_clauses:
+                        has_changes = any(existing_row.get(k) != v and existing_row.get(k.lower()) != v for k, v in mapped_fields.items())
+                        if mapped_fields and has_changes:
+                            set_clauses = [f"{col} = ?" for col in mapped_fields.keys()]
                             update_sql = f"UPDATE SERVICES_PIPELINE SET {', '.join(set_clauses)}, LAST_UPDATED = CURRENT_TIMESTAMP WHERE PIPELINE_KEY = ?;"
                             await db_manager.execute(update_sql, tuple(mapped_fields.values()) + (pipeline_key,))
                             reconcile_updates += 1
@@ -770,6 +774,8 @@ class TaskScheduler:
             val = extract_dotted_value(context_dict, mapping.source_field)
             if val is None:
                 val = context_dict.get(mapping.source_field)
+            if val is None:
+                continue
 
             if mapping.transformer:
                 try:

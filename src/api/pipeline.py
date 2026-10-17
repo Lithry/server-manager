@@ -444,7 +444,6 @@ async def sandbox_enrichment(req: SandboxEnrichmentRequest) -> Dict[str, Any]:
                 if s_resp.status_code == 200:
                     s_json = s_resp.json()
                     if isinstance(s_json, dict):
-                        sample_dict["sample"] = s_json
                         sample_dict.update(s_json)
                         recs = s_json.get("records") or s_json.get("Items") or s_json.get("files")
                         if isinstance(recs, list) and recs and isinstance(recs[0], dict):
@@ -452,7 +451,6 @@ async def sandbox_enrichment(req: SandboxEnrichmentRequest) -> Dict[str, Any]:
                             sample_dict.update(first_rec)
                             sample_dict["records"] = first_rec
                     elif isinstance(s_json, list):
-                        sample_dict["sample"] = {"List": s_json}
                         if s_json and isinstance(s_json[0], dict):
                             first_rec = s_json[0]
                             sample_dict.update(first_rec)

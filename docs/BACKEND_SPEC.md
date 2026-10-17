@@ -22,8 +22,9 @@ src/
 │   ├── config.py         # Dynamic settings, Pydantic schemas & atomic persistence
 │   ├── database.py       # SQLite WAL manager, schema initialization & DDL migrations
 │   ├── gitops.py         # Read-only host repository status inspector
-│   ├── predicates.py     # AST-based safe boolean expression & transformer evaluator
-│   └── scheduler.py      # Background task loops, API polling, tag caching & stage engine
+│   ├── predicates.py     # AST-based safe boolean expression evaluator & transformer re-exports
+│   ├── scheduler.py      # Background task loops, API polling, tag caching & stage engine
+│   └── transformers.py   # Single-line multi-branch transformer evaluator & safe context
 └── api/
     ├── __init__.py       # API package marker
     ├── incidents.py      # Incident management and ERROR_INDEX catalog endpoints
@@ -151,20 +152,53 @@ src/
 
 ---
 
-### 2.4 `src/core/predicates.py` — Safe AST Evaluation
+### 2.4 `src/core/predicates.py` — Safe AST Boolean Evaluation
 - **Security Policy**: Zero usage of arbitrary `eval()` on raw user strings.
 - **`PredicateEvaluator`**:
   - Normalizes SQL-like tokens (`IS NOT NULL` $\rightarrow$ `is not None`, `AND` $\rightarrow$ `and`, `NULL` $\rightarrow$ `None`).
   - Evaluates standard comparison and logical AST nodes (`ast.Compare`, `ast.BoolOp`, `ast.UnaryOp`).
   - Resolves identifiers case-insensitively against context dictionary (`IS_ANIME`, `FILE_PATH`, `stage.<id>.completed`).
   - `validate_syntax(expr)`: Performs syntax linting and operator checks before saving settings.
-- **`TransformerEvaluator`**:
-  - Evaluates conditional expressions matching `if <condition> then <val_true> else <val_false>`.
-  - Injects safe lambda helpers (`lower`, `upper`, `merge`) without exposing unsafe `__builtins__`.
+- **Re-exports**: Re-exports `TransformerEvaluator` and `SafeContext` from `src.core.transformers` to maintain backwards compatibility across all consumers.
 
 ---
 
-### 2.5 `src/core/scheduler.py` — Ingestion & State Progression
+### 2.5 `src/core/transformers.py` — Single-Line Multi-Branch Transformer Engine
+- **Decoupled Architecture**: Extracted into a dedicated module (<160 lines) to eliminate monolithic bloat and isolate transformation parsing from stage predicate logic.
+- **`SafeContext(dict)`**:
+  - Automatically resolves missing keys to `None` instead of raising `KeyError`.
+  - Performs case-insensitive dictionary lookups (tries uppercase, lowercase, capitalized, and casefolded variants).
+- **`TransformerEvaluator`**:
+  - **String Literal Masking (`_mask_strings` / `_unmask_strings`)**:
+    - Masks single- and double-quoted string literals using regex into `__STR_LIT_{idx}__` tokens prior to keyword tokenization.
+    - Prevents false-positive token splits when transformer keywords (such as `then`, `else`, `return`, `if`) appear inside string values.
+  - **Syntax Normalization (`normalize_transformer_syntax`)**:
+    - Normalizes `else return <val>` to `else <val>` and `(if|elif|else if) <cond> return <val>` to `\1 <cond> then <val>`.
+    - Normalizes human-friendly single-line branching syntax into nested Python ternary expressions:
+      - 2-State: `if <cond> then <val1> else <val2>` $\rightarrow$ `(<val1>) if (<cond>) else (<val2>)`
+      - Multi-Branch: `if <cond1> then <val1> else if <cond2> then <val2> else <default>` (or with `elif`) $\rightarrow$ chained backwards from `else` into `(<val1>) if (<cond1>) else ((<val2>) if (<cond2>) else (<default>))`.
+      - Pure Python ternaries (e.g., `'DELETED' if EVENT == 'DELETED' else 'ACTIVE'`) pass through unmodified.
+  - **Syntax Validation (`validate_syntax`)**:
+    - Validates transformer expressions ahead of persistence using `ast.parse(norm, mode="eval")`. Returns `(bool, str)`.
+  - **Safe Sandbox Evaluation (`evaluate`)**:
+    - Sandboxed execution environment: `safe_globals = {"__builtins__": {}}`.
+    - Injected safe built-in functions: `str`, `int`, `bool`, `len`, `lower` (lowercase string helper), `upper` (uppercase string helper), and `merge` (JSON array / scalar accumulator helper).
+    - Injected `value` and request `context` wrapped into `SafeContext`.
+    - Supports optional `raise_errors: bool = False` flag (returns original `value` on error by default; re-raises for testing and validation).
+
+---
+
+### 2.6 `src/core/scheduler.py` — Ingestion & State Progression
+- **Global Ingestion Watermark (`poll_service`)**:
+  - **Global Watermark Query**: Queries `SELECT MAX(CREATED_AT) as latest FROM SERVICES_PIPELINE` globally across the entire table without filtering by service (`PIPELINE_KEY LIKE ?`).
+  - **Stage Activation Fallback**: If the table is empty or `latest` is `None`, falls back to the earliest active root stage activation timestamp (`active_root_stages[0].last_activated_at`).
+  - **Strict Cutoff & Early Pagination Termination**: Events are evaluated chronologically. Only incoming records strictly newer than the watermark (`r_dt > latest_dt`) are processed. Records with `r_dt <= latest_dt` are skipped (`is_older = True`); when all records on a page are older than or equal to the watermark or already exist in the database, pagination halts early.
+- **Immutable `CREATED_AT` & Conditional `LAST_UPDATED`**:
+  - **`CREATED_AT` Immutability**: Established once upon initial row insertion (`NEW_ENTRY`) from upstream item timestamp or UTC now. `CREATED_AT` is part of `SYSTEM_RESERVED_COLUMNS`, excluded from dynamic mapping targets, and strictly omitted from all subsequent in-place updates.
+  - **Conditional `LAST_UPDATED` Execution**: In both root in-place updates and consumer stage reconciliation (`_execute_consumer_enrichment`), SQL `UPDATE` and `LAST_UPDATED = CURRENT_TIMESTAMP` execute strictly when `has_changes` is `True` (at least one field value differs from existing row values). Prevents spurious timestamp updates and false modification logs when incoming payloads contain identical data.
+- **Source Field `None` Skipping**:
+  - In both root stage ingestion and consumer enrichment loops, if source field extraction (`extract_dotted_value` or direct key lookup) evaluates to `None`, the field mapping is immediately bypassed (`continue`).
+  - Transformers are not evaluated and destination columns are never overwritten when incoming upstream values are absent.
 - **In-Memory Tag Cache**:
   - Upstream services provide numeric tag IDs (`series.tags: [1, 5]`).
   - Scheduler fetches `/api/v3/tag` from upstream and caches `{id: label}` for 10 minutes.
@@ -189,13 +223,13 @@ src/
 
 ---
 
-### 2.6 `src/core/gitops.py` — Git Inspection
+### 2.7 `src/core/gitops.py` — Git Inspection
 - Inspects `/repo` via non-mutating Git subprocess calls (`git rev-parse HEAD`, `git branch --show-current`, `git status --porcelain`).
 - Reports commit hash, short hash, active branch, and uncommitted dirty file count to the WebUI and Tier 3 meta-tools.
 
 ---
 
-### 2.7 `src/api/pipeline.py` — Pipeline Data, Sampling & Decoupled Sandbox Engine
+### 2.8 `src/api/pipeline.py` — Pipeline Data, Sampling & Decoupled Sandbox Engine
 - **Decoupled API Sandbox (`POST /api/v1/pipeline/sandbox/enrichment`)**:
   - **`SandboxEnrichmentRequest` Schema**:
     - `service_id: str`: Target upstream service configuration key.

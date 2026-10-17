@@ -3,7 +3,6 @@
 import ast
 import operator
 import re
-import json
 from typing import Any, Dict, Optional, Tuple
 
 
@@ -157,77 +156,7 @@ class PredicateEvaluator:
             raise ValueError(f"Unsupported AST node expression: {type(node)}")
 
 
-class TransformerEvaluator:
-    """Evaluates field transformations safely (e.g. if 'anime' in tags then 1 else 0)."""
+from src.core.transformers import SafeContext, TransformerEvaluator
 
-    class SafeContext(dict):
-        """Dictionary that resolves missing keys as None and supports case-insensitive lookups."""
-
-        def __missing__(self, key: str) -> Any:
-            if not isinstance(key, str):
-                return None
-            for k in (key.upper(), key.lower(), key.capitalize()):
-                if k in self:
-                    return self[k]
-            key_lower = key.lower()
-            for k, v in self.items():
-                if isinstance(k, str) and k.lower() == key_lower:
-                    return v
-            return None
-
-    @classmethod
-    def validate_syntax(cls, expr: Optional[str]) -> Tuple[bool, str]:
-        if not expr or not expr.strip():
-            return True, "Direct value mapping"
-        cleaned = expr.strip()
-        m = re.match(r"^if\s+(.+)\s+then\s+(.+)\s+else\s+(.+)$", cleaned, flags=re.IGNORECASE)
-        if m:
-            cond, val_if_true, val_if_false = m.groups()
-            py_expr = f"({val_if_true}) if ({cond}) else ({val_if_false})"
-        else:
-            py_expr = cleaned
-        try:
-            ast.parse(py_expr, mode="eval")
-            return True, "Valid transformer expression"
-        except Exception as e:
-            return False, f"Invalid transformer: {str(e)}"
-
-    @classmethod
-    def evaluate(cls, expr: Optional[str], value: Any, context: Optional[Dict[str, Any]] = None, raise_errors: bool = False) -> Any:
-        if not expr or not expr.strip():
-            return value
-        cleaned = expr.strip()
-        m = re.match(r"^if\s+(.+)\s+then\s+(.+)\s+else\s+(.+)$", cleaned, flags=re.IGNORECASE)
-        if m:
-            cond, val_if_true, val_if_false = m.groups()
-            py_expr = f"({val_if_true}) if ({cond}) else ({val_if_false})"
-        else:
-            py_expr = cleaned
-
-        safe_globals = {"__builtins__": {}}
-        safe_locals = {
-            "value": value,
-            "str": str,
-            "int": int,
-            "bool": bool,
-            "len": len,
-            "lower": lambda s: str(s).lower() if s is not None else "",
-            "upper": lambda s: str(s).upper() if s is not None else "",
-            "merge": lambda existing, new: (
-                (json.loads(existing) if isinstance(existing, str) and existing.startswith("[") else ([existing] if existing else [])) +
-                (json.loads(new) if isinstance(new, str) and new.startswith("[") else ([new] if new else []))
-            ),
-        }
-        if context:
-            safe_locals.update(context)
-        safe_context = cls.SafeContext(safe_locals)
-        try:
-            return eval(py_expr, safe_globals, safe_context)
-        except Exception as e:
-            if raise_errors:
-                raise e
-            return value
-
-
-SafeContext = TransformerEvaluator.SafeContext
+__all__ = ["PredicateEvaluator", "TransformerEvaluator", "SafeContext"]
 

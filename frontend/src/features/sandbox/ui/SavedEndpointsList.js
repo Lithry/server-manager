@@ -43,8 +43,8 @@ export function SavedEndpointsList({
           const isActive = activeSet.has(trimmedEp);
           return html`
             <div
-              class="u-flex u-flex-col u-gap-1"
-              style="padding: var(--space-2); border-radius: var(--radius-xs); border: 1px solid ${isActive ? 'var(--color-accent)' : 'var(--color-border)'}; background: ${isActive ? 'color-mix(in srgb, var(--color-accent) 12%, transparent)' : 'var(--color-bg-surface)'}; cursor: pointer; transition: all var(--transition-fast);"
+              class="u-flex u-flex-col u-gap-1 selectable-item ${isActive ? 'is-selected' : ''}"
+              style="padding: var(--space-2);"
               @click=${() => onToggleEndpoint?.(name, trimmedEp)}
             >
               <div class="u-flex u-items-center u-justify-between">
@@ -53,13 +53,14 @@ export function SavedEndpointsList({
                 </strong>
                 <span
                   class="u-font-mono u-text-2xs"
-                  style="padding: 1px 6px; border-radius: var(--radius-xs); font-size: 0.65rem; font-weight: var(--font-weight-medium); ${isActive ? 'background: var(--color-accent); color: #fff;' : 'background: var(--color-bg-base); color: var(--color-text-muted); border: 1px solid var(--color-border);'}"
+                  style="padding: 1px 6px; border-radius: var(--radius-xs); font-size: var(--font-size-2xs); font-weight: var(--font-weight-medium); ${isActive ? 'background: var(--color-accent); color: #fff;' : 'background: var(--color-bg-base); color: var(--color-text-muted); border: 1px solid var(--color-border);'}"
                 >
                   ${isActive ? 'ON' : 'OFF'}
                 </span>
               </div>
               <div
-                class="u-font-mono u-text-2xs u-text-muted u-truncate"
+                class="u-font-mono u-truncate"
+                style="font-size: var(--font-size-xs); color: var(--color-text-secondary);"
                 title=${ep}
               >
                 ${ep}

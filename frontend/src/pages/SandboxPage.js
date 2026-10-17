@@ -68,14 +68,14 @@ export function createSandboxPage() {
           <div class="u-flex u-flex-col u-gap-2" style="flex: 3; min-height: 0;">
             <div style="background: var(--color-bg-card); border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: var(--space-2);">
               <div class="u-flex u-items-center u-justify-between u-mb-1">
-                <span class="u-text-2xs u-text-muted u-font-mono">Endpoint Templates (one per line, e.g. /api/v3/series/{seriesId})</span>
-                <span class="u-text-2xs u-text-muted">Use {path} placeholders</span>
+                <span class="u-font-mono" style="font-size: var(--font-size-sm); color: var(--color-text-secondary);">Endpoint Templates (one per line, e.g. /api/v3/series/{seriesId})</span>
+                <span style="font-size: var(--font-size-sm); color: var(--color-text-secondary);">Use {path} placeholders</span>
               </div>
               <textarea
-                class="form-input u-font-mono u-text-xs"
+                class="form-input u-font-mono"
                 placeholder="/api/v3/endpoint/{id} (one per line)"
                 rows="3"
-                style="resize: vertical; min-height: 48px; width: 100%; border: none; background: transparent; padding: 0; outline: none; line-height: 1.4;"
+                style="resize: none; min-height: 48px; width: 100%; border: none; background: transparent; padding: 0; outline: none; line-height: 1.4; font-size: var(--font-size-sm);"
                 .value=${state.testEndpoint}
                 @input=${(e) => store.set({ testEndpoint: e.target.value })}
               ></textarea>
@@ -90,12 +90,10 @@ export function createSandboxPage() {
                 activeTab: state.inspectorTab,
                 filterQuery: state.inspectorFilter,
                 copiedPath: state.copiedPath,
-                testVariable: state.testVariable,
                 onTabChange: (tab) => store.set({ inspectorTab: tab }),
                 onFilterChange: (q) => store.set({ inspectorFilter: q }),
                 onCopyPath: store.copyPath,
-                onInsertPlaceholder: store.insertPlaceholder,
-                onTestVariableChange: (val) => store.set({ testVariable: val })
+                onInsertPlaceholder: store.insertPlaceholder
               })}
             </div>
           </div>

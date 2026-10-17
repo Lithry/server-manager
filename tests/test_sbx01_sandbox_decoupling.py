@@ -91,10 +91,10 @@ class TestSbx01SandboxDecoupling(unittest.IsolatedAsyncioTestCase):
 
             mock_db.assert_not_called()
             self.assertTrue(result["success"])
-            # Root context has seriesId unpacked from records[0]
+            # Root context has seriesId and sourceTitle unpacked from records[0]
             self.assertEqual(result["context_data"]["seriesId"], 105)
-            # sample namespace is populated with raw wrapper
-            self.assertEqual(result["context_data"]["sample"]["records"][0]["sourceTitle"], "Test.Show.S01E01")
+            self.assertEqual(result["context_data"]["sourceTitle"], "Test.Show.S01E01")
+            self.assertNotIn("sample", result["context_data"])
             # records namespace holds first record dictionary
             self.assertEqual(result["context_data"]["records"]["sourceTitle"], "Test.Show.S01E01")
             # Enrichment using placeholder from sample

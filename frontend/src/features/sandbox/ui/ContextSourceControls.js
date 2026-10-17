@@ -117,11 +117,11 @@ export function ContextSourceControls({
         </div>
 
         <!-- Optional Record ID -->
-        <div style="width: 140px;">
+        <div style="min-width: 120px; max-width: 140px; flex: 1;">
           <input
             type="number"
             class="form-input u-font-mono u-text-sm"
-            placeholder="Record ID (opt)"
+            placeholder="Record ID"
             title="Optional Pipeline Record ID from database"
             .value=${selectedRecordId}
             @input=${(e) => onRecordIdChange?.(e.target.value)}
@@ -199,7 +199,7 @@ export function ContextSourceControls({
             placeholder='{"series": {"id": 101, "title": "Custom Show"}, "episodeId": 456}'
             .value=${customContextText}
             @input=${(e) => onCustomContextChange?.(e.target.value)}
-            style="resize: vertical; line-height: 1.4; width: 100%;"
+            style="resize: none; line-height: 1.4; width: 100%;"
           ></textarea>
         </div>
       </details>

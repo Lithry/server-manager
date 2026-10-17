@@ -16,9 +16,9 @@
 
   /* Text */
   --color-text: #f8fafc;
-  --color-text-secondary: #94a3b8;
-  --color-text-muted: #64748b;
-  --color-console-text: #cbd5e1;
+  --color-text-secondary: #cbd5e1;
+  --color-text-muted: #94a3b8;
+  --color-console-text: #e2e8f0;
 
   /* Brand */
   --color-accent: #38bdf8;
@@ -52,15 +52,29 @@
   /* Typography */
   --font-sans: "Inter", system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
-  --font-size-2xs: 0.65rem;
-  --font-size-xs: 0.75rem;
-  --font-size-sm: 0.8rem;
-  --font-size-base: 0.85rem;
-  --font-size-md: 0.9rem;
-  --font-size-lg: 1.1rem;
-  --font-size-xl: 1.25rem;
+  --font-size-2xs: 0.75rem;
+  --font-size-xs: 0.82rem;
+  --font-size-sm: 0.875rem;
+  --font-size-base: 1rem;
+  --font-size-md: 1.125rem;
+  --font-size-lg: 1.25rem;
+  --font-size-xl: 1.5rem;
   --font-size-2xl: 2rem;
   --font-weight-regular: 400;
+
+  /* Interaction states */
+  --opacity-disabled: 0.45;
+  --opacity-dimmed: 0.65;
+  --color-accent-subtle: color-mix(in srgb, var(--color-accent) 15%, transparent);
+  --color-accent-subtle-hover: color-mix(in srgb, var(--color-accent) 25%, transparent);
+  --color-surface-hover: color-mix(in srgb, var(--color-text) 6%, var(--color-bg-surface));
+  --color-card-hover: color-mix(in srgb, var(--color-text) 6%, var(--color-bg-card));
+  --color-state-inactive-text: var(--color-text-secondary);
+  --color-state-inactive-bg: var(--color-bg-card);
+  --color-state-inactive-border: var(--color-border);
+  --color-state-active-text: var(--color-accent);
+  --color-state-active-bg: var(--color-accent-subtle);
+  --color-state-active-border: var(--color-accent);
   --font-weight-medium: 500;
   --font-weight-semibold: 600;
   --font-weight-bold: 700;
