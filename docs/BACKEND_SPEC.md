@@ -196,9 +196,16 @@ src/
 - **Immutable `CREATED_AT` & Conditional `LAST_UPDATED`**:
   - **`CREATED_AT` Immutability**: Established once upon initial row insertion (`NEW_ENTRY`) from upstream item timestamp or UTC now. `CREATED_AT` is part of `SYSTEM_RESERVED_COLUMNS`, excluded from dynamic mapping targets, and strictly omitted from all subsequent in-place updates.
   - **Conditional `LAST_UPDATED` Execution**: In both root in-place updates and consumer stage reconciliation (`_execute_consumer_enrichment`), SQL `UPDATE` and `LAST_UPDATED = CURRENT_TIMESTAMP` execute strictly when `has_changes` is `True` (at least one field value differs from existing row values). Prevents spurious timestamp updates and false modification logs when incoming payloads contain identical data.
-- **Source Field `None` Skipping**:
-  - In both root stage ingestion and consumer enrichment loops, if source field extraction (`extract_dotted_value` or direct key lookup) evaluates to `None`, the field mapping is immediately bypassed (`continue`).
-  - Transformers are not evaluated and destination columns are never overwritten when incoming upstream values are absent.
+- **Reactive Delta Field Mapping Engine (`evaluate_reactive_mappings` & `_propagate_cross_service_table_mappings`)**:
+  - **Service-Agnostic Multi-Source Resolution**: `source_field` supports single or comma-separated source paths/columns (e.g., endpoint paths `series.title` or dynamic table columns `COL_A, COL_B`). Each token is dynamically classified as an incoming endpoint payload field or an existing uppercase `SERVICES_PIPELINE` column (`table_cols`).
+  - **Null Source Guard (`Skip None`)**: If all resolved sources for a mapping are `None` (or if a pure endpoint mapping receives `None` from the upstream payload), the mapping is immediately bypassed (`continue`) without evaluating transformers or modifying the target column.
+  - **Reactive Source-Change Guard**:
+    - For **Endpoint-Sourced Mappings**: HTTP enrichment endpoints are always queried on schedule so delayed upstream updates (e.g., `"TBD"` $\rightarrow$ final episode title or updated paths/IDs) are captured. The resulting coerced/merged value is compared against `existing_val`; only if `final_val != existing_val` is the column added to `delta_fields` and `changed_columns`.
+    - For **Table-Column-Sourced Mappings**: Evaluates the mapping/transformer strictly when at least one referenced source table column is in `changed_columns` (modified in the current cycle) **or** when the target column itself is currently `NULL` (`existing_val is None`) and at least one source column is non-null. Prevents redundant cycle-by-cycle self-assignments across large tables.
+  - **Order-Independent Intra-Service & Cross-Service Cascades**:
+    - Live row context (`live_row`) updates immediately upon each column delta and runs up to 5 fixed-point passes (`seen_triggers_by_col`), guaranteeing that dependent mappings react in the same cycle regardless of their visual order in the service's mapping list.
+    - When a root in-place update or multi-service stage enrichment modifies any column (`changed_columns`), `_propagate_cross_service_table_mappings` propagates those column deltas in memory (`payload_context={}`) across active table-column mappings of eligible stages (`s.order <= row_stage.order`), updating cross-service derived columns atomically in the same cycle.
+  - **Strict Delta SQL Writes**: SQL `UPDATE` statements include exclusively the columns present in `delta_fields` whose values actually changed.
 - **In-Memory Tag Cache**:
   - Upstream services provide numeric tag IDs (`series.tags: [1, 5]`).
   - Scheduler fetches `/api/v3/tag` from upstream and caches `{id: label}` for 10 minutes.

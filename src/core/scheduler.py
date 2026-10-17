@@ -1,5 +1,6 @@
 """Task execution scheduler with stage priority, dependency management, and active ingestion."""
 
+import ast
 import re
 import json
 import asyncio
@@ -297,6 +298,247 @@ def resolve_template_key(template: str, service_id: str, rec: dict) -> str:
         else:
             return ""
     return res
+
+
+def _get_row_col_val(row: Optional[Dict[str, Any]], col_name: str) -> Any:
+    """Retrieve a column value from a database row dictionary with case-insensitive fallback."""
+    if not row or not isinstance(row, dict):
+        return None
+    if col_name in row:
+        return row[col_name]
+    col_lower = col_name.lower()
+    if col_lower in row:
+        return row[col_lower]
+    for k, v in row.items():
+        if isinstance(k, str) and k.upper() == col_name:
+            return v
+    return None
+
+
+def _extract_transformer_table_deps(
+    transformer_expr: Optional[str], table_cols: set[str], target_col: str
+) -> set[str]:
+    """Extract uppercase table column names referenced as identifiers inside a transformer expression."""
+    if not transformer_expr or not transformer_expr.strip():
+        return set()
+    try:
+        norm = TransformerEvaluator.normalize_transformer_syntax(transformer_expr)
+        tree = ast.parse(norm, mode="eval")
+        deps: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name):
+                cand = node.id.upper()
+                if cand in table_cols and cand != target_col and cand not in SYSTEM_RESERVED_COLUMNS:
+                    deps.add(cand)
+        return deps
+    except Exception:
+        return set()
+
+
+def _get_stage_allowed_cols(stage: Any, service_id: str) -> Optional[set[str]]:
+    """Return the set of uppercase allowed target columns for a service in a stage, or None if unrestricted."""
+    if getattr(stage, "service_mapping_scopes", None) and service_id in stage.service_mapping_scopes:
+        raw_scope = stage.service_mapping_scopes[service_id]
+        if raw_scope:
+            return {c.strip().upper() for c in raw_scope if c and c.strip()}
+    return None
+
+
+def evaluate_reactive_mappings(
+    mappings: List[Any],
+    payload_context: Dict[str, Any],
+    existing_row: Optional[Dict[str, Any]],
+    table_cols: set[str],
+    allowed_cols: Optional[set[str]] = None,
+    item_identifier: str = "",
+    initial_changed_columns: Optional[set[str]] = None,
+    initial_delta_fields: Optional[Dict[str, Any]] = None,
+) -> tuple[Dict[str, Any], set[str]]:
+    """Evaluate active field mappings reactively based on source non-nullity and source change deltas.
+
+    - Skips any mapping whose resolved source(s) are None.
+    - For table-column-sourced mappings, skips evaluation unless at least one source table column
+      changed in the current cycle OR the target column is currently None (uninitialized).
+    - Updates live row context immediately so subsequent or dependent mappings see fresh values
+      within the same cycle, regardless of mapping order.
+    - Returns (delta_fields, changed_columns) containing strictly columns whose value changed.
+    """
+    delta_fields: Dict[str, Any] = dict(initial_delta_fields) if initial_delta_fields else {}
+    changed_columns: set[str] = set(initial_changed_columns) if initial_changed_columns else set()
+
+    live_row: Dict[str, Any] = {}
+    if existing_row:
+        for k, v in existing_row.items():
+            live_row[k] = v
+            if isinstance(k, str):
+                live_row[k.upper()] = v
+    for k, v in delta_fields.items():
+        live_row[k] = v
+
+    seen_triggers_by_col: Dict[str, set[str]] = {}
+    max_passes = 5
+
+    for pass_idx in range(max_passes):
+        newly_changed_in_pass: set[str] = set()
+
+        for mapping in mappings or []:
+            if not getattr(mapping, "target_column", None) or not getattr(mapping, "source_field", None):
+                continue
+            col_name = mapping.target_column.strip().upper()
+            if col_name in SYSTEM_RESERVED_COLUMNS or col_name not in table_cols:
+                continue
+            if allowed_cols is not None and col_name not in allowed_cols:
+                continue
+
+            raw_sources = [s.strip() for s in mapping.source_field.split(",") if s and s.strip()]
+            if not raw_sources:
+                continue
+
+            has_payload_source = False
+            has_non_null_payload = False
+            source_table_cols: set[str] = set()
+            resolved_values: List[Any] = []
+
+            for src in raw_sources:
+                is_table_col = (
+                    "." not in src
+                    and "[" not in src
+                    and src == src.upper()
+                    and src in table_cols
+                    and (not isinstance(payload_context, dict) or src not in payload_context)
+                )
+                if is_table_col:
+                    source_table_cols.add(src)
+                    resolved_values.append(_get_row_col_val(live_row, src))
+                else:
+                    has_payload_source = True
+                    p_val = extract_dotted_value(payload_context, src)
+                    if p_val is None and isinstance(payload_context, dict):
+                        p_val = payload_context.get(src)
+                    if p_val is not None:
+                        has_non_null_payload = True
+                    resolved_values.append(p_val)
+
+            if source_table_cols and getattr(mapping, "transformer", None):
+                extra_deps = _extract_transformer_table_deps(mapping.transformer, table_cols, col_name)
+                for dep_col in extra_deps:
+                    if dep_col not in source_table_cols:
+                        source_table_cols.add(dep_col)
+                        resolved_values.append(_get_row_col_val(live_row, dep_col))
+
+            if pass_idx > 0 and not source_table_cols:
+                # Pure payload mappings only need to run in the first pass
+                continue
+
+            # Rule 1: If source is None, ignore immediately
+            if has_payload_source and not source_table_cols and not has_non_null_payload:
+                continue
+            if all(v is None for v in resolved_values):
+                continue
+
+            existing_val = _get_row_col_val(live_row, col_name)
+
+            # Rule 2: Reactive change guard for table-column-sourced mappings
+            if source_table_cols and not has_non_null_payload:
+                seen_for_col = seen_triggers_by_col.get(col_name, set())
+                unseen_table_changes = (source_table_cols & changed_columns) - seen_for_col
+                is_uninitialized = (existing_val is None) and (col_name not in seen_triggers_by_col)
+                if not is_uninitialized and not unseen_table_changes:
+                    continue
+                seen_triggers_by_col[col_name] = set(seen_for_col) | (source_table_cols & changed_columns)
+            elif pass_idx > 0:
+                continue
+
+            val = (
+                resolved_values[0]
+                if len(resolved_values) == 1
+                else next((v for v in resolved_values if v is not None), None)
+            )
+
+            eval_context = {"records": live_row, **live_row, **(payload_context or {})}
+            if getattr(mapping, "transformer", None):
+                try:
+                    val = TransformerEvaluator.evaluate(mapping.transformer, val, eval_context)
+                except Exception:
+                    pass
+
+            if len(raw_sources) == 1 and raw_sources[0].endswith("[*]") and val is not None and not isinstance(val, list):
+                val = [val]
+
+            data_type = getattr(mapping, "data_type", "TEXT") or "TEXT"
+            ok, coerced_val = coerce_value_to_type(val, data_type, col_name=col_name, item_identifier=item_identifier)
+            if not ok:
+                continue
+
+            if existing_row is not None or existing_val is not None:
+                final_val = merge_field_value(existing_val, coerced_val, col_name=col_name, item_id=item_identifier)
+            else:
+                final_val = coerced_val
+
+            if existing_row is None and col_name not in live_row:
+                if final_val is not None:
+                    delta_fields[col_name] = final_val
+                    live_row[col_name] = final_val
+                    changed_columns.add(col_name)
+                    newly_changed_in_pass.add(col_name)
+            else:
+                if final_val != existing_val:
+                    delta_fields[col_name] = final_val
+                    live_row[col_name] = final_val
+                    changed_columns.add(col_name)
+                    newly_changed_in_pass.add(col_name)
+
+        if not newly_changed_in_pass:
+            break
+
+    return delta_fields, changed_columns
+
+
+def _propagate_cross_service_table_mappings(
+    stages: List[Any],
+    services: Dict[str, Any],
+    existing_row: Optional[Dict[str, Any]],
+    table_cols: set[str],
+    item_identifier: str,
+    changed_columns: set[str],
+    delta_fields: Dict[str, Any],
+) -> tuple[Dict[str, Any], set[str]]:
+    """Propagate table-column changes reactively across active service mappings in the given stages.
+    Purely in-memory evaluation (payload_context={}) for mappings whose sources reference table columns.
+    """
+    if not changed_columns or not stages or not services:
+        return delta_fields, changed_columns
+
+    cur_delta = dict(delta_fields)
+    cur_changed = set(changed_columns)
+    trigger_cols = set(changed_columns)
+
+    for _ in range(5):
+        if not trigger_cols:
+            break
+        prev_changed = set(cur_changed)
+        for st in stages:
+            if not getattr(st, "enabled", True) or not getattr(st, "service_ids", None):
+                continue
+            for s_id in st.service_ids:
+                s_cfg = services.get(s_id)
+                if not s_cfg or not getattr(s_cfg, "enabled", True) or not getattr(s_cfg, "field_mappings", None):
+                    continue
+                allowed = _get_stage_allowed_cols(st, s_id)
+                cur_delta, new_changed = evaluate_reactive_mappings(
+                    mappings=s_cfg.field_mappings,
+                    payload_context={},
+                    existing_row=existing_row,
+                    table_cols=table_cols,
+                    allowed_cols=allowed,
+                    item_identifier=item_identifier,
+                    initial_changed_columns=trigger_cols,
+                    initial_delta_fields=cur_delta,
+                )
+                cur_changed.update(new_changed)
+        trigger_cols = cur_changed - prev_changed
+
+    return cur_delta, cur_changed
 
 
 class TaskScheduler:
@@ -607,54 +849,45 @@ class TaskScheduler:
                                     payload["tags"] = [service_tags.get(t, str(t)) for t in raw_tags]
                                     payload["tag_labels"] = payload["tags"]
 
-                    context_dict = {"records": rec, **rec, **enrichment_data}
+                    payload_context = {"records": rec, **rec, **enrichment_data}
 
-                    # Evaluate field mappings
-                    mapped_fields: Dict[str, Any] = {}
-                    for mapping in service_cfg.field_mappings:
-                        if not mapping.target_column:
-                            continue
-                        col_name = mapping.target_column.strip().upper()
-                        if col_name in SYSTEM_RESERVED_COLUMNS or col_name not in table_cols:
-                            continue
+                    # Evaluate field mappings reactively (only non-null sources and real value deltas)
+                    mapped_fields, changed_cols = evaluate_reactive_mappings(
+                        mappings=service_cfg.field_mappings,
+                        payload_context=payload_context,
+                        existing_row=existing_row,
+                        table_cols=table_cols,
+                        allowed_cols=allowed_cols,
+                        item_identifier=pipeline_key,
+                    )
 
-                        if allowed_cols is not None and col_name not in allowed_cols:
-                            continue
-
-                        val = extract_dotted_value(context_dict, mapping.source_field)
-                        if val is None:
-                            val = context_dict.get(mapping.source_field)
-                        if val is None:
-                            continue
-
-                        if mapping.transformer:
-                            try:
-                                val = TransformerEvaluator.evaluate(mapping.transformer, val, context_dict)
-                            except Exception:
-                                pass
-
-                        if mapping.source_field.strip().endswith("[*]") and val is not None and not isinstance(val, list):
-                            val = [val]
-
-                        data_type = getattr(mapping, "data_type", "TEXT") or "TEXT"
-                        ok, coerced_val = coerce_value_to_type(val, data_type, col_name=col_name, item_identifier=pipeline_key)
-                        if not ok:
-                            continue
-
+                    if changed_cols:
                         if existing_row:
-                            existing_val = existing_row.get(col_name)
-                            if existing_val is None:
-                                existing_val = existing_row.get(col_name.lower())
-                            merged_val = merge_field_value(existing_val, coerced_val, col_name=col_name, item_id=pipeline_key)
-                            mapped_fields[col_name] = merged_val
+                            enabled_stages = sorted([s for s in settings.stages if s.enabled], key=lambda s: s.order)
+                            row_stage_slug = _get_row_col_val(existing_row, "STAGE")
+                            row_stage = next(
+                                (s for s in enabled_stages if s.id == row_stage_slug or str(s.order) == str(row_stage_slug)),
+                                active_stage,
+                            )
+                            max_order = row_stage.order if row_stage else active_stage.order
+                            eligible_stages = [s for s in enabled_stages if s.order <= max_order] or [active_stage]
                         else:
-                            mapped_fields[col_name] = coerced_val
+                            eligible_stages = [active_stage]
+
+                        mapped_fields, changed_cols = _propagate_cross_service_table_mappings(
+                            stages=eligible_stages,
+                            services=services_dict,
+                            existing_row=existing_row,
+                            table_cols=table_cols,
+                            item_identifier=pipeline_key,
+                            changed_columns=changed_cols,
+                            delta_fields=mapped_fields,
+                        )
 
                     # Authoritative Mermaid Lifecycle: In-Place UPDATE or NEW_ENTRY INSERT
                     if existing_row:
-                        # Perform in-place UPDATE
-                        has_changes = any(existing_row.get(k) != v and existing_row.get(k.lower()) != v for k, v in mapped_fields.items())
-                        if mapped_fields and has_changes:
+                        # Perform in-place UPDATE strictly with delta columns that actually changed
+                        if mapped_fields:
                             set_clauses = [f"{col} = ?" for col in mapped_fields.keys()]
                             update_sql = f"UPDATE SERVICES_PIPELINE SET {', '.join(set_clauses)}, LAST_UPDATED = CURRENT_TIMESTAMP WHERE PIPELINE_KEY = ?;"
                             await db_manager.execute(update_sql, tuple(mapped_fields.values()) + (pipeline_key,))
@@ -699,8 +932,9 @@ class TaskScheduler:
         table_cols: set,
         service_id: Optional[str] = None,
         allowed_columns: Optional[set[str]] = None,
+        initial_changed_columns: Optional[set[str]] = None,
     ) -> bool:
-        """Execute enrichment endpoints and apply field mappings for an existing row."""
+        """Execute enrichment endpoints and apply field mappings reactively for an existing row."""
         endpoints_to_query: Dict[str, str] = dict(service_cfg.enrichment_endpoints or {})
         if service_cfg.poll_endpoint and "{" in service_cfg.poll_endpoint:
             endpoints_to_query["primary"] = service_cfg.poll_endpoint
@@ -759,51 +993,34 @@ class TaskScheduler:
                             payload["tags"] = [service_tags.get(t, str(t)) for t in raw_tags]
                             payload["tag_labels"] = payload["tags"]
 
-        context_dict = {"records": row_dict, **row_dict, **enrichment_data}
-        mapped_fields: Dict[str, Any] = {}
-        for mapping in service_cfg.field_mappings:
-            if not mapping.target_column:
-                continue
-            col_name = mapping.target_column.strip().upper()
-            if col_name in SYSTEM_RESERVED_COLUMNS or col_name not in table_cols:
-                continue
+        non_col_row_data = {
+            k: v for k, v in row_dict.items()
+            if not (isinstance(k, str) and k == k.upper() and (k in table_cols or k in SYSTEM_RESERVED_COLUMNS))
+        }
+        payload_context = {**non_col_row_data, **enrichment_data}
+        item_id = str(row_dict.get("PIPELINE_KEY") or row_dict.get("ID"))
 
-            if allowed_columns is not None and col_name not in allowed_columns:
-                continue
+        delta_fields, updated_changed_cols = evaluate_reactive_mappings(
+            mappings=service_cfg.field_mappings,
+            payload_context=payload_context,
+            existing_row=row_dict,
+            table_cols=table_cols,
+            allowed_cols=allowed_columns,
+            item_identifier=item_id,
+            initial_changed_columns=initial_changed_columns,
+        )
 
-            val = extract_dotted_value(context_dict, mapping.source_field)
-            if val is None:
-                val = context_dict.get(mapping.source_field)
-            if val is None:
-                continue
+        if initial_changed_columns is not None:
+            initial_changed_columns.update(updated_changed_cols)
 
-            if mapping.transformer:
-                try:
-                    val = TransformerEvaluator.evaluate(mapping.transformer, val, context_dict)
-                except Exception:
-                    pass
-
-            if mapping.source_field.strip().endswith("[*]") and val is not None and not isinstance(val, list):
-                val = [val]
-
-            existing_val = row_dict.get(col_name)
-            data_type = getattr(mapping, "data_type", "TEXT") or "TEXT"
-            item_id = str(row_dict.get("PIPELINE_KEY") or row_dict.get("ID"))
-            ok, coerced_val = coerce_value_to_type(val, data_type, col_name=col_name, item_identifier=item_id)
-            if not ok:
-                continue
-
-            mapped_fields[col_name] = merge_field_value(existing_val, coerced_val, col_name=col_name, item_id=item_id)
-
-        has_changes = any(row_dict.get(k) != v for k, v in mapped_fields.items())
-        if mapped_fields and has_changes:
-            set_clauses = [f"{k} = ?" for k in mapped_fields.keys()]
-            vals = list(mapped_fields.values()) + [row_dict["ID"]]
+        if delta_fields:
+            set_clauses = [f"{k} = ?" for k in delta_fields.keys()]
+            vals = list(delta_fields.values()) + [row_dict["ID"]]
             await db_manager.execute(
                 f"UPDATE SERVICES_PIPELINE SET {', '.join(set_clauses)}, LAST_UPDATED = CURRENT_TIMESTAMP WHERE ID = ?;",
                 tuple(vals)
             )
-            print(f"[i] Row {row_dict['ID']} ({row_dict.get('PIPELINE_KEY')}) enriched with {len(mapped_fields)} mapped columns.")
+            print(f"[i] Row {row_dict['ID']} ({row_dict.get('PIPELINE_KEY')}) enriched with {len(delta_fields)} mapped columns.")
             return True
         return False
 
@@ -815,16 +1032,15 @@ class TaskScheduler:
             return False
 
         updated_any = False
+        stage_changed_columns: set[str] = set()
+        last_row_dict: Optional[Dict[str, Any]] = None
+
         for s_id in stage.service_ids:
             service_cfg = settings.services.get(s_id)
             if not service_cfg or not service_cfg.enabled:
                 continue
 
-            allowed_cols: Optional[set[str]] = None
-            if getattr(stage, "service_mapping_scopes", None) and s_id in stage.service_mapping_scopes:
-                raw_scope = stage.service_mapping_scopes[s_id]
-                if raw_scope:
-                    allowed_cols = {c.strip().upper() for c in raw_scope if c and c.strip()}
+            allowed_cols = _get_stage_allowed_cols(stage, s_id)
 
             try:
                 # Re-query row to ensure latest mapped columns are available for subsequent services
@@ -835,13 +1051,53 @@ class TaskScheduler:
                 if not current_rows:
                     break
                 row_dict = dict(current_rows[0])
+                last_row_dict = row_dict
+                call_kwargs: Dict[str, Any] = {
+                    "service_id": s_id,
+                    "allowed_columns": allowed_cols,
+                }
+                if stage_changed_columns:
+                    call_kwargs["initial_changed_columns"] = stage_changed_columns
                 updated = await self._execute_consumer_enrichment(
-                    service_cfg, row_dict, table_cols, service_id=s_id, allowed_columns=allowed_cols
+                    service_cfg, row_dict, table_cols, **call_kwargs
                 )
                 if updated:
                     updated_any = True
+                    post_rows = await db_manager.query(
+                        "SELECT * FROM SERVICES_PIPELINE WHERE ID = ?;",
+                        (row_id,)
+                    )
+                    if post_rows:
+                        post_dict = dict(post_rows[0])
+                        for k, v in post_dict.items():
+                            if isinstance(k, str) and k.upper() in table_cols and _get_row_col_val(row_dict, k.upper()) != v:
+                                stage_changed_columns.add(k.upper())
+                        last_row_dict = post_dict
             except Exception as enrich_err:
                 print(f"[!] Error during enrichment with service '{s_id}' for row {row_id}: {enrich_err}")
+
+        if stage_changed_columns and last_row_dict and len(stage.service_ids) > 1:
+            try:
+                item_id = str(last_row_dict.get("PIPELINE_KEY") or row_id)
+                extra_deltas, _ = _propagate_cross_service_table_mappings(
+                    stages=[stage],
+                    services=settings.services,
+                    existing_row=last_row_dict,
+                    table_cols=table_cols,
+                    item_identifier=item_id,
+                    changed_columns=stage_changed_columns,
+                    delta_fields={},
+                )
+                if extra_deltas:
+                    set_clauses = [f"{k} = ?" for k in extra_deltas.keys()]
+                    vals = list(extra_deltas.values()) + [row_id]
+                    await db_manager.execute(
+                        f"UPDATE SERVICES_PIPELINE SET {', '.join(set_clauses)}, LAST_UPDATED = CURRENT_TIMESTAMP WHERE ID = ?;",
+                        tuple(vals)
+                    )
+                    updated_any = True
+            except Exception as prop_err:
+                print(f"[!] Error propagating table mappings for row {row_id}: {prop_err}")
 
         return updated_any
 

@@ -1474,3 +1474,35 @@ This log maintains cross-session operational continuity, recording architectural
 - `docs/ARCHITECTURE.md` (Modified)
 - `docs/BACKLOG.md` (Modified)
 - `PROJECT_LOG.md` (Updated)
+
+---
+
+## Session Milestone: 2026-10-17 — Code Audit & Service-Agnostic Reactive Delta Field Mapping Engine (`SCHED-03`)
+
+### Role & Agent Assignment
+- **Principal Systems Auditor & Refactor Specialist (`code-auditor`)**: Performed deep architectural audit of the field mapping evaluation lifecycle in `src/core/scheduler.py`, identified 5 critical edge cases in naive table-column comparison, and implemented the service-agnostic Reactive Delta Field Mapping Engine (`evaluate_reactive_mappings` and `_propagate_cross_service_table_mappings`).
+
+### Root-Cause Audit Findings & Architectural Decisions
+1. **Cross-Service Table-Column Comparison Trap**:
+   - Comparing `context_dict[col] == row_dict[col]` when `col` is a database column always evaluates to `True` on subsequent services because the earlier service already persisted the updated column value into SQLite (`row_dict`).
+   - Resolved by tracking explicit `changed_columns` sets and propagating table-column changes in memory across active stage mappings (`_propagate_cross_service_table_mappings`).
+2. **Order-Independent Intra-Cycle Reactive Cascades (`evaluate_reactive_mappings`)**:
+   - Previously, `context_dict` was static during the mapping loop, preventing dependent mappings from seeing newly extracted columns in the same cycle or failing if dependent mappings were ordered above endpoint mappings.
+   - Implemented live context updates (`live_row`) and multi-pass fixed-point evaluation (`max_passes = 5` with `seen_triggers_by_col`), guaranteeing that table-column-dependent mappings evaluate strictly once per source change regardless of mapping order.
+3. **Service-Agnostic Multi-Source Resolution & Null Source Guard**:
+   - `source_field` supports single or comma-separated tokens (both endpoint paths and uppercase dynamic table columns in `table_cols`), plus AST dependency discovery (`_extract_transformer_table_deps`) for table-column-driven transformers.
+   - If all resolved sources are `None` (or if a pure endpoint mapping receives `None`), evaluation is immediately skipped (`continue`).
+   - Table-column-sourced mappings evaluate strictly when at least one source column is in `changed_columns` OR when the target column is currently `NULL` (`existing_val is None`) and at least one source column is non-null.
+4. **Unconditional Upstream HTTP Polling with Strict SQL Delta Filtering**:
+   - Preserved all HTTP enrichment queries so delayed upstream changes (e.g., `"TBD"` $\rightarrow$ final episode title or path updates) are always detected, while restricting `delta_fields` and SQL `UPDATE` statements strictly to columns whose final value changed (`final_val != existing_val`).
+
+### Verification Results
+- **Syntax Validation**: `.venv\Scripts\python.exe -m py_compile src\core\scheduler.py` passed with 0 errors.
+- **Automated Test Suite**: Added 5 unit tests in `tests/test_reactive_mappings.py`. Executed `.venv\Scripts\python.exe -m unittest discover -s tests -v` — 34/34 tests passing in 0.366s.
+
+### Files Modified
+- `src/core/scheduler.py` (Modified)
+- `tests/test_reactive_mappings.py` (Created)
+- `docs/BACKEND_SPEC.md` (Modified)
+- `PROJECT_LOG.md` (Updated)
+
