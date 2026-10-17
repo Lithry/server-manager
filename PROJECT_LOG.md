@@ -1055,3 +1055,41 @@ This log maintains cross-session operational continuity, recording architectural
 - `src/api/pipeline.py`
 - `tests/test_sbx01_sandbox_decoupling.py`
 - `PROJECT_LOG.md`
+
+---
+
+## Session Milestone: 2026-10-17 — API Sandbox Multi-Select Toggle & Selective Enrichment Execution
+
+### Role & Agent Assignment
+- **Frontend & WebUI Specialist (`Role 3` / `frontend-specialist`)**: Implemented multi-select toggle (On/Off) mechanic for saved endpoints in the API Sandbox and strict selective execution in `sandboxStore.js`.
+
+### Key Changes Implemented
+1. **Multi-Select Toggle in `SavedEndpointsList.js`**:
+   - Replaced single-selection state with multi-endpoint awareness (`activeEndpoints`), supporting Set, Array, or newline-delimited strings.
+   - Added active count indicator in header (`activeCount/total`).
+   - Rendered interactive `ON` / `OFF` badges with accent border and tint highlights for active endpoints.
+   - Clicking an inactive endpoint appends its URL to the textarea on a new line and activates it.
+   - Clicking an active endpoint removes its line from the textarea and deactivates it.
+   - Reactive synchronization: manual editing/deletion in the textarea instantly updates the `ON`/`OFF` state of corresponding saved endpoints.
+2. **Multi-Line Pure URL Textarea (`SandboxPage.js`)**:
+   - Configured textarea for multi-line endpoint templates (pure URLs, one per line, zero `name:` prefixes).
+   - Enabled vertical resizing and comfortable row count.
+3. **Strict Selective Execution (`sandboxStore.js`)**:
+   - `runTest`: Parses lines from `testEndpoint`. If 0 lines are present, passes `enrichment_endpoints: {}`, running only `sample_endpoint` and preventing unwanted enrichment calls.
+   - For active lines, maps each URL back to its saved namespace name in `currentService.enrichment_endpoints`, or uses `testName` / `test_{idx}` for custom endpoints.
+   - Response handling: If 0 endpoints, displays cumulative context in "Endpoint Result". If 1 endpoint, extracts and displays that endpoint's result. If multiple endpoints, displays a map of results for each requested namespace.
+   - Enhanced `insertPlaceholder`: Appends placeholders to the current/last line of multi-line templates.
+   - Enhanced `saveEndpoint`: Detects candidate unsaved lines when multiple endpoints are present in the textarea.
+4. **Module Constraints & Production Build**:
+   - All modules verified under the 250-line limit:
+     - `SandboxPage.js`: 133 lines.
+     - `SavedEndpointsList.js`: 73 lines.
+     - `sandboxStore.js`: 210 lines.
+   - Ran `npm run build` in `frontend/` and successfully compiled assets into `src/static/` with 0 errors.
+
+### Files Modified
+- `frontend/src/features/sandbox/ui/SavedEndpointsList.js`
+- `frontend/src/features/sandbox/model/sandboxStore.js`
+- `frontend/src/pages/SandboxPage.js`
+- `src/static/*` (Compiled production bundle)
+- `PROJECT_LOG.md`

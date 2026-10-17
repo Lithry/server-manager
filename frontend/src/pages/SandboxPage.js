@@ -68,14 +68,14 @@ export function createSandboxPage() {
           <div class="u-flex u-flex-col u-gap-2" style="flex: 3; min-height: 0;">
             <div style="background: var(--color-bg-card); border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: var(--space-2);">
               <div class="u-flex u-items-center u-justify-between u-mb-1">
-                <span class="u-text-2xs u-text-muted u-font-mono">Endpoint Template (e.g. /api/v3/series/{series.id})</span>
+                <span class="u-text-2xs u-text-muted u-font-mono">Endpoint Templates (one per line, e.g. /api/v3/series/{seriesId})</span>
                 <span class="u-text-2xs u-text-muted">Use {path} placeholders</span>
               </div>
               <textarea
                 class="form-input u-font-mono u-text-xs"
-                placeholder="/api/v3/Endpoint/{ID}?query=..."
-                rows="2"
-                style="resize: none; width: 100%; border: none; background: transparent; padding: 0; outline: none;"
+                placeholder="/api/v3/endpoint/{id} (one per line)"
+                rows="3"
+                style="resize: vertical; min-height: 48px; width: 100%; border: none; background: transparent; padding: 0; outline: none; line-height: 1.4;"
                 .value=${state.testEndpoint}
                 @input=${(e) => store.set({ testEndpoint: e.target.value })}
               ></textarea>
@@ -104,8 +104,8 @@ export function createSandboxPage() {
           <div style="flex: 1; max-width: 280px; min-height: 0;">
             ${SavedEndpointsList({
               endpoints: currentService?.enrichment_endpoints || {},
-              selectedName: state.testName,
-              onSelectEndpoint: (name, ep) => store.set({ testName: name, testEndpoint: ep })
+              activeEndpoints: state.testEndpoint,
+              onToggleEndpoint: store.toggleEndpoint
             })}
           </div>
         </div>
