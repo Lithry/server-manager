@@ -58,59 +58,79 @@ src/
 - **Persistence Model**: Serialized JSON document stored at `SETTINGS_PATH` (default: `/data/settings.json`).
 - **Concurrency Guard**: All read and write operations are synchronized using an `asyncio.Lock` inside `ConfigManager`.
 - **Data Models (Pydantic v2)**:
+  - `PipelineConfig`:
+    - `id`: Pipeline identifier slug (e.g. `default`, `media`, `backups`).
+    - `name`, `description`: Display label and description.
+    - `table_name`: Resolved via `resolved_table_name()` into sanitized `PIPELINE_<SLUG>`.
+    - `retention_days`: Retention window in days for `STATUS = 'SINK'` records (`LAST_UPDATED`).
+    - `column_order`: Visual column ordering per pipeline.
+    - `enabled`: Pipeline activation toggle.
   - `StageConfig`:
     - `id`: Semantic string slug (`ingest`, `recognition`, `library`).
     - `name`: Display label.
     - `order`: Visual sequence integer.
+    - `pipeline_ids`: List of assigned pipeline IDs (M:N mapping; defaults to `["default"]`).
+    - `interval_seconds`: Stage execution interval in seconds (`None` inherits `global_poll_interval_seconds`).
     - `start_condition`: Safe boolean predicate. `None` indicates a Root Producer stage.
-    - `complete_condition`: Boolean predicate for stage completion. `None` indicates a Sink Stage.
-    - `grace_period_minutes`: File stabilization delay before completing stage 1 (default: 10m).
+    - `complete_condition`: Boolean predicate for stage completion. `None` indicates a Passive Sink stage (or Root + Sink when `start_condition` is also `None`).
+    - `grace_period_minutes`: Stabilization delay before completing a Root stage (default: 10m).
     - `timeout_minutes`: Watchdog threshold before emitting `WARN_PIPELINE_STALLED` (default: 30m).
     - `service_ids`: List of assigned service keys (M:N mapping).
-    - `service_mapping_scopes`: Dictionary mapping `service_id` to a list of allowed `target_column`s for that stage (default: `{}`). Empty or omitted service key defaults to evaluating all mappings.
+    - `service_mapping_scopes`: Dictionary mapping `service_id` to a list of allowed `target_column`s for that stage (default: `{}`).
     - `enabled`: Stage activation toggle.
-    - `last_activated_at`: ISO timestamp recorded when stage is toggled active.
+    - `last_activated_at`: ISO timestamp recorded when a Root stage is toggled active.
   - `FieldMapping`:
-    - `source_field`: Dotted path into upstream API payload (e.g., `series.title`, `data.droppedPath`).
+    - `source_field`: Single or comma-separated dotted paths into upstream API payloads or existing uppercase table columns.
     - `target_column`: Sanitized destination column (`^[A-Z0-9_]+$`).
     - `data_type`: SQLite column type (`TEXT`, `INTEGER`, `REAL`).
     - `transformer`: Optional condition (e.g., `if 'anime' in tags then 1 else 0`).
   - `ServiceConfig`:
-    - `base_url`: Target service URL (e.g., `http://sonarr:8989`).
+    - `base_url`: Target service URL.
     - `api_key`: API credential.
-    - `poll_endpoint`: Primary polling URI (e.g., `/api/v3/history`).
-    - `poll_interval_seconds`: Optional per-service override for global interval.
+    - `poll_endpoint`: Primary polling URI (supports `{interval_seconds}`, `{interval_minutes}`, `{lookback_iso}`, `{lookback_unix}`).
     - `pipeline_key_template`: Template for unique item key (e.g., `{service}:{id}`).
-    - `enrichment_endpoints`: Namespaced dictionary of secondary APIs (e.g., `{"series": "/api/v3/series/{seriesId}"}`).
+    - `enrichment_endpoints`: Namespaced dictionary of secondary APIs.
     - `field_mappings`: List of configured `FieldMapping` entries.
   - `NotificationTrigger`:
     - `event`: Event identifier (`ON_INCIDENT_OPEN`, `ON_DEPLOY_SUCCESS`, etc.).
     - `channel`: `ntfy` or `webhook`.
     - `target_url`, `topic`, `priority`, `tags`, `message_template`.
-  - `Settings`: Root configuration aggregate with retention, polling, stages, and services.
-- **Settings Normalization & Scope Sanitization (`src/api/settings.py`)**:
-  - Automatically synchronizes column renames into `service_mapping_scopes` across all stages when a target column is edited.
-  - Prunes unassigned services or non-existent columns during settings update, uppercase-normalizing and deduplicating entries. Removes empty scopes so stages fall back cleanly to all-columns execution.
+  - `Settings`: Root configuration aggregate with `pipelines`, `stages`, `services`, and `notification_triggers`.
+- **Settings Normalization & Safe Column Rename Migration (`src/api/settings.py`)**:
+  - Validates stage ID uniqueness and allows visual stage reordering and deletion without index-mismatch errors.
+  - Detects genuine column renames by matching unambiguous `source_field` mappings (never by list index), migrating columns across all configured `PIPELINE_<SLUG>` tables and propagating renames into `service_mapping_scopes`.
 
 ---
 
-### 2.3 `src/core/database.py` — SQLite WAL & Schema Evolution
+### 2.3 `src/core/database.py` — SQLite WAL, Multi-Pipeline & Custom Tables Engine
 - **Pragmas**:
   - `PRAGMA journal_mode = WAL;` (High concurrency with zero reader blocking).
   - `PRAGMA synchronous = NORMAL;` (Optimal durability balance).
   - `PRAGMA busy_timeout = 5000;` (5-second lock retry window).
 - **Schema DDL**:
   ```sql
-  -- 1. Universal Pipeline Table
-  CREATE TABLE IF NOT EXISTS SERVICES_PIPELINE (
+  -- 1. Multi-Pipeline Metadata Registry
+  CREATE TABLE IF NOT EXISTS PIPELINES (
+      ID TEXT PRIMARY KEY,
+      NAME TEXT NOT NULL,
+      DESCRIPTION TEXT DEFAULT '',
+      TABLE_NAME TEXT UNIQUE NOT NULL,
+      RETENTION_DAYS INTEGER DEFAULT 7,
+      ENABLED INTEGER DEFAULT 1,
+      CREATED_AT TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- 2. Dynamic Pipeline Table Template (per pipeline slug)
+  CREATE TABLE IF NOT EXISTS PIPELINE_<SLUG> (
       ID INTEGER PRIMARY KEY AUTOINCREMENT,
       PIPELINE_KEY TEXT UNIQUE NOT NULL,
       STAGE TEXT,
       STATUS TEXT DEFAULT 'PENDING',
+      CREATED_AT TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       LAST_UPDATED TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   );
 
-  -- 2. Extensible Error Definition Catalog
+  -- 3. Extensible Error Definition Catalog
   CREATE TABLE IF NOT EXISTS ERROR_INDEX (
       ERROR_CODE TEXT PRIMARY KEY,
       CATEGORY TEXT NOT NULL,
@@ -121,7 +141,7 @@ src/
       UPDATED_AT TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   );
 
-  -- 3. Normalized Incident Tracker
+  -- 4. Normalized Incident Tracker
   CREATE TABLE IF NOT EXISTS SYSTEM_INCIDENTS (
       ID INTEGER PRIMARY KEY AUTOINCREMENT,
       INCIDENT_CODE TEXT NOT NULL,
@@ -135,20 +155,24 @@ src/
       FOREIGN KEY (INCIDENT_CODE) REFERENCES ERROR_INDEX (ERROR_CODE)
   );
 
-  -- 4. Custom SQL Views Registry
+  -- 5. Dual-Mode Custom SQL Views & Persistent Custom Tables Registry
   CREATE TABLE IF NOT EXISTS CUSTOM_VIEWS (
       ID INTEGER PRIMARY KEY AUTOINCREMENT,
       VIEW_NAME TEXT UNIQUE NOT NULL,
       SQL_QUERY TEXT NOT NULL,
+      MODE TEXT DEFAULT 'VIEW',
+      SYNC_KEY_COLUMN TEXT DEFAULT 'PIPELINE_KEY',
+      REFRESH_INTERVAL_SECONDS INTEGER DEFAULT NULL,
+      LAST_SYNCED_AT TIMESTAMP DEFAULT NULL,
       IS_PRESET INTEGER DEFAULT 0,
       CREATED_AT TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   );
   ```
-- **Dynamic Migration Engine**:
-  - `ensure_column(table_name, column_name, column_type)`: Executes `ALTER TABLE <table_name> ADD COLUMN "<column_name>" <type>` if column is absent. Rejects system-reserved columns.
-  - `sync_dynamic_columns(services)`: Auto-ensures all target columns defined in service field mappings exist in `SERVICES_PIPELINE` on startup and configuration update.
-  - `drop_column(table_name, column_name)`: Removes user-defined columns (`ALTER TABLE ... DROP COLUMN`).
-  - `rename_column(table_name, old_col, new_col)`: Renames column dynamically while preserving table indices.
+- **Dynamic Migration, Retention & Custom Table Synchronization**:
+  - `ensure_pipeline_table(pipeline_id, name, description, retention_days, enabled)`: Registers pipeline metadata in `PIPELINES` and provisions `PIPELINE_<SLUG>` with indices on `PIPELINE_KEY` and `STATUS`.
+  - `sync_dynamic_columns(settings)`: Provisions all configured pipeline tables and ensures target columns exist across the pipelines to which each service's stages are assigned.
+  - `prune_pipeline_retention(table_name, retention_days)`: Deletes exclusively `STATUS = 'SINK'` records where `datetime(LAST_UPDATED) < datetime('now', '-N days')`.
+  - `sync_custom_table(view_name)`: Materializes and synchronizes a `MODE = 'TABLE'` entry from its `SQL_QUERY` projection using `INSERT INTO <TABLE> (...) VALUES (...) ON CONFLICT("<SYNC_KEY_COLUMN>") DO UPDATE SET ...`, updating `LAST_SYNCED_AT`.
 
 ---
 
@@ -156,104 +180,64 @@ src/
 - **Security Policy**: Zero usage of arbitrary `eval()` on raw user strings.
 - **`PredicateEvaluator`**:
   - Normalizes SQL-like tokens (`IS NOT NULL` $\rightarrow$ `is not None`, `AND` $\rightarrow$ `and`, `NULL` $\rightarrow$ `None`).
-  - Evaluates standard comparison and logical AST nodes (`ast.Compare`, `ast.BoolOp`, `ast.UnaryOp`).
-  - Resolves identifiers case-insensitively against context dictionary (`IS_ANIME`, `FILE_PATH`, `stage.<id>.completed`).
+  - Evaluates comparison, boolean, unary, and safe function call AST nodes (`ast.Compare`, `ast.BoolOp`, `ast.UnaryOp`, `ast.Call` for `len`, `lower`, `upper`, `str`, `int`, `float`, `bool`).
+  - Resolves identifiers case-insensitively against context dictionary and automatically unpacks serialized JSON list strings via `parse_json_list_if_str`.
   - `validate_syntax(expr)`: Performs syntax linting and operator checks before saving settings.
-- **Re-exports**: Re-exports `TransformerEvaluator` and `SafeContext` from `src.core.transformers` to maintain backwards compatibility across all consumers.
 
 ---
 
 ### 2.5 `src/core/transformers.py` — Single-Line Multi-Branch Transformer Engine
-- **Decoupled Architecture**: Extracted into a dedicated module (<160 lines) to eliminate monolithic bloat and isolate transformation parsing from stage predicate logic.
+- **Decoupled Architecture**: Dedicated module isolating transformation parsing, list deduplication (`deduplicate_list`), and JSON list unpacking (`parse_json_list_if_str`).
 - **`SafeContext(dict)`**:
   - Automatically resolves missing keys to `None` instead of raising `KeyError`.
-  - Performs case-insensitive dictionary lookups (tries uppercase, lowercase, capitalized, and casefolded variants).
+  - Performs case-insensitive dictionary lookups and unpacks JSON list strings into Python `list` instances so `len(LIST_COL)` and `'x' in LIST_COL` work natively on SQLite columns.
 - **`TransformerEvaluator`**:
-  - **String Literal Masking (`_mask_strings` / `_unmask_strings`)**:
-    - Masks single- and double-quoted string literals using regex into `__STR_LIT_{idx}__` tokens prior to keyword tokenization.
-    - Prevents false-positive token splits when transformer keywords (such as `then`, `else`, `return`, `if`) appear inside string values.
-  - **Syntax Normalization (`normalize_transformer_syntax`)**:
-    - Normalizes `else return <val>` to `else <val>` and `(if|elif|else if) <cond> return <val>` to `\1 <cond> then <val>`.
-    - Normalizes human-friendly single-line branching syntax into nested Python ternary expressions:
-      - 2-State: `if <cond> then <val1> else <val2>` $\rightarrow$ `(<val1>) if (<cond>) else (<val2>)`
-      - Multi-Branch: `if <cond1> then <val1> else if <cond2> then <val2> else <default>` (or with `elif`) $\rightarrow$ chained backwards from `else` into `(<val1>) if (<cond1>) else ((<val2>) if (<cond2>) else (<default>))`.
-      - Pure Python ternaries (e.g., `'DELETED' if EVENT == 'DELETED' else 'ACTIVE'`) pass through unmodified.
-  - **Syntax Validation (`validate_syntax`)**:
-    - Validates transformer expressions ahead of persistence using `ast.parse(norm, mode="eval")`. Returns `(bool, str)`.
-  - **Safe Sandbox Evaluation (`evaluate`)**:
-    - Sandboxed execution environment: `safe_globals = {"__builtins__": {}}`.
-    - Injected safe built-in functions: `str`, `int`, `bool`, `len`, `lower` (lowercase string helper), `upper` (uppercase string helper), and `merge` (JSON array / scalar accumulator helper).
-    - Injected `value` and request `context` wrapped into `SafeContext`.
-    - Supports optional `raise_errors: bool = False` flag (returns original `value` on error by default; re-raises for testing and validation).
+  - **String Literal Masking (`_mask_strings` / `_unmask_strings`)**: Masks quoted string literals prior to keyword tokenization.
+  - **Syntax Normalization (`normalize_transformer_syntax`)**: Normalizes single-line branching (`if ... then ... else if ... then ... else ...`, `elif`, `return`) into nested Python ternaries.
+  - **Safe Sandbox Evaluation (`evaluate`)**: Executes in `safe_globals = {"__builtins__": {}}` with injected helpers (`str`, `int`, `bool`, `len`, `lower`, `upper`, `merge`).
 
 ---
 
-### 2.6 `src/core/scheduler.py` — Ingestion & State Progression
-- **Global Ingestion Watermark (`poll_service`)**:
-  - **Global Watermark Query**: Queries `SELECT MAX(CREATED_AT) as latest FROM SERVICES_PIPELINE` globally across the entire table without filtering by service (`PIPELINE_KEY LIKE ?`).
-  - **Stage Activation Fallback**: If the table is empty or `latest` is `None`, falls back to the earliest active root stage activation timestamp (`active_root_stages[0].last_activated_at`).
-  - **Strict Cutoff & Early Pagination Termination**: Events are evaluated chronologically. Only incoming records strictly newer than the watermark (`r_dt > latest_dt`) are processed. Records with `r_dt <= latest_dt` are skipped (`is_older = True`); when all records on a page are older than or equal to the watermark or already exist in the database, pagination halts early.
-- **Immutable `CREATED_AT` & Conditional `LAST_UPDATED`**:
-  - **`CREATED_AT` Immutability**: Established once upon initial row insertion (`NEW_ENTRY`) from upstream item timestamp or UTC now. `CREATED_AT` is part of `SYSTEM_RESERVED_COLUMNS`, excluded from dynamic mapping targets, and strictly omitted from all subsequent in-place updates.
-  - **Conditional `LAST_UPDATED` Execution**: In both root in-place updates and consumer stage reconciliation (`_execute_consumer_enrichment`), SQL `UPDATE` and `LAST_UPDATED = CURRENT_TIMESTAMP` execute strictly when `has_changes` is `True` (at least one field value differs from existing row values). Prevents spurious timestamp updates and false modification logs when incoming payloads contain identical data.
+### 2.6 `src/core/scheduler.py` — Stage-Driven Ingestion, Lazy Enrichment & DAG Progression
+- **Stage-Driven Loops (`_stage_loop` & `run_stage_cycle`)**:
+  - Spawns one async loop per enabled active stage (Root and Consumer stages) using `stage.interval_seconds` (falling back to `settings.global_poll_interval_seconds`).
+  - Downstream `SINK` stages (`start_condition != NULL` and `complete_condition IS NULL`) are 100% passive and do not spawn polling tasks.
+  - Per-table `asyncio.Lock` (`_get_pipeline_lock`) serializes concurrent stage writes to the same `PIPELINE_<SLUG>` table.
+- **Relative Lookback Window ($\Delta t$) & ServerManager `CREATED_AT` (`_ingest_root_service_for_stage`)**:
+  - Computes lookback window $\Delta t = \text{interval\_seconds}$ referenced against the upstream HTTP `Date` response header (`ref_clock`, with fallback to ServerManager UTC) to prevent timezone/clock-skew drops.
+  - Interpolates `{interval_seconds}`, `{interval_minutes}`, `{lookback_iso}`, and `{lookback_unix}` placeholders in `poll_endpoint`.
+  - Skips events older than `cutoff_dt = max(ref_clock - delta_t, stage.last_activated_at)`.
+  - Stamps `CREATED_AT` strictly with ServerManager's internal UTC clock upon initial insertion (`STATUS = 'SINK'` if Root stage has no `complete_condition`, else `STATUS = 'PENDING'`).
+  - **Passive SINK In-Place Updates**: If an incoming Root event matches an existing `PIPELINE_KEY` (even if the row is already in `STATUS = 'SINK'`), evaluates scoped reactive mappings and updates changed columns and `LAST_UPDATED = CURRENT_TIMESTAMP` in-place without resetting `STAGE` or `STATUS`.
+- **Lazy Multi-Enrichment (`_compute_required_enrichment_namespaces` & `fetch_enrichment_payloads`)**:
+  - Inspects active stage `service_mapping_scopes` (and transitive `{namespace.field}` endpoint placeholders) to fetch exclusively the secondary enrichment endpoints needed by the stage's monitored columns.
 - **Reactive Delta Field Mapping Engine (`evaluate_reactive_mappings` & `_propagate_cross_service_table_mappings`)**:
-  - **Service-Agnostic Multi-Source Resolution**: `source_field` supports single or comma-separated source paths/columns (e.g., endpoint paths `series.title` or dynamic table columns `COL_A, COL_B`). Each token is dynamically classified as an incoming endpoint payload field or an existing uppercase `SERVICES_PIPELINE` column (`table_cols`).
-  - **Null Source Guard (`Skip None`)**: If all resolved sources for a mapping are `None` (or if a pure endpoint mapping receives `None` from the upstream payload), the mapping is immediately bypassed (`continue`) without evaluating transformers or modifying the target column.
-  - **Reactive Source-Change Guard**:
-    - For **Endpoint-Sourced Mappings**: HTTP enrichment endpoints are always queried on schedule so delayed upstream updates (e.g., `"TBD"` $\rightarrow$ final episode title or updated paths/IDs) are captured. The resulting coerced/merged value is compared against `existing_val`; only if `final_val != existing_val` is the column added to `delta_fields` and `changed_columns`.
-    - For **Table-Column-Sourced Mappings**: Evaluates the mapping/transformer strictly when at least one referenced source table column is in `changed_columns` (modified in the current cycle) **or** when the target column itself is currently `NULL` (`existing_val is None`) and at least one source column is non-null. Prevents redundant cycle-by-cycle self-assignments across large tables.
-  - **Order-Independent Intra-Service & Cross-Service Cascades**:
-    - Live row context (`live_row`) updates immediately upon each column delta and runs up to 5 fixed-point passes (`seen_triggers_by_col`), guaranteeing that dependent mappings react in the same cycle regardless of their visual order in the service's mapping list.
-    - When a root in-place update or multi-service stage enrichment modifies any column (`changed_columns`), `_propagate_cross_service_table_mappings` propagates those column deltas in memory (`payload_context={}`) across active table-column mappings of eligible stages (`s.order <= row_stage.order`), updating cross-service derived columns atomically in the same cycle.
-  - **Strict Delta SQL Writes**: SQL `UPDATE` statements include exclusively the columns present in `delta_fields` whose values actually changed.
-- **In-Memory Tag Cache**:
-  - Upstream services provide numeric tag IDs (`series.tags: [1, 5]`).
-  - Scheduler fetches `/api/v3/tag` from upstream and caches `{id: label}` for 10 minutes.
-  - Automatically resolves numeric tags to string labels (`['anime']`) during payload flattening.
-- **Nested List Projection (`extract_dotted_value`)**:
-  - Traverses nested objects and projects arrays using mandatory `[*]` syntax (e.g. `movie.alternateTitles[*].title` $\rightarrow$ `["Sousou no Frieren", "Frieren: Beyond Journey's End"]`). Traversal over arrays without explicit `[*]` or numeric index returns `None`.
-  - Supports terminal `[*]` syntax (e.g. `episode.title[*]`) to wrap scalar values into single-item lists `[val]` for accumulative list columns.
-- **Data Sanitization (`sanitize_and_serialize`)**:
-  - Null normalization: empty lists (`[]`), empty strings (`""`), and whitespace convert to `NULL`.
-  - Non-empty lists are deduplicated and serialized as JSON arrays.
-- **Cross-Service Array Merging (`merge_field_value`)**:
-  - Enforces strict type boundaries via `is_json_list` helper: safely rejects scalar updates into list columns and list updates into scalar columns with diagnostic error logging.
-  - Merges list-to-list with exact, stripped, and case-insensitive deduplication while preserving element insertion order.
-- **Stage-Scoped Field Mapping Execution (`service_mapping_scopes`)**:
-  - **Root Stage Scoping (`trigger_now`)**: Extracts `allowed_cols = active_stage.service_mapping_scopes.get(service_id)`. If defined and non-empty, restricts evaluated field mappings to columns in `allowed_cols`. Unscoped attributes are not mapped, preserving `NULL`.
-  - **Consumer Enrichment Scoping (`_update_mapped_values_for_stage` & `_execute_consumer_enrichment`)**: Resolves `allowed_cols` per service from `stage.service_mapping_scopes` and passes `allowed_columns=allowed_cols` to consumer enrichment. Only scoped columns are computed, merged, and updated in SQLite. Unscoped columns are skipped and untouched.
-- **Stage Progression Engine (`reconcile_stages`)**:
-  - **Grace Period Check**: Verifies if Stage 1 items have matured beyond `grace_period_minutes`.
-  - **Watchdog Check**: Detects intermediate rows stalled longer than `timeout_minutes` and inserts `WARN_PIPELINE_STALLED` into `SYSTEM_INCIDENTS`.
-  - **Consumer Promotion**: Identifies rows with `STATUS = 'COMPLETED'` eligible for subsequent stages (`STAGE < target.order`), queries configured enrichment endpoints, executes field mappings, and updates row status.
-  - **Sink Promotion**: Promotes matching rows to terminal `STATUS = 'SINK'`.
+  - Multi-source resolution across endpoint paths and uppercase table columns (`table_cols`), null-source skipping, multi-pass intra-service cascades, and cross-service table-column propagation.
+- **Stage Progression, Grace Period & Watchdog (`reconcile_stages`)**:
+  - Enforces `grace_period_minutes` for Root stages before allowing `complete_condition` transition.
+  - Enforces `timeout_minutes` watchdog for `PENDING` rows, emitting deduplicated `WARN_PIPELINE_STALLED` incidents into `SYSTEM_INCIDENTS`.
+  - Promotes `COMPLETED` rows forward to the next qualifying Consumer (`STATUS = 'PENDING'`) or Passive Sink (`STATUS = 'SINK'`) stage.
+- **Background Retention & Custom Table Loops (`_retention_loop` & `_custom_tables_loop`)**:
+  - `_retention_loop`: Periodically runs `prune_pipeline_retention` across all enabled pipelines.
+  - `_custom_tables_loop`: Periodically runs `sync_custom_table` for all `MODE = 'TABLE'` entries in `CUSTOM_VIEWS` whose `REFRESH_INTERVAL_SECONDS` ($T_s$) has elapsed.
 
 ---
 
 ### 2.7 `src/core/gitops.py` — Git Inspection
 - Inspects `/repo` via non-mutating Git subprocess calls (`git rev-parse HEAD`, `git branch --show-current`, `git status --porcelain`).
-- Reports commit hash, short hash, active branch, and uncommitted dirty file count to the WebUI and Tier 3 meta-tools.
 
 ---
 
-### 2.8 `src/api/pipeline.py` — Pipeline Data, Sampling & Decoupled Sandbox Engine
-- **Decoupled API Sandbox (`POST /api/v1/pipeline/sandbox/enrichment`)**:
-  - **`SandboxEnrichmentRequest` Schema**:
-    - `service_id: str`: Target upstream service configuration key.
-    - `record_id: Optional[int] = None`: Optional `SERVICES_PIPELINE` row ID. If omitted, database queries are entirely bypassed.
-    - `sample_endpoint: Optional[str] = None`: Direct upstream path (e.g., `/api/v3/history?pageSize=1`) sampled live via HTTP GET.
-    - `custom_context: Optional[Dict[str, Any]] = None`: Arbitrary operator-defined JSON mock context.
-    - `enrichment_endpoints: Dict[str, str] = Field(default_factory=dict)`: Mapping of namespace labels to endpoint URI templates.
-  - **Multi-Source Context Resolution**:
-    - Assembles unified context: `{**row_dict, **sample_dict, **custom_context, **enrichment_data}`.
-    - If `record_id` is supplied, fetches row from `SERVICES_PIPELINE`; raises `404` if not found.
-    - If `sample_endpoint` is supplied, queries upstream service via `httpx.AsyncClient`, storing payload under `"sample"` and merging at root.
-    - Injects `custom_context` for mock evaluation.
-    - Sequentially iterates over `enrichment_endpoints`, resolving `{placeholder}` expressions using `extract_dotted_value` with case-insensitive fallbacks. Unresolved placeholders are recorded in execution logs without aborting the simulation.
-    - Returns `{ "success": True, "logs": logs, "context_data": final_context, "flattened_keys": flatten_json_keys(final_context) }`.
-- **Payload Schema Flattening (`flatten_json_keys`)**:
-  - Recursively flattens nested dictionaries and collections into discrete paths, types, and sample strings.
-  - Formats array items using explicit `[*]` wildcard projection notation (e.g. `items[*].id`, `tags[*]`) matching `CORE-04` array extractor semantics.
+### 2.8 `src/api/pipeline.py` — Multi-Pipeline Data, Registry, Sampling & Sandbox Engine
+- **Pipeline Registry CRUD (`/api/v1/pipeline/registry`)**:
+  - `GET /api/v1/pipeline/registry`: List all configured pipelines with row/sink statistics.
+  - `POST /api/v1/pipeline/registry`: Create a new pipeline and provision `PIPELINE_<SLUG>`.
+  - `PATCH /api/v1/pipeline/registry/{pipeline_id}`: Update pipeline metadata, `retention_days`, or `enabled` state.
+  - `DELETE /api/v1/pipeline/registry/{pipeline_id}`: Delete a pipeline and drop its `PIPELINE_<SLUG>` table (`default` pipeline is protected).
+- **Parameterized Pipeline Operations**:
+  - All data, purge, column management, and stats endpoints accept `pipeline_id: str = Query("default")`.
+- **Unified Decoupled Sandbox (`POST /api/v1/pipeline/sandbox/enrichment`)**:
+  - Uses shared `fetch_enrichment_payloads` and `_extract_payload_records` from `src/core/scheduler.py`.
 
 ---
 
@@ -262,22 +246,28 @@ src/
 | Method | Path | Summary | Tags |
 | :--- | :--- | :--- | :--- |
 | `GET` | `/health` | Container and scheduler health probe | System |
-| `GET` | `/api/v1/pipeline` | Query `SERVICES_PIPELINE` records with pagination & filters | Pipeline |
-| `POST` | `/api/v1/pipeline/purge` | Purge all rows from `SERVICES_PIPELINE` | Pipeline |
-| `GET` | `/api/v1/pipeline/columns` | Retrieve all table columns and deprecation state | Pipeline |
-| `POST` | `/api/v1/pipeline/columns` | Add a dynamic column with strict naming checks | Pipeline |
-| `DELETE` | `/api/v1/pipeline/columns/{name}` | Delete a user-defined column | Pipeline |
-| `POST` | `/api/v1/pipeline/columns/prune` | Batch prune unused dynamic columns | Pipeline |
-| `PUT` | `/api/v1/pipeline/columns/order` | Persist visual column display order | Pipeline |
+| `GET` | `/api/v1/pipeline/registry` | List all registered pipelines and row metrics | Pipeline |
+| `POST` | `/api/v1/pipeline/registry` | Create a new pipeline and provision `PIPELINE_<SLUG>` | Pipeline |
+| `PATCH` | `/api/v1/pipeline/registry/{id}` | Update pipeline configuration and retention policy | Pipeline |
+| `DELETE` | `/api/v1/pipeline/registry/{id}` | Delete pipeline and drop `PIPELINE_<SLUG>` table | Pipeline |
+| `GET` | `/api/v1/pipeline` | Query `PIPELINE_<SLUG>` records (`?pipeline_id=default`) | Pipeline |
+| `POST` | `/api/v1/pipeline/purge` | Purge all rows from target pipeline (`?pipeline_id=default`) | Pipeline |
+| `GET` | `/api/v1/pipeline/columns` | Retrieve pipeline table columns and deprecation state | Pipeline |
+| `POST` | `/api/v1/pipeline/columns` | Add a dynamic column to target pipeline | Pipeline |
+| `DELETE` | `/api/v1/pipeline/columns/{name}` | Delete a user-defined column from target pipeline | Pipeline |
+| `POST` | `/api/v1/pipeline/columns/prune` | Batch prune unused dynamic columns from target pipeline | Pipeline |
+| `PUT` | `/api/v1/pipeline/columns/order` | Persist visual column display order for target pipeline | Pipeline |
 | `POST` | `/api/v1/pipeline/sample` | Live sample upstream service API payloads | Pipeline |
 | `POST` | `/api/v1/pipeline/sandbox/enrichment` | Simulate enrichment chains against DB records, live samples, or custom contexts | Pipeline |
-| `GET` | `/api/v1/pipeline/services/{id}/events` | Discover unique event types from upstream history | Pipeline |
+| `GET` | `/api/v1/pipeline/services/{id}/events` | Discover unique event types from upstream `poll_endpoint` | Pipeline |
 | `GET` | `/api/v1/pipeline/stats` | Aggregated pipeline progression counts | Pipeline |
-| `GET` | `/api/v1/views` | List all custom and preset SQL views | Views |
-| `GET` | `/api/v1/views/{name}` | Get specific view metadata | Views |
-| `GET` | `/api/v1/views/{name}/data` | Execute view query with pagination | Views |
-| `POST` | `/api/v1/views` | Register a new custom SQL view | Views |
-| `DELETE` | `/api/v1/views/{name}` | Remove a custom SQL view | Views |
+| `GET` | `/api/v1/views` | List all registered SQL views (`VIEW`) and custom tables (`TABLE`) | Views & Custom Tables |
+| `GET` | `/api/v1/views/{name}` | Get metadata for a specific view or persistent custom table | Views & Custom Tables |
+| `GET` | `/api/v1/views/{name}/data` | Execute view or query persistent custom table with pagination | Views & Custom Tables |
+| `POST` | `/api/v1/views` | Create a virtual SQL `VIEW` or persistent materialized `TABLE` | Views & Custom Tables |
+| `PATCH` | `/api/v1/views/{name}` | Update SQL projection, refresh interval $T_s$, or promote `VIEW` $\rightarrow$ `TABLE` | Views & Custom Tables |
+| `POST` | `/api/v1/views/{name}/sync` | Manually trigger immediate `UPSERT` sync for a `MODE='TABLE'` entry | Views & Custom Tables |
+| `DELETE` | `/api/v1/views/{name}` | Delete a custom view or persistent custom table | Views & Custom Tables |
 | `GET` | `/api/v1/incidents` | List system incidents with error catalog remedies | Incidents |
 | `GET` | `/api/v1/incidents/summary` | Fast count summary of active and resolved incidents | Incidents |
 | `POST` | `/api/v1/incidents` | Report a new incident | Incidents |
@@ -288,21 +278,19 @@ src/
 | `GET` | `/api/v1/tools` | List executable custom tools in `/config/custom_tools` | Custom Tools |
 | `POST` | `/api/v1/tools/{name}/run` | Execute sandboxed tool and stream console logs | Custom Tools |
 | `GET` | `/api/v1/settings` | Retrieve active application settings | Settings |
-| `POST` | `/api/v1/settings` | Save settings, migrate columns, and restart scheduler | Settings |
+| `POST` | `/api/v1/settings` | Save settings, migrate columns across pipelines, and restart scheduler | Settings |
 | `POST` | `/api/v1/settings/test-predicate` | Validate predicate expression syntax | Settings |
 | `POST` | `/api/v1/settings/test-transformer` | Validate transformer expression syntax | Settings |
-| `GET` | `/api/v1/settings/scheduler/status` | Ingestion scheduler running status and loop state | Settings |
-| `POST` | `/api/v1/settings/scheduler/restart` | Manually restart all background ingestion loops | Settings |
+| `GET` | `/api/v1/settings/scheduler/status` | Stage-driven scheduler running status and loop state | Settings |
+| `POST` | `/api/v1/settings/scheduler/restart` | Manually restart all background stage, retention, and custom table loops | Settings |
 | `POST` | `/api/v1/settings/test-notification` | Dispatch test push alert to NTFY or Webhook | Settings |
-| `GET` | `/api/v1/meta/query` | Tier 3 LLM Telemetry Query (Overview, Incidents, etc.) | LLM Meta-Tools |
+| `GET` | `/api/v1/meta/query` | Tier 3 LLM Telemetry Query (`overview`, `incidents`, `pipeline`, `views`, `gitops`, `errors`) | LLM Meta-Tools |
 | `GET` | `/api/v1/meta/tools` | OpenAPI function spec for LibreChat tool integration | LLM Meta-Tools |
 
 ---
 
 ## 4. Identified Backend Technical Gaps (Roadmap Input)
 
-1. **CORE-02 (Multi-Pipeline Dynamic Registry `PIPELINES`)**:
-   - Currently, all workflows share a single `SERVICES_PIPELINE` table.
-   - Future architectural phase must support dynamic isolated tables (`PIPELINE_<SLUG>`) registered in a `PIPELINES` catalog table.
-2. **API-02 (Remediation REST API for LLM Agents)**:
+1. **API-02 (Remediation REST API for LLM Agents)**:
    - `POST /api/v1/meta/remediate` is planned to execute pre-authorized remediation runbooks via HATEOAS parameter handoff.
+

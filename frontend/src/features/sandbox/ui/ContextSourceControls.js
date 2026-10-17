@@ -77,7 +77,9 @@ function resolveAvailableEndpoints(selectedService, currentService) {
 
 export function ContextSourceControls({
   services = {},
+  pipelines = {},
   selectedService = '',
+  selectedPipelineId = 'default',
   selectedRecordId = '',
   sampleEndpoint = '',
   customContextText = '',
@@ -86,6 +88,7 @@ export function ContextSourceControls({
   isLoading = false,
   saveSuccess = false,
   onServiceChange,
+  onPipelineChange,
   onRecordIdChange,
   onSampleEndpointChange,
   onCustomContextChange,
@@ -94,6 +97,7 @@ export function ContextSourceControls({
   onSaveToService
 }) {
   const serviceKeys = Object.keys(services);
+  const pipelineKeys = Object.keys(pipelines).length > 0 ? Object.keys(pipelines) : ['default'];
   const currentService = services[selectedService];
   const availableEndpoints = resolveAvailableEndpoints(selectedService, currentService);
 
@@ -102,7 +106,7 @@ export function ContextSourceControls({
       <!-- Primary Controls Row -->
       <div class="u-flex u-gap-3 u-items-center" style="flex-wrap: wrap;">
         <!-- Service Selector -->
-        <div style="flex: 1; min-width: 160px; max-width: 240px;">
+        <div style="flex: 1; min-width: 150px; max-width: 220px;">
           <select
             class="form-select u-font-mono u-text-sm"
             @change=${(e) => onServiceChange?.(e.target.value)}
@@ -116,13 +120,28 @@ export function ContextSourceControls({
           </select>
         </div>
 
+        <!-- Pipeline Selector for Record ID -->
+        <div style="min-width: 130px; max-width: 170px;">
+          <select
+            class="form-select u-font-mono u-text-sm"
+            title="Pipeline table for Record ID lookup"
+            @change=${(e) => onPipelineChange?.(e.target.value)}
+          >
+            ${pipelineKeys.map((pid) => html`
+              <option value=${pid} ?selected=${selectedPipelineId === pid}>
+                Pipeline: ${pid}
+              </option>
+            `)}
+          </select>
+        </div>
+
         <!-- Optional Record ID -->
-        <div style="min-width: 120px; max-width: 140px; flex: 1;">
+        <div style="min-width: 110px; max-width: 130px; flex: 1;">
           <input
             type="number"
             class="form-input u-font-mono u-text-sm"
             placeholder="Record ID"
-            title="Optional Pipeline Record ID from database"
+            title="Optional Pipeline Record ID from selected pipeline table"
             .value=${selectedRecordId}
             @input=${(e) => onRecordIdChange?.(e.target.value)}
           />

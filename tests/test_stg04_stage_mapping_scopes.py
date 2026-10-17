@@ -60,11 +60,13 @@ class TestStg04StageMappingScopes(unittest.IsolatedAsyncioTestCase):
 
         with patch("src.api.settings.config_manager.get_settings", new_callable=AsyncMock) as mock_get_old, \
              patch("src.api.settings.config_manager.update_settings", new_callable=AsyncMock) as mock_update, \
+             patch("src.api.settings.db_manager.ensure_pipeline_table", new_callable=AsyncMock) as mock_ensure_tbl, \
              patch("src.api.settings.db_manager.get_table_columns", new_callable=AsyncMock) as mock_get_cols, \
              patch("src.api.settings.db_manager.sync_dynamic_columns", new_callable=AsyncMock), \
              patch("src.api.settings.scheduler.restart", new_callable=AsyncMock):
 
             mock_get_old.return_value = Settings(stages=[stage1, stage2], services={"sonarr": svc})
+            mock_ensure_tbl.return_value = "PIPELINE_DEFAULT"
             mock_get_cols.return_value = [{"name": "TITLE"}, {"name": "SEASON"}]
             mock_update.side_effect = lambda s: s
 
@@ -102,6 +104,7 @@ class TestStg04StageMappingScopes(unittest.IsolatedAsyncioTestCase):
 
         with patch("src.api.settings.config_manager.get_settings", new_callable=AsyncMock) as mock_get_old, \
              patch("src.api.settings.config_manager.update_settings", new_callable=AsyncMock) as mock_update, \
+             patch("src.api.settings.db_manager.ensure_pipeline_table", new_callable=AsyncMock) as mock_ensure_tbl, \
              patch("src.api.settings.db_manager.get_table_columns", new_callable=AsyncMock) as mock_get_cols, \
              patch("src.api.settings.db_manager.rename_column", new_callable=AsyncMock) as mock_rename, \
              patch("src.api.settings.db_manager.sync_dynamic_columns", new_callable=AsyncMock), \
@@ -111,6 +114,7 @@ class TestStg04StageMappingScopes(unittest.IsolatedAsyncioTestCase):
                 stages=[StageConfig(id="stage_1", name="Stage 1", service_ids=["sonarr"])],
                 services={"sonarr": old_svc}
             )
+            mock_ensure_tbl.return_value = "PIPELINE_DEFAULT"
             mock_get_cols.return_value = [{"name": "SEASON_OLD"}]
             mock_update.side_effect = lambda s: s
 
@@ -118,7 +122,7 @@ class TestStg04StageMappingScopes(unittest.IsolatedAsyncioTestCase):
 
             # Scope should now contain SEASON_NEW
             self.assertEqual(updated.stages[0].service_mapping_scopes["sonarr"], ["SEASON_NEW"])
-            mock_rename.assert_awaited_once_with("SERVICES_PIPELINE", "SEASON_OLD", "SEASON_NEW")
+            mock_rename.assert_awaited_once_with("PIPELINE_DEFAULT", "SEASON_OLD", "SEASON_NEW")
 
     async def test_execute_consumer_enrichment_scope_filtering(self):
         """Verify _execute_consumer_enrichment only updates scoped columns and skips unscoped ones."""
@@ -147,7 +151,8 @@ class TestStg04StageMappingScopes(unittest.IsolatedAsyncioTestCase):
                 row_dict=row_dict,
                 table_cols=table_cols,
                 service_id="sonarr",
-                allowed_columns={"TITLE"}
+                allowed_columns={"TITLE"},
+                table_name="PIPELINE_DEFAULT",
             )
             self.assertTrue(updated)
             mock_execute.assert_awaited_once()
@@ -164,7 +169,8 @@ class TestStg04StageMappingScopes(unittest.IsolatedAsyncioTestCase):
                 row_dict=row_dict,
                 table_cols=table_cols,
                 service_id="sonarr",
-                allowed_columns=None
+                allowed_columns=None,
+                table_name="PIPELINE_DEFAULT",
             )
             self.assertTrue(updated)
             mock_execute.assert_awaited_once()
@@ -194,7 +200,8 @@ class TestStg04StageMappingScopes(unittest.IsolatedAsyncioTestCase):
                 stage=stage,
                 row_id=10,
                 table_cols={"TITLE", "SEASON"},
-                settings=settings
+                settings=settings,
+                table_name="PIPELINE_DEFAULT",
             )
 
             self.assertTrue(res)
@@ -228,20 +235,21 @@ class TestStg04StageMappingScopes(unittest.IsolatedAsyncioTestCase):
 
         mock_resp = MagicMock()
         mock_resp.status_code = 200
+        mock_resp.headers = {}
         mock_resp.json.return_value = [{"id": 101, "title": "Test Title", "season": 2, "eventType": "grabbed"}]
 
         with patch("src.core.scheduler.config_manager.get_settings", new_callable=AsyncMock) as mock_get_settings, \
+             patch("src.core.scheduler.db_manager.ensure_pipeline_table", new_callable=AsyncMock) as mock_ensure_tbl, \
              patch("src.core.scheduler.db_manager.get_table_columns", new_callable=AsyncMock) as mock_cols, \
              patch("src.core.scheduler.db_manager.query", new_callable=AsyncMock) as mock_query, \
              patch("src.core.scheduler.db_manager.execute", new_callable=AsyncMock) as mock_execute, \
-             patch("src.core.scheduler.httpx.AsyncClient.get", new_callable=AsyncMock) as mock_http_get, \
-             patch.object(scheduler_instance, "_get_service_tags", new_callable=AsyncMock) as mock_tags:
+             patch("src.core.scheduler.httpx.AsyncClient.get", new_callable=AsyncMock) as mock_http_get:
 
             mock_get_settings.return_value = settings
+            mock_ensure_tbl.return_value = "PIPELINE_DEFAULT"
             mock_cols.return_value = [{"name": "TITLE"}, {"name": "SEASON"}]
             mock_query.return_value = []  # No existing row
             mock_http_get.return_value = mock_resp
-            mock_tags.return_value = {}
 
             status = await scheduler_instance.trigger_now("sonarr")
             self.assertEqual(status["status"], "success")

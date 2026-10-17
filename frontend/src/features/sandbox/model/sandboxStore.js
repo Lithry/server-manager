@@ -5,6 +5,7 @@ import { sandboxApi } from '../api.js';
 export function createSandboxStore() {
   let state = {
     selectedService: '',
+    selectedPipelineId: 'default',
     selectedRecordId: '',
     sampleEndpoint: '',
     customContextText: '',
@@ -109,6 +110,7 @@ export function createSandboxStore() {
     try {
       const res = await sandboxApi.testEnrichment({
         service_id: s.selectedService,
+        pipeline_id: s.selectedPipelineId || 'default',
         record_id: s.selectedRecordId ? parseInt(s.selectedRecordId, 10) : null,
         sample_endpoint: s.sampleEndpoint.trim() || null,
         custom_context: parsedCustomContext,
@@ -169,8 +171,8 @@ export function createSandboxStore() {
     const newServices = { ...services, [s.selectedService]: { ...currentService, enrichment_endpoints: enrichmentEndpoints } };
     const newSettings = { ...snapshot.data, services: newServices };
     try {
-      await http.post('/api/v1/settings/config', newSettings);
-      queryCache.setData(settingsKeys.all, () => newSettings);
+      const updated = await http.post('/api/v1/settings', newSettings);
+      queryCache.setData(settingsKeys.all, () => updated);
       set({ saveSuccess: true, error: null });
       setTimeout(() => set({ saveSuccess: false }), 3000);
     } catch (err) {

@@ -1,12 +1,39 @@
 import { html, nothing } from 'lit-html';
 import { Button } from '../../../shared/ui/atoms/Button/Button.js';
-import { Icon } from '../../../shared/ui/atoms/Icon/Icon.js';
+import { queryCache } from '../../../shared/api/index.js';
+import { settingsKeys } from '../api.js';
 
-export function createServicesPanel(store, servicesData = {}, globalPoll = 300) {
+export function createServicesPanel(store, servicesData = {}) {
   const serviceKeys = Object.keys(servicesData);
 
   const handleAddService = () => {
-    store.set(s => ({ ...s, isServiceModalOpen: true }));
+    store.set(s => ({ ...s, isServiceModalOpen: true, editingServiceId: null }));
+  };
+
+  const handleDeleteService = (key) => {
+    if (!confirm(`Delete service '${key}' and remove it from assigned stages?`)) return;
+    const snapshot = queryCache.read(settingsKeys.all);
+    if (!snapshot?.data) return;
+
+    const nextServices = { ...(snapshot.data.services || {}) };
+    delete nextServices[key];
+
+    const nextStages = (snapshot.data.stages || []).map(st => {
+      const nextScopes = { ...(st.service_mapping_scopes || {}) };
+      delete nextScopes[key];
+      return {
+        ...st,
+        service_ids: (st.service_ids || []).filter(sid => sid !== key),
+        service_mapping_scopes: nextScopes
+      };
+    });
+
+    queryCache.setData(settingsKeys.all, () => ({
+      ...snapshot.data,
+      services: nextServices,
+      stages: nextStages
+    }));
+    store.set(s => ({ ...s, isDirty: true }));
   };
 
   const renderServiceItem = (key, s, isLast) => {
@@ -18,22 +45,19 @@ export function createServicesPanel(store, servicesData = {}, globalPoll = 300) 
         <div class="u-flex u-items-center u-justify-between u-mb-2">
           <div class="u-flex u-items-center u-gap-3">
             <strong style="font-size: 1.1rem; color: var(--color-text);">${s.name}</strong>
-            <span class="u-font-mono u-text-xs" style="background: color-mix(in srgb, var(--color-accent) 20%, transparent); color: var(--color-accent); padding: 2px 6px; border-radius: 4px;">${s.name.toUpperCase()}</span>
+            <span class="u-font-mono u-text-xs" style="background: color-mix(in srgb, var(--color-accent) 20%, transparent); color: var(--color-accent); padding: 2px 6px; border-radius: 4px;">${key.toUpperCase()}</span>
             ${s.enabled 
               ? html`<span class="u-font-mono u-text-xs" style="background: color-mix(in srgb, var(--color-success) 20%, transparent); color: var(--color-success); padding: 2px 6px; border-radius: 4px;">ACTIVE</span>`
               : html`<span class="u-font-mono u-text-xs" style="background: color-mix(in srgb, var(--color-text-muted) 20%, transparent); color: var(--color-text-muted); padding: 2px 6px; border-radius: 4px;">DISABLED</span>`
             }
-            <span class="u-font-mono u-text-xs" style="color: #fff; font-weight: bold;">
-              ${s.poll_interval_seconds ? `POLLS EVERY ${s.poll_interval_seconds}S` : `INHERITS GLOBAL (${globalPoll}S)`}
-            </span>
           </div>
           <div class="u-flex u-gap-2">
             ${Button({ label: 'Edit', variant: 'ghost', size: 'sm', onClick: () => store.set(s => ({ ...s, isServiceModalOpen: true, editingServiceId: key })) })}
-            ${Button({ label: 'Delete', variant: 'delete', size: 'sm', onClick: () => confirm('Delete service?') })}
+            ${Button({ label: 'Delete', variant: 'delete', size: 'sm', onClick: () => handleDeleteService(key) })}
           </div>
         </div>
         <div class="u-text-sm u-font-mono u-text-muted" style="color: var(--color-text-muted);">
-          Base URL: ${s.base_url || 'N/A'} | API Key ${s.api_key ? 'configured' : 'missing'} | Field Mappings: <span style="color: var(--color-text); font-weight: bold;">${fieldMapCount}</span> | Enrichment: <span style="color: var(--color-text-secondary);">${enrichmentKeys || 'none'}</span>
+          Base URL: ${s.base_url || 'N/A'} | API Key: ${s.api_key ? 'configured' : 'missing'} | Field Mappings: <span style="color: var(--color-text); font-weight: bold;">${fieldMapCount}</span> | Enrichment: <span style="color: var(--color-text-secondary);">${enrichmentKeys || 'none'}</span>
         </div>
       </div>
     `;
@@ -56,3 +80,4 @@ export function createServicesPanel(store, servicesData = {}, globalPoll = 300) 
     </div>
   `;
 }
+

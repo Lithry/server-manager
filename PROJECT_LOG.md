@@ -1506,3 +1506,117 @@ This log maintains cross-session operational continuity, recording architectural
 - `docs/BACKEND_SPEC.md` (Modified)
 - `PROJECT_LOG.md` (Updated)
 
+---
+
+## Session Milestone: 2026-10-17 — Backend Architecture Audit & Multi-Pipeline / Custom Tables Refactoring (`CORE-02` & `VIEW-01`)
+
+### Role & Agent Assignment
+- **Principal Systems Auditor & Refactor Specialist (`code-auditor`)**: Performed exhaustive backend database, schema, and execution flow audit, isolated root-cause blockers and service-specific coupling, and executed the 5-phase refactoring to achieve a 100% service-agnostic multi-pipeline monitoring and telemetry system.
+
+### Root-Cause Audit Findings & Architectural Refactoring Applied
+1. **Multi-Pipeline Dynamic Registry & Destructive Legacy Removal (`src/core/config.py`, `src/core/database.py`, `src/api/pipeline.py`, `src/main.py`)**:
+   - Destructively dropped legacy `SERVICES_PIPELINE` / `SERVICE_PIPELINE` tables on schema initialization (`initialize_schema`).
+   - Created `PIPELINES` metadata registry table (`ID`, `NAME`, `DESCRIPTION`, `TABLE_NAME`, `RETENTION_DAYS`, `ENABLED`, `CREATED_AT`) and provisioned `PIPELINE_DEFAULT` as the initial pipeline table.
+   - Added `PipelineConfig` (with `resolved_table_name()`) and `StageConfig.pipeline_ids` (`list[str]`, M:N stage-to-pipeline assignment).
+   - Updated `sync_dynamic_columns(settings)` to provision all configured `PIPELINE_<SLUG>` tables and synchronize dynamic columns per pipeline based on assigned stages and services.
+   - Added `/api/v1/pipeline/registry` CRUD endpoints (`GET`, `POST`, `PATCH`, `DELETE`) and parameterized all `/api/v1/pipeline*` endpoints by `pipeline_id`.
+2. **Stage-Driven Execution Intervals, Relative Lookback Window ($\Delta t$) & ServerManager `CREATED_AT` (`src/core/config.py`, `src/core/scheduler.py`)**:
+   - Moved polling interval ownership from `ServiceConfig` (`poll_interval_seconds` removed) to `StageConfig.interval_seconds` (falling back to `settings.global_poll_interval_seconds`).
+   - Replaced service-driven polling loops with stage-driven loops (`_stage_loop(stage_id)` and `run_stage_cycle(stage_id)`), guarded per pipeline table by `asyncio.Lock` (`_get_pipeline_lock`).
+   - Root stage ingestion (`_ingest_root_service_for_stage`) computes a relative lookback window ($\Delta t = \text{interval\_seconds}$) referenced against the upstream HTTP `Date` response header (`ref_clock`, with fallback to ServerManager UTC) and supports `{interval_seconds}`, `{interval_minutes}`, `{lookback_iso}`, `{lookback_unix}` placeholders in `poll_endpoint`.
+   - Stamped `CREATED_AT` strictly with ServerManager's internal UTC clock upon initial row insertion.
+3. **Passive `SINK` Stages, Root+Sink Mode & `LAST_UPDATED` Retention Pruning (`src/core/scheduler.py`, `src/core/database.py`)**:
+   - Downstream `SINK` stages (`start_condition != NULL` and `complete_condition IS NULL`) are 100% passive and do not spawn polling loops.
+   - Root stages with `complete_condition IS NULL` ingest directly into `STATUS = 'SINK'` (Root + Sink mode).
+   - If a new event arrives during a Root stage cycle matching an existing `PIPELINE_KEY` (even if the row is in `SINK`), the Root stage updates changed monitored columns in-place and updates `LAST_UPDATED = CURRENT_TIMESTAMP` without resetting `STAGE` or `STATUS`.
+   - Implemented `prune_pipeline_retention` and `_retention_loop` to delete exclusively `STATUS = 'SINK'` records whose `LAST_UPDATED` is older than the pipeline's `retention_days`.
+   - Enforced `grace_period_minutes` for Root stages and `timeout_minutes` watchdog emitting deduplicated `WARN_PIPELINE_STALLED` incidents into `SYSTEM_INCIDENTS`.
+4. **Dual-Mode View & Persistent Custom Table Builder (`VIEW` & `TABLE`) (`src/core/database.py`, `src/api/views.py`, `src/core/scheduler.py`)**:
+   - Upgraded `CUSTOM_VIEWS` with `MODE` (`'VIEW'` or `'TABLE'`), `SYNC_KEY_COLUMN`, `REFRESH_INTERVAL_SECONDS` ($T_s$), and `LAST_SYNCED_AT`.
+   - Implemented `sync_custom_table(view_name)` to materialize persistent SQLite tables and execute `INSERT INTO <VIEW_NAME> ... ON CONFLICT("<SYNC_KEY_COLUMN>") DO UPDATE SET ...`.
+   - Added `POST /api/v1/views/{view_name}/sync` (manual sync), `PATCH /api/v1/views/{view_name}` (update query, $T_s$, or promote `VIEW` to `TABLE`), and `_custom_tables_loop` in `TaskScheduler` for automated periodic synchronization.
+5. **100% Service-Agnostic Cleanup, Lazy Enrichment & Safe Settings Migration (`src/api/pipeline.py`, `src/api/settings.py`, `src/api/meta.py`, `src/core/transformers.py`, `src/core/predicates.py`)**:
+   - Removed all hardcoded Sonarr/Radarr/Shoko/Jellyfin paths, `/api/v3/tag`, `episodeId`, `EVENT_DESCRIPTIONS`, `JELLYFIN_STATUS`, and `MEDIA_CATALOG` references across `src/`.
+   - Unified enrichment execution (`fetch_enrichment_payloads`) between `TaskScheduler` and the API Sandbox, adding lazy namespace filtering (`_compute_required_enrichment_namespaces`) so stages only call HTTP enrichment endpoints required by their `service_mapping_scopes`.
+   - Added transparent JSON list unpacking (`parse_json_list_if_str`) and safe `ast.Call` functions (`len`, `lower`, `upper`, `str`, `int`, `float`, `bool`) to `PredicateEvaluator` and `SafeContext`.
+   - Fixed `update_settings` in `src/api/settings.py` to allow stage reordering/deletion and detect column renames strictly by unambiguous `source_field` matching rather than list index.
+
+### Verification Results
+- **Syntax Compilation**: `.venv\Scripts\python.exe -m py_compile` across all 14 modules in `src/` passed with 0 errors.
+- **Automated Test Suite**: Executed `.venv\Scripts\python.exe -m unittest discover -s tests -v` — 37/37 unit and integration tests passed cleanly in 1.919s (including `tests/test_multi_pipeline_and_custom_tables.py`).
+
+### Files Modified & Created
+- `src/core/config.py` (Modified)
+- `src/core/database.py` (Modified)
+- `src/core/transformers.py` (Modified)
+- `src/core/predicates.py` (Modified)
+- `src/core/scheduler.py` (Modified)
+- `src/api/pipeline.py` (Modified)
+- `src/api/settings.py` (Modified)
+- `src/api/views.py` (Modified)
+- `src/api/meta.py` (Modified)
+- `src/main.py` (Modified)
+- `tests/test_reactive_mappings.py` (Modified)
+- `tests/test_transformers.py` (Modified)
+- `tests/test_stg04_stage_mapping_scopes.py` (Modified)
+- `tests/test_multi_pipeline_and_custom_tables.py` (Created)
+- `docs/ARCHITECTURE.md` (Modified)
+- `docs/BACKEND_SPEC.md` (Modified)
+- `docs/BACKLOG.md` (Modified)
+- `PROJECT_LOG.md` (Updated)
+
+---
+
+## [2026-10-17] — Frontend Architecture Audit & Multi-Pipeline / Dual-Mode Views & Custom Tables WebUI Refactoring
+
+### Acting Role
+- `Principal Systems Auditor & Refactor Specialist` (`code-auditor` — Manual User Invocation)
+
+### Summary of Architectural Changes
+1. **Multi-Pipeline Management & Active Pipeline Switcher (`frontend/src/features/settings/ui/PipelinesPanel.js`, `frontend/src/features/settings/ui/PipelineModal.js`, `frontend/src/pages/SettingsPage.js`, `frontend/src/pages/PipelinePage.js`, `frontend/src/features/pipeline/api.js`, `frontend/src/features/pipeline/ui/ManageColumnsModal.js`)**:
+   - Added a dedicated `Pipelines` tab in `SettingsPage.js` (`PipelinesPanel.js` + `PipelineModal.js`) for full CRUD over `settings.pipelines` (`id`, `name`, `description`, `retention_days`, `column_order`) with SQL identifier validation (`^[A-Z0-9_]+$`) and cascading cleanup of `stage.pipeline_ids` on deletion.
+   - Updated `PipelinePage.js` and `ManageColumnsModal.js` with an active pipeline selector (`pipeline_id`), dynamic pipeline-scoped column ordering and physical column pruning (`DELETE /api/v1/pipeline/columns/{column_name}?pipeline_id=...`), pipeline-scoped database purge (`DELETE /api/v1/pipeline/purge?pipeline_id=...`), and removed dead `alert()` placeholder buttons.
+2. **Stage-Centric Intervals, Multi-Pipeline Assignment & Collector Semantics (`frontend/src/features/settings/ui/StagesPanel.js`, `frontend/src/features/settings/ui/StageModal.js`)**:
+   - Updated `StageModal.js` and `StagesPanel.js` to support multi-pipeline assignment (`pipeline_ids`), stage-level `interval_seconds` (with global inheritance), fixed `timeout_minutes` (replacing legacy `watchdog_timeout_minutes` bug), wired Stage deletion, and added dynamic collector badges (`ROOT + SINK` when `is_root && !complete_condition` vs `SINK (PASSIVE)` when `!is_root && !complete_condition`).
+3. **Service-Agnostic Cleanup & Strict <250-Line Modularization (`frontend/src/features/settings/ui/ServicesPanel.js`, `frontend/src/features/settings/ui/ServiceModal.js`, `frontend/src/features/settings/ui/ServiceEventDiscovery.js`, `frontend/src/features/settings/ui/SampleApiModal.js`)**:
+   - Removed `poll_interval_seconds` from `ServicesPanel.js` and `ServiceModal.js`, wired the Service `Delete` button with cascading cleanup of `stage.service_ids` and `stage.service_mapping_scopes`, and added documentation for relative lookback placeholders (`{lookback_seconds}`, `{lookback_minutes}`, `{lookback_iso}`, `{cutoff_iso}`).
+   - Extracted `ServiceEventDiscovery.js` (136 lines) from `ServiceModal.js` (232 lines) and compacted `SampleApiModal.js` (206 lines) so every module in `frontend/src/` strictly obeys the `< 250` lines architectural limit.
+4. **Dual-Mode SQL Views & Persistent Custom Tables UI (`frontend/src/pages/ViewsPage.js`, `frontend/src/features/views/ViewList.js`, `frontend/src/features/views/api.js`, `frontend/src/features/views/ui/ViewModal.js`, `frontend/src/features/views/ui/ViewDataModal.js`)**:
+   - Replaced dead `alert()` actions in `ViewsPage.js` and `ViewList.js` with `ViewModal.js` (create/edit `MODE = 'VIEW'` virtual views or `MODE = 'TABLE'` persistent tables with `sync_key_column` and automated $T_s$ `refresh_interval_seconds`, including `VIEW -> TABLE` promotion) and `ViewDataModal.js` (live row/column inspection via `GET /api/v1/views/{name}/data` and manual `Sync Now` via `POST /api/v1/views/{name}/sync`).
+5. **Engine Overview, Dashboard Telemetry & API Sandbox Alignment (`frontend/src/features/settings/ui/EnginePanel.js`, `frontend/src/features/overview/OverviewPanel.js`, `frontend/src/features/sandbox/model/sandboxStore.js`, `frontend/src/features/sandbox/ui/ContextSourceControls.js`, `frontend/src/pages/SandboxPage.js`)**:
+   - Wired `Restart Scheduler Loops` in `EnginePanel.js` to `POST /api/v1/settings/scheduler/restart` and displayed real Stage Interval Overrides and Pipeline Retention Overrides.
+   - Updated `OverviewPanel.js` to consume `data.gitops` and multi-pipeline `data.telemetry.pipelines` breakdown.
+   - Added `pipeline_id` selector to `ContextSourceControls.js` and `sandboxStore.js` for `Record ID` lookups and fixed `saveEndpoint()` to persist via `POST /api/v1/settings`.
+
+### Verification Results
+- **Zero Legacy References**: Verified 0 occurrences of `SERVICES_PIPELINE`, `poll_interval_seconds`, or `watchdog_timeout_minutes` across `frontend/src/`.
+- **Module Size Constraint**: Verified all 38 `.js` modules in `frontend/src/` are $\le 241$ lines (strictly under the 250-line architectural limit).
+- **Production Bundle Build**: Executed `npm run build` in `frontend/` — Vite 5 + LightningCSS compiled cleanly in `866ms` into `src/static/`.
+
+### Files Modified & Created
+- `frontend/src/features/settings/ui/PipelinesPanel.js` (Created)
+- `frontend/src/features/settings/ui/PipelineModal.js` (Created)
+- `frontend/src/features/settings/ui/ServiceEventDiscovery.js` (Created)
+- `frontend/src/features/views/ui/ViewModal.js` (Created)
+- `frontend/src/features/views/ui/ViewDataModal.js` (Created)
+- `frontend/src/pages/SettingsPage.js` (Modified)
+- `frontend/src/pages/PipelinePage.js` (Modified)
+- `frontend/src/pages/ViewsPage.js` (Modified)
+- `frontend/src/pages/SandboxPage.js` (Modified)
+- `frontend/src/features/pipeline/api.js` (Modified)
+- `frontend/src/features/pipeline/ui/ManageColumnsModal.js` (Modified)
+- `frontend/src/features/settings/ui/StagesPanel.js` (Modified)
+- `frontend/src/features/settings/ui/StageModal.js` (Modified)
+- `frontend/src/features/settings/ui/ServicesPanel.js` (Modified)
+- `frontend/src/features/settings/ui/ServiceModal.js` (Modified)
+- `frontend/src/features/settings/ui/SampleApiModal.js` (Modified)
+- `frontend/src/features/settings/ui/EnginePanel.js` (Modified)
+- `frontend/src/features/views/api.js` (Modified)
+- `frontend/src/features/views/ViewList.js` (Modified)
+- `frontend/src/features/overview/OverviewPanel.js` (Modified)
+- `frontend/src/features/sandbox/model/sandboxStore.js` (Modified)
+- `frontend/src/features/sandbox/ui/ContextSourceControls.js` (Modified)
+- `src/static/` (Regenerated via `npm run build`)
+- `docs/FRONTEND_SPEC.md` (Modified)
+- `PROJECT_LOG.md` (Updated)
+

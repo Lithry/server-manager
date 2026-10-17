@@ -20,15 +20,15 @@ router = APIRouter(prefix="/api/v1/meta", tags=["LLM Meta-Tools"])
 
 @router.get("/query")
 async def server_query(
-    target: str = Query(..., description="Target telemetry domain: 'overview', 'incidents', 'pipeline', 'catalog', 'gitops', 'errors'"),
-    filter: Optional[str] = Query(None, description="Optional category or status filter"),
+    target: str = Query(..., description="Target telemetry domain: 'overview', 'incidents', 'pipeline', 'views', 'catalog', 'gitops', 'errors'"),
+    filter: Optional[str] = Query(None, description="Optional category, status, stage, or view name filter"),
+    pipeline_id: Optional[str] = Query(None, description="Optional pipeline ID for 'pipeline' target (defaults to 'default')"),
     limit: int = Query(20, ge=1, le=100),
 ) -> Dict[str, Any]:
-    """Tier 3 LLM Telemetry Query Interface (Stateless RAG for LibreChat)."""
+    """Tier 3 LLM Telemetry Query Interface (Stateless RAG)."""
     clean_target = target.strip().lower()
 
     if clean_target == "overview":
-        # Aggregate high-level server health and system state
         incidents_summary = await db_manager.query("""
             SELECT 
                 COUNT(CASE WHEN RESOLVED = 0 THEN 1 END) AS active_incidents,
@@ -36,23 +36,39 @@ async def server_query(
                 COUNT(CASE WHEN RESOLVED = 0 AND SEVERITY = 'WARNING' THEN 1 END) AS warning_incidents
             FROM SYSTEM_INCIDENTS;
         """)
-        # Dynamic pipeline count
-        cols = await db_manager.get_table_columns("SERVICES_PIPELINE")
-        pipeline_total = 0
-        available_count = 0
-        try:
-            total_rows = await db_manager.query("SELECT COUNT(*) as total FROM SERVICES_PIPELINE;")
-            pipeline_total = total_rows[0]["total"] if total_rows else 0
-            if "JELLYFIN_STATUS" in cols:
-                avail_rows = await db_manager.query("SELECT COUNT(*) as avail FROM SERVICES_PIPELINE WHERE JELLYFIN_STATUS = 'AVAILABLE';")
-                available_count = avail_rows[0]["avail"] if avail_rows else 0
-            elif "STATUS" in cols:
-                avail_rows = await db_manager.query("SELECT COUNT(*) as avail FROM SERVICES_PIPELINE WHERE STATUS = 'AVAILABLE';")
-                available_count = avail_rows[0]["avail"] if avail_rows else 0
-        except Exception:
-            pass
 
         settings = await config_manager.get_settings()
+        settings.normalize_pipelines()
+
+        pipeline_total = 0
+        completed_or_sink_count = 0
+        pipelines_summary: List[Dict[str, Any]] = []
+
+        for pid, pcfg in settings.pipelines.items():
+            table_name = pcfg.resolved_table_name()
+            p_total = 0
+            p_sink = 0
+            try:
+                t_rows = await db_manager.query(f"SELECT COUNT(*) as total FROM {table_name};")
+                p_total = t_rows[0]["total"] if t_rows else 0
+                s_rows = await db_manager.query(
+                    f"SELECT COUNT(*) as cnt FROM {table_name} WHERE STATUS IN ('COMPLETED', 'SINK');"
+                )
+                p_sink = s_rows[0]["cnt"] if s_rows else 0
+            except Exception:
+                pass
+            pipeline_total += p_total
+            completed_or_sink_count += p_sink
+            pipelines_summary.append({
+                "id": pid,
+                "name": pcfg.name,
+                "table_name": table_name,
+                "enabled": pcfg.enabled,
+                "retention_days": pcfg.retention_days,
+                "total_items": p_total,
+                "completed_or_sink_items": p_sink,
+            })
+
         git_status = await gitops_manager.get_status()
         sched_status = scheduler.get_scheduler_status()
 
@@ -60,7 +76,9 @@ async def server_query(
             {
                 "id": s.id,
                 "name": s.name,
+                "pipeline_ids": s.pipeline_ids,
                 "service_ids": s.service_ids,
+                "interval_seconds": s.interval_seconds,
                 "enabled": s.enabled,
             }
             for s in settings.stages
@@ -72,7 +90,8 @@ async def server_query(
             "active_incidents": incidents_summary[0]["active_incidents"] if incidents_summary else 0,
             "critical_incidents": incidents_summary[0]["critical_incidents"] if incidents_summary else 0,
             "pipeline_total_items": pipeline_total,
-            "pipeline_available_media": available_count,
+            "pipeline_completed_or_sink_items": completed_or_sink_count,
+            "pipelines": pipelines_summary,
             "registered_services": len(settings.services),
             "stages": stages_data,
             "gitops": {
@@ -114,40 +133,54 @@ async def server_query(
         }
 
     elif clean_target == "pipeline":
+        settings = await config_manager.get_settings()
+        p_cfg = settings.resolve_pipeline(pipeline_id or "default")
+        table_name = p_cfg.resolved_table_name()
+
         where_sql = ""
         params = []
         if filter:
-            where_sql = "WHERE STATUS = ?"
-            params.append(filter.upper())
+            where_sql = "WHERE STATUS = ? OR STAGE = ?"
+            params.extend([filter.upper(), filter])
 
         items = await db_manager.query(
-            f"SELECT * FROM SERVICES_PIPELINE {where_sql} ORDER BY LAST_UPDATED DESC LIMIT ?;",
+            f"SELECT * FROM {table_name} {where_sql} ORDER BY LAST_UPDATED DESC LIMIT ?;",
             tuple(params + [limit]),
         )
         return {
             "target": "pipeline",
+            "pipeline_id": p_cfg.id,
+            "table_name": table_name,
             "count": len(items),
             "items": items,
         }
 
-    elif clean_target == "catalog":
-        # Query MEDIA_CATALOG preset view if instantiated
-        view_exists = await db_manager.query("SELECT name FROM sqlite_master WHERE type='view' AND name='MEDIA_CATALOG';")
-        if not view_exists:
+    elif clean_target in ("views", "catalog"):
+        registered = await db_manager.query("SELECT * FROM CUSTOM_VIEWS ORDER BY ID ASC;")
+        if filter:
+            target_view = filter.strip().upper()
+            matching = [r for r in registered if r["VIEW_NAME"] == target_view]
+            if not matching:
+                return {
+                    "target": clean_target,
+                    "view_name": target_view,
+                    "count": 0,
+                    "items": [],
+                    "note": f"View or custom table '{target_view}' is not registered",
+                }
+            rows = await db_manager.query(f"SELECT * FROM {target_view} LIMIT ?;", (limit,))
             return {
-                "target": "media_catalog",
-                "count": 0,
-                "items": [],
-                "note": "MEDIA_CATALOG view is not instantiated",
+                "target": clean_target,
+                "view_name": target_view,
+                "mode": matching[0].get("MODE", "VIEW"),
+                "count": len(rows),
+                "items": rows,
             }
-        items = await db_manager.query(
-            "SELECT * FROM MEDIA_CATALOG ORDER BY LAST_UPDATED DESC LIMIT ?;",
-            (limit,),
-        )
+
         return {
-            "target": "media_catalog",
-            "count": len(items),
-            "items": items,
+            "target": clean_target,
+            "count": len(registered),
+            "items": registered,
         }
 
     elif clean_target == "gitops":
@@ -177,7 +210,7 @@ async def server_query(
     else:
         raise HTTPException(
             status_code=400,
-            detail=f"Unknown target '{target}'. Supported targets: overview, incidents, pipeline, catalog, gitops, errors",
+            detail=f"Unknown target '{target}'. Supported targets: overview, incidents, pipeline, views, catalog, gitops, errors",
         )
 
 
@@ -186,18 +219,22 @@ async def get_tool_definition() -> Dict[str, Any]:
     """OpenAPI function specification for LibreChat Custom Tool configuration."""
     return {
         "name": "server_query",
-        "description": "Structured telemetry query tool for cubi-server. Use this to query server health, active incidents, media catalog status, error remedies, and GitOps state. Strictly read-only and pre-digested.",
+        "description": "Structured telemetry query tool for ServerManager. Use this to query server health, active incidents, multi-pipeline telemetry rows, custom views/tables, error remedies, and GitOps state. Strictly read-only and pre-digested.",
         "parameters": {
             "type": "object",
             "properties": {
                 "target": {
                     "type": "string",
-                    "enum": ["overview", "incidents", "pipeline", "catalog", "gitops", "errors"],
-                    "description": "Domain to inspect: 'overview' for overall health, 'incidents' for active alerts with remedies, 'catalog' for available media items, 'gitops' for git status, 'errors' for known error remedies.",
+                    "enum": ["overview", "incidents", "pipeline", "views", "catalog", "gitops", "errors"],
+                    "description": "Domain to inspect: 'overview' for overall health, 'incidents' for active alerts with remedies, 'pipeline' for pipeline telemetry rows, 'views' or 'catalog' for custom views and persistent custom tables, 'gitops' for git status, 'errors' for known error remedies.",
                 },
                 "filter": {
                     "type": "string",
-                    "description": "Optional category, severity (CRITICAL, WARNING), or status filter.",
+                    "description": "Optional category, severity (CRITICAL, WARNING), status/stage filter, or custom view/table name.",
+                },
+                "pipeline_id": {
+                    "type": "string",
+                    "description": "Optional pipeline ID when querying 'pipeline' target (defaults to 'default').",
                 },
                 "limit": {
                     "type": "integer",

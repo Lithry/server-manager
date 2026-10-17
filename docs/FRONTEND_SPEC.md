@@ -1,6 +1,6 @@
 # ServerManager Modular Frontend Architecture & Technical Specification
 
-**Current Version:** `v0.1.9` (REF-01 Phase Complete & Validated)  
+**Current Version:** `v0.2.0` (Multi-Pipeline, Stage-Centric Intervals & Dual-Mode Views/Tables Complete)  
 **Core Technologies:** Native ES Modules + `lit-html` (v3.1.2) + Vite 5 + LightningCSS  
 **Self-Hosted Typography:** `@fontsource/inter` + `@fontsource/jetbrains-mono`  
 **Build Target:** `src/static/` (Delivered natively via FastAPI StaticFiles)  
@@ -46,12 +46,12 @@ frontend/
     ├── features/             # Domain-specific slices (UI + API handlers + Local State)
     │   ├── gitops/           # Git status card & commit details
     │   ├── incidents/        # IncidentTable, CatalogTable, ReportIncidentModal, AddErrorModal
-    │   ├── overview/         # OverviewPanel, telemetry cards & metrics
-    │   ├── pipeline/         # PipelineTable, ManageColumnsModal, cell renderers
+    │   ├── overview/         # OverviewPanel, multi-pipeline telemetry cards & stage metrics
+    │   ├── pipeline/         # PipelineTable, ManageColumnsModal, multi-pipeline API client
     │   ├── sandbox/          # PayloadInspector, ContextSourceControls, SavedEndpointsList, sandboxStore
-    │   ├── settings/         # ServiceModal, StageModal, ServiceScopeSelector, MappingModal, NotificationTriggerModal
+    │   ├── settings/         # ServicesPanel, ServiceModal, ServiceEventDiscovery, PipelinesPanel, PipelineModal, StagesPanel, StageModal, ServiceScopeSelector, MappingModal, NotificationTriggerModal, EnginePanel
     │   ├── tools/            # ToolList & live streaming ToolRunnerModal
-    │   └── views/            # ViewList & dynamic SQL view query modal
+    │   └── views/            # ViewList, ViewModal, ViewDataModal & dual-mode API client
     ├── pages/                # Page route views connecting features to layout
     │   ├── GitOpsPage.js
     │   ├── IncidentsPage.js
@@ -78,9 +78,9 @@ frontend/
 All UI elements utilize predefined styles and components rather than arbitrary ad-hoc inline styles.
 
 ### 3.1 Atoms (`shared/ui/atoms/`)
-- **`Button`**: Clickable action element with 5 semantic variants (`primary`, `secondary`, `ghost`, `danger`, `warning`) and integrated async `loading` spinner state.
+- **`Button`**: Clickable action element with semantic variants and integrated async `loading` spinner state.
 - **`Badge`**: Status indicator supporting tones: `info`, `success`, `warning`, `danger`, `neutral`, `sink` (amber).
-- **`Icon`**: Standardized SVG glyph renderer with consistent sizing tokens (`sm`, `md`, `lg`). Includes `copy`, `plus`, and `terminal` paths.
+- **`Icon`**: Standardized SVG glyph renderer with consistent sizing tokens (`sm`, `md`, `lg`). Includes `copy`, `plus`, `package`, and `terminal` paths.
 - **`Spinner`**: Non-blocking CSS animation spinner for async loading states.
 - **`Toggle`**: Accessible toggle switch for boolean settings and stage toggles.
 
@@ -95,31 +95,27 @@ All UI elements utilize predefined styles and components rather than arbitrary a
 - **`ConfirmDialog`**: Standardized confirmation prompt replacing native blocking `window.confirm()`.
 
 ### 3.4 Feature Subcomponents & Modular Modals
+- **`PipelinesPanel` & `PipelineModal` (`features/settings/ui/PipelinesPanel.js`, `PipelineModal.js`)**:
+  - Dedicated multi-pipeline management tab in Settings allowing operators to register, edit, enable/disable, and delete isolated telemetry pipelines (`PIPELINE_<SLUG>`).
+  - Supports per-pipeline `retention_days` overrides (or inheriting global retention) and displays stages assigned to each pipeline.
+- **`StagesPanel` & `StageModal` (`features/settings/ui/StagesPanel.js`, `StageModal.js`)**:
+  - Configures multi-pipeline assignment (`pipeline_ids`), stage-level execution cadence (`interval_seconds` or global inheritance), `grace_period_minutes`, and `timeout_minutes`.
+  - Distinguishes **Active Root + Sink Stages** (`ROOT + SINK` — ingests directly into `STATUS = 'SINK'`) from **Downstream Passive Sink Stages** (`SINK (PASSIVE)` — no active polling loop; receives passive updates by `PIPELINE_KEY` and retains rows until `retention_days` expires since `LAST_UPDATED`).
 - **`ServiceScopeSelector` (`features/settings/ui/ServiceScopeSelector.js`)**:
-  - Standalone presentation and selection component (<120 lines) extracted to maintain the strict ~250 lines per module boundary in `StageModal.js`.
-  - Integrates native HTML5 `<details>` / `<summary>` accordions per assigned service.
-  - Dynamically computes and displays status badges: `(${checkedCount} of ${totalCount} active)` if scoped, or `All fields active by default` when unscoped.
-  - Controls: "Select All" and "Clear All" buttons, with inline guidance for operators.
-  - Exports `collectServiceMappingScopes` with clean default fallback: omits the service key from the resulting dictionary if 0 or all columns are checked, preserving the backend engine's default all-columns behavior without blocking alerts.
+  - Standalone presentation and selection component (<125 lines) extracted to maintain the strict ~250 lines per module boundary in `StageModal.js`.
+  - Integrates native HTML5 `<details>` / `<summary>` accordions per assigned service to scope which mapped columns are evaluated/updated by a given stage.
+- **`ServiceModal` & `ServiceEventDiscovery` (`features/settings/ui/ServiceModal.js`, `ServiceEventDiscovery.js`)**:
+  - Service registration and editing (<240 lines) with zero service-level polling intervals (intervals belong strictly to Stages) and inline guidance for relative lookback placeholders (`{lookback_seconds}`, `{lookback_minutes}`, `{lookback_iso}`, `{cutoff_iso}`).
+  - `ServiceEventDiscovery.js` (<140 lines) encapsulates live event discovery against `POST /api/v1/pipeline/sample`.
 - **`MappingModal` (`features/settings/ui/MappingModal.js`)**:
-  - Field mapping and transformer configuration dialog (<135 lines).
-  - Single-line text input for transformer expressions, maintaining operator ergonomics and avoiding multiline layout shifts.
-  - Live syntax guide documenting direct boolean expressions (`'anime' in value`), 2-state conditional expressions (`if 'anime' in value then 1 else 0`), single-line multi-branch expressions (`if EVENT == 'DELETED' then 'DELETED' else if SHOKO_ID is not None then 'RECOGNIZED' else 'UNRECOGNIZED'`), and built-in helper functions (`lower(value)`, `len(value) > 0`).
-  - Integrated interactive transformer testing harness executing against `POST /api/v1/settings/test-transformer`, supporting both scalar sample values and structured JSON mock context dictionaries.
+  - Field mapping and transformer configuration dialog (<135 lines) with interactive transformer testing against `POST /api/v1/settings/test-transformer`, supporting both `value` and previously mapped custom columns in `context_dict`.
+- **`ViewList`, `ViewModal` & `ViewDataModal` (`features/views/`)**:
+  - Complete dual-mode management for **Virtual SQL Views (`MODE = 'VIEW'`)** and **Persistent Custom Tables (`MODE = 'TABLE'`)**.
+  - Supports configuring `sync_key_column` (`PIPELINE_KEY` default) and automated refresh cycle $T_s$ (`refresh_interval_seconds`), manual **Sync Now** (`POST /api/v1/views/{name}/sync`), live data inspection (`GET /api/v1/views/{name}/data` in `ViewDataModal.js`), and deletion (`DELETE /api/v1/views/{name}`).
 - **Developer API Sandbox Feature Slice (`features/sandbox/`)**:
-  - **`PayloadInspector` (`features/sandbox/ui/PayloadInspector.js`)**:
-    - Four-tab inspection view (<155 lines): `Discovered Keys`, `Endpoint Result`, `Cumulative Context`, and `Logs`.
-    - Real-time search filter and data type pills (`int`, `float`, `bool`, `list`, `dict`) with preview samples.
-    - 1-Click Copy: Copies dot-notation paths (`series.id`, `tags[*]`) to clipboard with animated visual checkmark feedback.
-    - 1-Click Insert: Injects or interpolates `{path}` placeholders directly into the active endpoint URL template textarea.
-    - Embedded JSON Path evaluator for instant expression testing over responses.
-  - **`ContextSourceControls` (`features/sandbox/ui/ContextSourceControls.js`)**:
-    - Multi-source parameter inputs (<130 lines) supporting service selection, optional database `record_id`, direct live `sample_endpoint` sampling, and collapsible Custom JSON Mock Context panel.
-    - Real-time JSON syntax feedback (`✓ Valid JSON` / `Invalid JSON syntax`) and non-blocking error banners replacing legacy `alert()`.
-  - **`SavedEndpointsList` (`features/sandbox/ui/SavedEndpointsList.js`)**:
-    - Visual catalog (<55 lines) of saved enrichment endpoints with click-to-select and active highlight state.
-  - **`sandboxStore` (`features/sandbox/model/sandboxStore.js`)**:
-    - Reactive state store (<135 lines) handling asynchronous test dispatching to `/api/v1/pipeline/sandbox/enrichment`, context assembly, tab selection, and settings persistence.
+  - **`PayloadInspector` (`features/sandbox/ui/PayloadInspector.js`)**: Four-tab inspection view (`Discovered Keys`, `Endpoint Result`, `Cumulative Context`, and `Logs`).
+  - **`ContextSourceControls` (`features/sandbox/ui/ContextSourceControls.js`)**: Multi-source parameter inputs supporting service selection, `pipeline_id` selection for database `record_id` lookups, direct live `sample_endpoint` sampling, and collapsible Custom JSON Mock Context panel.
+  - **`SavedEndpointsList` (`features/sandbox/ui/SavedEndpointsList.js`)** & **`sandboxStore` (`features/sandbox/model/sandboxStore.js`)**: Reactive state store dispatching to `/api/v1/pipeline/sandbox/enrichment` and persisting saved endpoints to `POST /api/v1/settings`.
 
 ---
 
@@ -141,12 +137,11 @@ All UI elements utilize predefined styles and components rather than arbitrary a
 - **Change-Tracking Modification Array Architecture (`pendingModifications = []`)**:
   - Replaces volatile flags with an explicit tracking array storing discrete modification records: `{ key, oldValue, newValue }`.
   - Canonical `deepEqual(a, b)` Comparison: Recursively validates primitives, order-sensitive arrays, and nested objects without external dependencies.
-  - Granular Path Tracking: Evaluates edits across upstream services (`services.<id>`), notification triggers (`notification_triggers`), pipeline stages (`stages`), and engine retention/polling cadences.
-  - Reversion Detection & Splicing: Whenever an operator edits a field, `trackModification` inspects the state. If `deepEqual(oldValue, newValue)` evaluates to `true` (e.g. reverting an edited string back to its baseline value, or deleting an unsaved item), the modification is spliced out (`splice`) from `pendingModifications`.
+  - Granular Path Tracking: Evaluates edits across upstream services (`services.<id>`), telemetry pipelines (`pipelines.<id>`), notification triggers (`notification_triggers`), pipeline stages (`stages`), and engine retention/polling cadences.
+  - Reversion Detection & Splicing: Whenever an operator edits a field, `trackModification` inspects the state. If `deepEqual(oldValue, newValue)` evaluates to `true`, the modification is spliced out (`splice`) from `pendingModifications`.
 - **Reactive `isDirty` State & UI Binding**:
   - Store update interceptor continuously evaluates current cache against baseline, deriving `isDirty = pendingModifications.length > 0`.
   - Directly drives the "Save All Settings" button state (`disabled: !isDirty`) and toggles the red `!` notification badge.
-  - Reverting all changes back to baseline automatically clears all pending modifications and sets `isDirty = false`, disabling the Save button and hiding the alert badge without requiring a page refresh.
 - **Navigation Safety & Unsaved Changes Guard**:
   - Intercepts client-side routing via `router.setBeforeNavigateHook()`: when `pendingModifications.length > 0`, displays an asynchronous `ConfirmDialog` warning before navigation.
   - Attaches browser `beforeunload` listener to prevent accidental page refresh or tab close.

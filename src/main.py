@@ -34,10 +34,10 @@ async def lifespan(app: FastAPI):
     print("[i] Initializing ServerManager database schema...")
     await db_manager.initialize_schema()
 
-    # Sync dynamic columns from configured services into SERVICES_PIPELINE
-    print("[i] Syncing dynamic columns from configured services...")
+    # Sync dynamic columns from configured services into all pipeline tables
+    print("[i] Syncing dynamic columns from configured services across pipelines...")
     settings = await config_manager.get_settings()
-    await db_manager.sync_dynamic_columns(settings.services)
+    await db_manager.sync_dynamic_columns(settings)
 
     # Start background task scheduler
     print("[i] Starting task scheduler...")

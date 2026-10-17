@@ -8,7 +8,8 @@ from pydantic import BaseModel
 
 from src.core.config import config_manager, Settings, NotificationTrigger
 from src.core.scheduler import scheduler
-from src.core.predicates import PredicateEvaluator, TransformerEvaluator
+from src.core.predicates import PredicateEvaluator
+from src.core.transformers import TransformerEvaluator
 from src.core.database import db_manager, SYSTEM_RESERVED_COLUMNS
 
 
@@ -41,7 +42,8 @@ async def get_settings() -> Settings:
 
 @router.post("")
 async def update_settings(settings: Settings) -> Settings:
-    """Update settings, auto-migrate database columns, and reload background scheduler."""
+    """Update settings, auto-migrate database columns across pipelines, and reload background scheduler."""
+    settings.normalize_pipelines()
     services_dict = settings.services
 
     # 1. Validate that no mapping uses a reserved system column
@@ -57,24 +59,32 @@ async def update_settings(settings: Settings) -> Settings:
                     )
                 all_new_targets.add(col_upper)
 
-    # 2. Validate Stage ID Immutability, Normalize Order and Sync Activation Cutoffs
+    # 2. Validate Stage ID uniqueness, normalize order, and sync activation cutoffs
     old_settings = await config_manager.get_settings()
     old_stages = old_settings.stages
     old_services = old_settings.services
     old_stages_by_id = {s.id: s for s in old_stages}
 
-    # Match by index to detect renames/swaps of existing slugs
+    seen_stage_ids: set[str] = set()
+    valid_pipeline_ids = set(settings.pipelines.keys())
     for idx, stage in enumerate(settings.stages):
+        clean_stage_id = (stage.id or "").strip()
+        if not clean_stage_id:
+            raise HTTPException(status_code=400, detail=f"Stage at index {idx} has an empty ID.")
+        if clean_stage_id in seen_stage_ids:
+            raise HTTPException(status_code=400, detail=f"Duplicate stage ID '{clean_stage_id}'.")
+        seen_stage_ids.add(clean_stage_id)
+        stage.id = clean_stage_id
+
         # Normalize order based on position
         stage.order = idx + 1
 
-        if idx < len(old_stages):
-            old_stage = old_stages[idx]
-            if old_stage.id != stage.id:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Stage ID at index {idx} cannot be changed from '{old_stage.id}' to '{stage.id}'."
-                )
+        # Normalize pipeline_ids
+        if not stage.pipeline_ids:
+            stage.pipeline_ids = ["default"]
+        else:
+            filtered_pids = [pid for pid in stage.pipeline_ids if pid in valid_pipeline_ids]
+            stage.pipeline_ids = filtered_pids if filtered_pids else ["default"]
 
         # Decouple consumer stages from last_activated_at
         if stage.start_condition and stage.start_condition.strip():
@@ -86,46 +96,78 @@ async def update_settings(settings: Settings) -> Settings:
             if stage.enabled and not was_enabled and not stage.last_activated_at:
                 stage.last_activated_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
-    # 3. Detect renames and auto-migrate data
-    existing_table_cols = {c["name"].upper() for c in await db_manager.get_table_columns("SERVICES_PIPELINE")}
+    # 3. Ensure all configured pipeline tables exist before column migration
+    pipeline_tables: list[str] = []
+    for p_id, p_cfg in settings.pipelines.items():
+        t_name = await db_manager.ensure_pipeline_table(
+            pipeline_id=p_id,
+            name=p_cfg.name,
+            description=p_cfg.description,
+            retention_days=p_cfg.retention_days,
+            enabled=p_cfg.enabled,
+        )
+        pipeline_tables.append(t_name)
 
+    # 4. Detect genuine column renames (matched by identical non-empty source_field) and auto-migrate data
     for s_id, s_conf in services_dict.items():
         old_conf = old_services.get(s_id)
         if not old_conf:
             continue
-        for idx, new_map in enumerate(s_conf.field_mappings):
-            if idx < len(old_conf.field_mappings):
-                old_map = old_conf.field_mappings[idx]
-                old_target = (old_map.target_column or "").strip().upper()
-                new_target = (new_map.target_column or "").strip().upper()
 
-                if old_target and new_target and old_target != new_target:
-                    # Update matching column names inside stage.service_mapping_scopes for all stages
-                    for stage in settings.stages:
-                        if stage.service_mapping_scopes:
-                            for scope_sid, cols in list(stage.service_mapping_scopes.items()):
-                                if cols and (old_target in cols or any(isinstance(c, str) and c.strip().upper() == old_target for c in cols)):
-                                    stage.service_mapping_scopes[scope_sid] = [
-                                        new_target if (isinstance(c, str) and (c == old_target or c.strip().upper() == old_target)) else c
-                                        for c in cols
-                                    ]
+        # Map non-empty source_field -> target_column where source_field is unambiguous
+        old_by_source: Dict[str, str] = {}
+        old_source_counts: Dict[str, int] = {}
+        for m in old_conf.field_mappings:
+            src = (m.source_field or "").strip()
+            tgt = (m.target_column or "").strip().upper()
+            if src and tgt:
+                old_source_counts[src] = old_source_counts.get(src, 0) + 1
+                old_by_source[src] = tgt
 
-                    if old_target not in all_new_targets and old_target in existing_table_cols:
-                        try:
-                            if new_target not in existing_table_cols:
-                                await db_manager.rename_column("SERVICES_PIPELINE", old_target, new_target)
-                                existing_table_cols.remove(old_target)
-                                existing_table_cols.add(new_target)
-                            else:
-                                await db_manager.execute(
-                                    f'UPDATE SERVICES_PIPELINE SET "{new_target}" = COALESCE("{new_target}", "{old_target}") WHERE "{old_target}" IS NOT NULL;'
-                                )
-                                await db_manager.drop_column("SERVICES_PIPELINE", old_target)
-                                existing_table_cols.remove(old_target)
-                        except Exception as e:
-                            print(f"[!] Warning auto-migrating column {old_target} -> {new_target}: {e}")
+        new_source_counts: Dict[str, int] = {}
+        for m in s_conf.field_mappings:
+            src = (m.source_field or "").strip()
+            if src:
+                new_source_counts[src] = new_source_counts.get(src, 0) + 1
 
-    # 4. Sanitize stage service mapping scopes before saving
+        for new_map in s_conf.field_mappings:
+            src = (new_map.source_field or "").strip()
+            new_target = (new_map.target_column or "").strip().upper()
+            if not src or not new_target:
+                continue
+            if old_source_counts.get(src) != 1 or new_source_counts.get(src) != 1:
+                continue
+
+            old_target = old_by_source.get(src, "")
+            if old_target and old_target != new_target:
+                # Update matching column names inside stage.service_mapping_scopes for all stages
+                for stage in settings.stages:
+                    if stage.service_mapping_scopes:
+                        for scope_sid, cols in list(stage.service_mapping_scopes.items()):
+                            if cols and any(isinstance(c, str) and c.strip().upper() == old_target for c in cols):
+                                stage.service_mapping_scopes[scope_sid] = [
+                                    new_target if (isinstance(c, str) and c.strip().upper() == old_target) else c
+                                    for c in cols
+                                ]
+
+                if old_target not in all_new_targets:
+                    for table_name in pipeline_tables:
+                        existing_table_cols = {
+                            c["name"].upper() for c in await db_manager.get_table_columns(table_name)
+                        }
+                        if old_target in existing_table_cols:
+                            try:
+                                if new_target not in existing_table_cols:
+                                    await db_manager.rename_column(table_name, old_target, new_target)
+                                else:
+                                    await db_manager.execute(
+                                        f'UPDATE {table_name} SET "{new_target}" = COALESCE("{new_target}", "{old_target}") WHERE "{old_target}" IS NOT NULL;'
+                                    )
+                                    await db_manager.drop_column(table_name, old_target)
+                            except Exception as e:
+                                print(f"[!] Warning auto-migrating column {old_target} -> {new_target} in {table_name}: {e}")
+
+    # 5. Sanitize stage service mapping scopes before saving
     for stage in settings.stages:
         if stage.service_mapping_scopes:
             sanitized_scopes: Dict[str, list[str]] = {}
@@ -153,8 +195,8 @@ async def update_settings(settings: Settings) -> Settings:
 
             stage.service_mapping_scopes = sanitized_scopes
 
-    # 5. Auto-ensure dynamic columns in SERVICES_PIPELINE for all field mappings
-    await db_manager.sync_dynamic_columns(services_dict)
+    # 6. Auto-ensure dynamic columns across all configured pipelines
+    await db_manager.sync_dynamic_columns(settings)
 
     updated = await config_manager.update_settings(settings)
     await scheduler.restart()

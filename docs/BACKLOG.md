@@ -42,10 +42,10 @@
 | **TRANS-01** | **P1 (High)** | Core / Engine | Single-Line Multi-Branch Transformer Engine & Syntax Normalization | Phase 1 (`v0.1.9`) | **COMPLETED ✓** |
 | **SCHED-02** | **P1 (High)** | Core / Ingestion | Ingestion Watermark, Immutable CREATED_AT & Accurate LAST_UPDATED | Phase 1 (`v0.1.9`) | **COMPLETED ✓** |
 | **UI-04** | **P2 (Medium)** | WebUI / Settings | Change-Tracking Modification Array & Accurate isDirty Reactivity | Phase 1 (`v0.1.9`) | **COMPLETED ✓** |
-| **CORE-02** | **P1 (High)** | Core / Engine | Multi-Pipeline Dynamic Registry & Scoped DAG Progression Engine | Phase 2 (`v0.2.0`) | **PLANNED 📅** |
+| **CORE-02** | **P1 (High)** | Core / Engine | Multi-Pipeline Dynamic Registry, Stage-Driven Loops & Passive SINK | Phase 2 (`v0.2.0`) | **COMPLETED ✓** |
 | **API-01** | **P2 (Medium)** | Core / Presets | Shoko Server Verified API Schema & Presets | Phase 1 (`v0.1.6`) | **COMPLETED ✓** |
 | **API-02** | **P2 (Medium)** | LLM / Telemetry | Tier 3 Guided Remediation API (`/api/v1/meta/remediate`) | Phase 4 (`v0.4.0`) | **PLANNED 📅** |
-| **VIEW-01** | **P2 (Medium)** | Storage / Views | Dual-Mode Table & View Builder (Persistent Tables + Views) | Phase 3 (`v0.3.0`) | **PLANNED 📅** |
+| **VIEW-01** | **P2 (Medium)** | Storage / Views | Dual-Mode Table & View Builder (Persistent Tables + Views) | Phase 3 (`v0.3.0`) | **COMPLETED ✓** |
 | **UX-01** | **P2 (Medium)** | WebUI / Tooling | Sample API Auto-Namespace Detection & Prefilling | Phase 1 (`v0.1.6`) | **COMPLETED ✓** |
 | **UX-02** | **P2 (Medium)** | WebUI / Wizard | Guided Setup Flow & Pipeline Wizard | Phase 5 (`v0.5.0`) | **PLANNED 📅** |
 | **CFG-01** | **P2 (Medium)** | Core / Config | Out-of-the-Box Service Presets (Sonarr, Radarr, Jellyfin) | Phase 5 (`v0.5.0`) | **PLANNED 📅** |
@@ -256,34 +256,41 @@
 
 ---
 
-### 3.11 CORE-02: Multi-Pipeline Dynamic Registry & Scoped DAG Progression Engine (`v0.2.0` - Phase 2)
-- **Objective**: Upgrade from single `SERVICES_PIPELINE` to multi-pipeline dynamic architecture.
-- **Dependencies**: Requires stabilization of single-pipeline stage mechanics (`STG-01` through `STG-03`) and developer sandbox tooling (`SBX-01`).
-- **Tasks**:
-  1. Create metadata registry table in SQLite:
-     ```sql
-     CREATE TABLE IF NOT EXISTS PIPELINES (
-         ID TEXT PRIMARY KEY,
-         NAME TEXT NOT NULL,
-         DESCRIPTION TEXT,
-         TABLE_NAME TEXT NOT NULL,
-         ENABLED INTEGER DEFAULT 1,
-         CREATED_AT TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-     );
-     ```
-  2. Support dynamically generated isolated SQLite tables: `PIPELINE_<SLUG>` (e.g. `PIPELINE_MEDIA`, `PIPELINE_BACKUPS`).
-  3. Scope stages, services, and field mappings to specific `pipeline_id`.
-  4. Update WebUI navigation with pipeline selector switcher and scoped pipeline views.
+### 3.11 CORE-02: Multi-Pipeline Dynamic Registry, Stage-Driven Loops, Passive SINK & Retention Engine (`v0.2.0`) [COMPLETED ✓]
+- **Objective**: Upgrade from single hardcoded `SERVICES_PIPELINE` to a 100% service-agnostic multi-pipeline dynamic architecture with stage-driven intervals, relative lookback windows, passive `SINK` stages, and `LAST_UPDATED`-based `SINK` retention pruning.
+- **Architectural Solution & Implemented Changes**:
+  1. **Destructive Legacy Removal & `PIPELINES` Registry (`src/core/database.py`, `src/core/config.py`)**: [✓ COMPLETED]
+     - Dropped legacy `SERVICES_PIPELINE` / `SERVICE_PIPELINE` tables.
+     - Created `PIPELINES` metadata registry table and dynamic `PIPELINE_<SLUG>` tables (`PIPELINE_DEFAULT` seeded by default).
+     - Added `PipelineConfig` and `StageConfig.pipeline_ids` (M:N assignment of stages to one or multiple pipelines).
+     - Added `/api/v1/pipeline/registry` CRUD endpoints and parameterized all `/api/v1/pipeline*` endpoints by `pipeline_id`.
+  2. **Stage-Driven Intervals & Relative Lookback Window ($\Delta t$) (`src/core/scheduler.py`)**: [✓ COMPLETED]
+     - Moved polling interval ownership to `StageConfig.interval_seconds` (removing `poll_interval_seconds` from `ServiceConfig`).
+     - Implemented `_stage_loop(stage_id)` and `run_stage_cycle(stage_id)`.
+     - Root stage ingestion filters incoming events using a relative lookback window ($\Delta t = \text{interval\_seconds}$) referenced against the upstream HTTP `Date` response header (with fallback to ServerManager UTC) and supports `{interval_seconds}`, `{interval_minutes}`, `{lookback_iso}`, `{lookback_unix}` placeholders in `poll_endpoint`.
+     - Stamped `CREATED_AT` strictly with ServerManager's internal UTC clock.
+  3. **Passive `SINK` Stages & Root+Sink Support (`src/core/scheduler.py`)**: [✓ COMPLETED]
+     - Downstream `SINK` stages (`start_condition != NULL` and `complete_condition IS NULL`) are 100% passive (no active polling loop).
+     - Root stages with `complete_condition IS NULL` ingest directly with `STATUS = 'SINK'` (Root + Sink).
+     - When a new event arrives in a Root stage matching an existing `PIPELINE_KEY` (even if the row is in `SINK`), the Root stage updates changed monitored columns and `LAST_UPDATED = CURRENT_TIMESTAMP` in-place without resetting `STAGE` or `STATUS`.
+  4. **Retention Pruning & Watchdog Enforcement (`src/core/database.py`, `src/core/scheduler.py`)**: [✓ COMPLETED]
+     - Implemented `prune_pipeline_retention` and `_retention_loop` to delete exclusively `STATUS = 'SINK'` records whose `LAST_UPDATED` is older than `retention_days`.
+     - Enforced `grace_period_minutes` for Root stages and `timeout_minutes` watchdog emitting `WARN_PIPELINE_STALLED` incidents.
 
 ---
 
-### 3.12 VIEW-01: Dual-Mode Table & View Builder (`v0.3.0` - Phase 3)
-- **Objective**: Allow operators to create both virtual SQL views and persistent materialized destination tables.
-- **Tasks**:
-  1. Support two dataset types:
-     - **Dynamic Views**: Virtual SQLite views (`CREATE VIEW ...`) for ad-hoc inspection and prototyping.
-     - **Persistent Tables**: Real SQLite destination tables with background incremental Upsert synchronization (`INSERT INTO ... ON CONFLICT DO UPDATE`).
-  2. Factory preset for `CATALOG_MEDIA` consolidated playable library catalog, decoupled from pipeline retention purging.
+### 3.12 VIEW-01: Dual-Mode Table & View Builder (`v0.3.0`) [COMPLETED ✓]
+- **Objective**: Allow operators to create both virtual SQL views (`MODE = 'VIEW'`) for temporary checks and persistent materialized custom tables (`MODE = 'TABLE'`) populated from pipeline data with manual or automated $T_s$ synchronization.
+- **Architectural Solution & Implemented Changes**:
+  1. **Upgraded `CUSTOM_VIEWS` Registry (`src/core/database.py`)**: [✓ COMPLETED]
+     - Extended `CUSTOM_VIEWS` with `MODE` (`'VIEW'` or `'TABLE'`), `SYNC_KEY_COLUMN` (default `'PIPELINE_KEY'`), `REFRESH_INTERVAL_SECONDS` ($T_s$), and `LAST_SYNCED_AT`.
+  2. **Materialized Custom Table Synchronization Engine (`sync_custom_table`)**: [✓ COMPLETED]
+     - Dynamically provisions `<VIEW_NAME>` table with `"<SYNC_KEY_COLUMN>" TEXT PRIMARY KEY` and `LAST_SYNCED_AT`, adds projected columns automatically, and executes `INSERT INTO <VIEW_NAME> ... ON CONFLICT("<SYNC_KEY_COLUMN>") DO UPDATE SET ...`.
+     - Persistent tables retain their records even after source rows are pruned from `PIPELINE_<SLUG>` by retention policies.
+  3. **Manual & Automated $T_s$ Synchronization (`src/api/views.py`, `src/core/scheduler.py`)**: [✓ COMPLETED]
+     - Added `POST /api/v1/views/{view_name}/sync` for on-demand manual synchronization and `PATCH /api/v1/views/{view_name}` to update `refresh_interval_seconds` or promote a `VIEW` to `TABLE`.
+     - Added `_custom_tables_loop` in `TaskScheduler` to automatically synchronize `MODE = 'TABLE'` entries whenever their `REFRESH_INTERVAL_SECONDS` ($T_s$) elapses.
+     - Queryable via `GET /api/v1/views/{view_name}/data`.
 
 ---
 

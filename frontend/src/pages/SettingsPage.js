@@ -8,6 +8,8 @@ import { ConfirmDialog } from '../shared/ui/organisms/ConfirmDialog/ConfirmDialo
 
 import { createServicesPanel } from '../features/settings/ui/ServicesPanel.js';
 import { createServiceModal } from '../features/settings/ui/ServiceModal.js';
+import { createPipelinesPanel } from '../features/settings/ui/PipelinesPanel.js';
+import { createPipelineModal } from '../features/settings/ui/PipelineModal.js';
 import { createStagesPanel } from '../features/settings/ui/StagesPanel.js';
 import { createStageModal } from '../features/settings/ui/StageModal.js';
 import { createMappingsPanel } from '../features/settings/ui/MappingsPanel.js';
@@ -53,6 +55,9 @@ export function createSettingsPage(router) {
       if (key === 'services') {
         const sKeys = new Set([...Object.keys(baseline.services || {}), ...Object.keys(cur.services || {}), ...pendingModifications.filter(m => m.key.startsWith('services.')).map(m => m.key.slice(9))]);
         for (const sKey of sKeys) trackModification(`services.${sKey}`, baseline.services?.[sKey], cur.services?.[sKey]);
+      } else if (key === 'pipelines') {
+        const pKeys = new Set([...Object.keys(baseline.pipelines || {}), ...Object.keys(cur.pipelines || {}), ...pendingModifications.filter(m => m.key.startsWith('pipelines.')).map(m => m.key.slice(10))]);
+        for (const pKey of pKeys) trackModification(`pipelines.${pKey}`, baseline.pipelines?.[pKey], cur.pipelines?.[pKey]);
       } else if (key === 'notification_triggers' || key === 'triggers') {
         trackModification('notification_triggers', baseline.notification_triggers ?? baseline.triggers ?? [], cur.notification_triggers ?? cur.triggers ?? []);
       } else {
@@ -63,8 +68,9 @@ export function createSettingsPage(router) {
 
   const store = createStore({ 
     activeTab: 'services', saving: false, isDirty: false,
-    isServiceModalOpen: false, isStageModalOpen: false, isMappingModalOpen: false,
-    isSampleApiModalOpen: false, isNotificationModalOpen: false, selectedMappingService: ''
+    isServiceModalOpen: false, isPipelineModalOpen: false, isStageModalOpen: false,
+    isMappingModalOpen: false, isSampleApiModalOpen: false, isNotificationModalOpen: false,
+    selectedMappingService: ''
   });
 
   const rawSet = store.set;
@@ -135,7 +141,7 @@ export function createSettingsPage(router) {
     },
     view() {
       const state = store.get();
-      const { activeTab, saving, isServiceModalOpen, isStageModalOpen, isMappingModalOpen, isSampleApiModalOpen, isNotificationModalOpen } = state;
+      const { activeTab, saving, isServiceModalOpen, isPipelineModalOpen, isStageModalOpen, isMappingModalOpen, isSampleApiModalOpen, isNotificationModalOpen } = state;
       const snapshot = queryCache.read(settingsKeys.all);
       const { data, status, error } = snapshot;
 
@@ -144,7 +150,7 @@ export function createSettingsPage(router) {
 
       const isDirty = pendingModifications.length > 0;
       const config = { retention_days: data?.retention_days || 30, global_poll_interval_seconds: data?.global_poll_interval_seconds || 300 };
-      const servicesData = data?.services || {}, stagesData = data?.stages || [], globalPoll = config.global_poll_interval_seconds;
+      const servicesData = data?.services || {}, pipelinesData = data?.pipelines || {}, stagesData = data?.stages || [], globalPoll = config.global_poll_interval_seconds;
 
       const renderTabButton = (id, icon, label) => html`
         <button type="button" class="tab-btn ${activeTab === id ? 'is-active' : ''}" @click=${() => store.set(s => ({ ...s, activeTab: id }))}>
@@ -155,11 +161,12 @@ export function createSettingsPage(router) {
 
       return html`
         <div class="u-flex u-flex-col u-gap-4">
-          <div class="u-flex u-items-center u-justify-between u-mb-2">
-            <div class="u-flex u-gap-2">
+          <div class="u-flex u-items-center u-justify-between u-mb-2" style="flex-wrap: wrap; gap: var(--space-2);">
+            <div class="u-flex u-gap-2" style="flex-wrap: wrap;">
               ${renderTabButton('services', 'database', 'Services')}
               ${renderTabButton('sandbox', 'terminal', 'API Sandbox')}
               ${renderTabButton('mappings', 'code', 'Field Mappings')}
+              ${renderTabButton('pipelines', 'package', 'Pipelines')}
               ${renderTabButton('stages', 'activity', 'Stages & Predicates')}
               ${renderTabButton('notifications', 'bell', 'Notification Triggers')}
               ${renderTabButton('engine', 'settings', 'Engine & Retention')}
@@ -194,15 +201,17 @@ export function createSettingsPage(router) {
             </div>
           </div>
           
-          ${activeTab === 'services' ? createServicesPanel(store, servicesData, globalPoll) : nothing}
+          ${activeTab === 'services' ? createServicesPanel(store, servicesData) : nothing}
           ${activeTab === 'sandbox' ? sandboxPanel.view() : nothing}
           ${activeTab === 'mappings' ? createMappingsPanel(store, servicesData) : nothing}
-          ${activeTab === 'stages' ? createStagesPanel(store, stagesData) : nothing}
+          ${activeTab === 'pipelines' ? createPipelinesPanel(store, pipelinesData, stagesData, config.retention_days) : nothing}
+          ${activeTab === 'stages' ? createStagesPanel(store, stagesData, globalPoll) : nothing}
           ${activeTab === 'notifications' ? createNotificationsPanel(store, data) : nothing}
-          ${activeTab === 'engine' ? createEnginePanel(store, config) : nothing}
+          ${activeTab === 'engine' ? createEnginePanel(store, config, data) : nothing}
           
           <!-- Modals -->
           ${isServiceModalOpen ? createServiceModal(store) : nothing}
+          ${isPipelineModalOpen ? createPipelineModal(store) : nothing}
           ${isStageModalOpen ? createStageModal(store) : nothing}
           ${isMappingModalOpen ? createMappingModal(store) : nothing}
           ${isSampleApiModalOpen ? createSampleApiModal(store) : nothing}

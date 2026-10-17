@@ -6,6 +6,9 @@ import re
 from typing import Any, Dict, Optional, Tuple
 
 
+from src.core.transformers import parse_json_list_if_str
+
+
 class PredicateEvaluator:
     """Safe boolean expression evaluator using Python AST without arbitrary code execution."""
 
@@ -19,10 +22,20 @@ class PredicateEvaluator:
         ast.LtE: operator.le,
         ast.Gt: operator.gt,
         ast.GtE: operator.ge,
-        ast.In: lambda a, b: a in b,
-        ast.NotIn: lambda a, b: a not in b,
+        ast.In: lambda a, b: a in b if b is not None else False,
+        ast.NotIn: lambda a, b: (a not in b) if b is not None else True,
         ast.Is: operator.is_,
         ast.IsNot: operator.is_not,
+    }
+
+    ALLOWED_FUNCTIONS = {
+        "len": lambda x: len(x) if x is not None else 0,
+        "lower": lambda x: str(x).lower() if x is not None else "",
+        "upper": lambda x: str(x).upper() if x is not None else "",
+        "str": lambda x: str(x) if x is not None else "",
+        "int": lambda x: int(x) if x is not None else 0,
+        "float": lambda x: float(x) if x is not None else 0.0,
+        "bool": bool,
     }
 
     @classmethod
@@ -105,11 +118,11 @@ class PredicateEvaluator:
         elif isinstance(node, ast.Name):
             # Identifiers like IS_ANIME, FILE_PATH, VFS_PATH (case-insensitive lookup)
             if node.id in context:
-                return context[node.id]
+                return parse_json_list_if_str(context[node.id])
             if node.id.upper() in context:
-                return context[node.id.upper()]
+                return parse_json_list_if_str(context[node.id.upper()])
             if node.id.lower() in context:
-                return context[node.id.lower()]
+                return parse_json_list_if_str(context[node.id.lower()])
             return None
         elif isinstance(node, ast.Attribute):
             # Handles chained attributes like stage.ingest.completed
@@ -123,12 +136,18 @@ class PredicateEvaluator:
             parts.reverse()
             full_attr = ".".join(parts)
             if full_attr in context:
-                return context[full_attr]
+                return parse_json_list_if_str(context[full_attr])
             if full_attr.upper() in context:
-                return context[full_attr.upper()]
+                return parse_json_list_if_str(context[full_attr.upper()])
             if full_attr.lower() in context:
-                return context[full_attr.lower()]
+                return parse_json_list_if_str(context[full_attr.lower()])
             return None
+        elif isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id in cls.ALLOWED_FUNCTIONS:
+                func = cls.ALLOWED_FUNCTIONS[node.func.id]
+                args = [cls._eval_node(arg, context) for arg in node.args]
+                return func(*args)
+            raise ValueError(f"Unsupported function call in predicate: {ast.dump(node.func)}")
         elif isinstance(node, ast.BoolOp):
             values = [cls._eval_node(val, context) for val in node.values]
             op_func = cls.ALLOWED_OPERATORS.get(type(node.op))
@@ -156,7 +175,5 @@ class PredicateEvaluator:
             raise ValueError(f"Unsupported AST node expression: {type(node)}")
 
 
-from src.core.transformers import SafeContext, TransformerEvaluator
-
-__all__ = ["PredicateEvaluator", "TransformerEvaluator", "SafeContext"]
+__all__ = ["PredicateEvaluator"]
 

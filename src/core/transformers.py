@@ -6,8 +6,62 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 
+def parse_json_list_if_str(val: Any) -> Any:
+    """If val is a JSON-serialized list string, return the parsed Python list; otherwise return val."""
+    if isinstance(val, str):
+        stripped = val.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            try:
+                parsed = json.loads(stripped)
+                if isinstance(parsed, list):
+                    return parsed
+            except Exception:
+                pass
+    return val
+
+
+def deduplicate_list(items: Any) -> List[Any]:
+    """Deduplicate list items case-insensitively while preserving insertion order and skipping blanks."""
+    if not isinstance(items, (list, tuple, set)):
+        return []
+    seen: set[str] = set()
+    unique_items: List[Any] = []
+    for item in items:
+        if item is None:
+            continue
+        if isinstance(item, str):
+            cleaned = item.strip()
+            if not cleaned:
+                continue
+            key = cleaned.lower()
+            if key not in seen:
+                seen.add(key)
+                unique_items.append(cleaned)
+        else:
+            key = str(item)
+            if key not in seen:
+                seen.add(key)
+                unique_items.append(item)
+    return unique_items
+
+
+def _coerce_to_list(val: Any) -> List[Any]:
+    parsed = parse_json_list_if_str(val)
+    if isinstance(parsed, list):
+        return parsed
+    if parsed is None or parsed == "":
+        return []
+    return [parsed]
+
+
 class SafeContext(dict):
-    """Dictionary that resolves missing keys as None and supports case-insensitive lookups."""
+    """Dictionary that resolves missing keys as None, supports case-insensitive lookups, and unpacks JSON lists."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        for k, v in list(self.items()):
+            if isinstance(v, str) and v.strip().startswith("[") and v.strip().endswith("]"):
+                self[k] = parse_json_list_if_str(v)
 
     def __missing__(self, key: str) -> Any:
         if not isinstance(key, str):
@@ -128,17 +182,14 @@ class TransformerEvaluator:
 
         safe_globals = {"__builtins__": {}}
         safe_locals = {
-            "value": value,
+            "value": parse_json_list_if_str(value),
             "str": str,
             "int": int,
             "bool": bool,
             "len": len,
             "lower": lambda s: str(s).lower() if s is not None else "",
             "upper": lambda s: str(s).upper() if s is not None else "",
-            "merge": lambda existing, new: (
-                (existing if isinstance(existing, list) else (json.loads(existing) if isinstance(existing, str) and existing.startswith("[") else ([existing] if existing is not None and existing != "" else []))) +
-                (new if isinstance(new, list) else (json.loads(new) if isinstance(new, str) and new.startswith("[") else ([new] if new is not None and new != "" else [])))
-            ),
+            "merge": lambda existing, new: deduplicate_list(_coerce_to_list(existing) + _coerce_to_list(new)),
         }
         if context:
             safe_locals.update(context)

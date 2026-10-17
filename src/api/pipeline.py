@@ -1,14 +1,18 @@
-"""Universal pipeline and dynamic schema API endpoints."""
+"""Universal multi-pipeline registry, dynamic schema mapper, API sampler, and decoupled sandbox endpoints."""
 
-import re
 import httpx
-import urllib.parse
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from src.core.database import db_manager, SQL_IDENTIFIER_REGEX, SYSTEM_RESERVED_COLUMNS
-from src.core.config import config_manager
+from src.core.config import config_manager, PipelineConfig
+from src.core.scheduler import (
+    prepare_service_request,
+    fetch_enrichment_payloads,
+    _extract_payload_records,
+    extract_dotted_value,
+)
 
 
 router = APIRouter(prefix="/api/v1/pipeline", tags=["Pipeline"])
@@ -31,39 +35,23 @@ def sort_pipeline_columns(all_columns: List[str], preferred_order: List[str]) ->
     return system_cols + sorted_user
 
 
-def prepare_service_request(base_url: str, endpoint: str, api_key: str = "") -> tuple[str, dict]:
-    """Prepare target URL and headers, handling Docker network host routing and Kestrel Host headers."""
-    parsed = urllib.parse.urlparse(base_url.rstrip("/"))
-    hostname = (parsed.hostname or "").lower()
-    port = parsed.port
-
-    headers = {}
-    if api_key:
-        headers["X-Api-Key"] = api_key
-        headers["Authorization"] = f"Bearer {api_key}"
-        headers["apikey"] = api_key
-
-    # If the target is localhost, 127.0.0.1, or host.docker.internal:
-    # Inside a Docker container, we must connect to the host gateway (host.docker.internal).
-    # Furthermore, ASP.NET Core apps (Sonarr, Radarr, Jellyfin) reject "Host: host.docker.internal"
-    # with 400 Bad Request (Invalid Hostname), so we explicitly set "Host: localhost[:port]".
-    if hostname in ("localhost", "127.0.0.1", "host.docker.internal"):
-        target_netloc = f"host.docker.internal:{port}" if port else "host.docker.internal"
-        headers["Host"] = f"localhost:{port}" if port else "localhost"
-        parsed = parsed._replace(netloc=target_netloc)
-
-    clean_endpoint = endpoint.lstrip("/")
-    target_url = f"{urllib.parse.urlunparse(parsed)}/{clean_endpoint}" if clean_endpoint else urllib.parse.urlunparse(parsed)
-    return target_url, headers
+class UpsertPipelineRequest(BaseModel):
+    id: str
+    name: str
+    description: str = ""
+    retention_days: int = 30
+    enabled: bool = True
 
 
 class AddColumnRequest(BaseModel):
     column_name: str
     column_type: str = "TEXT"
+    pipeline_id: Optional[str] = None
 
 
 class SandboxEnrichmentRequest(BaseModel):
     service_id: str
+    pipeline_id: Optional[str] = None
     record_id: Optional[int] = None
     custom_context: Optional[Dict[str, Any]] = None
     sample_endpoint: Optional[str] = None
@@ -72,16 +60,16 @@ class SandboxEnrichmentRequest(BaseModel):
 
 class ReorderColumnsRequest(BaseModel):
     column_order: List[str]
+    pipeline_id: Optional[str] = None
 
 
 class SampleApiRequest(BaseModel):
-    service_id: str | None = None
-    app_id: str | None = None  # Backward compatibility
-    endpoint: str = "/api/v3/history"  # or custom endpoint
+    service_id: str
+    endpoint: str = ""
 
 
 def flatten_json_keys(obj: Any, prefix: str = "") -> List[Dict[str, Any]]:
-    """Flatten JSON payload to display available fields with samples."""
+    """Flatten JSON payload to display available fields with samples and explicit [*] list syntax."""
     fields = []
     if isinstance(obj, dict):
         for k, v in obj.items():
@@ -102,28 +90,121 @@ def flatten_json_keys(obj: Any, prefix: str = "") -> List[Dict[str, Any]]:
     return fields
 
 
+@router.get("/registry")
+async def list_pipelines() -> List[Dict[str, Any]]:
+    """List all registered pipelines with their SQLite table name, retention policy, and row counts."""
+    settings = await config_manager.get_settings()
+    settings.normalize_pipelines()
+    result = []
+    for pid, pcfg in settings.pipelines.items():
+        t_name = pcfg.resolved_table_name()
+        total_rows = 0
+        try:
+            cnt_res = await db_manager.query(f"SELECT COUNT(*) as cnt FROM {t_name};")
+            total_rows = cnt_res[0]["cnt"] if cnt_res else 0
+        except Exception:
+            pass
+        result.append({
+            "id": pid,
+            "name": pcfg.name,
+            "description": pcfg.description,
+            "table_name": t_name,
+            "retention_days": pcfg.retention_days,
+            "enabled": pcfg.enabled,
+            "column_order": pcfg.column_order,
+            "total_rows": total_rows,
+        })
+    return result
+
+
+@router.post("/registry")
+async def upsert_pipeline(req: UpsertPipelineRequest) -> Dict[str, Any]:
+    """Create or update a pipeline table (PIPELINE_<SLUG>) and register it in settings and SQLite."""
+    clean_id = req.id.strip().lower()
+    if not clean_id or not SQL_IDENTIFIER_REGEX.match(clean_id.upper()):
+        raise HTTPException(status_code=400, detail=f"Invalid pipeline id '{req.id}'. Use alphanumeric and underscores.")
+
+    settings = await config_manager.get_settings()
+    existing = settings.pipelines.get(clean_id)
+    col_order = existing.column_order if existing else []
+
+    pcfg = PipelineConfig(
+        id=clean_id,
+        name=req.name.strip() or clean_id,
+        description=req.description.strip(),
+        retention_days=max(0, int(req.retention_days)),
+        column_order=col_order,
+        enabled=req.enabled,
+    )
+    pcfg.table_name = pcfg.resolved_table_name()
+
+    await db_manager.ensure_pipeline_table(
+        pcfg.table_name,
+        pipeline_id=clean_id,
+        name=pcfg.name,
+        description=pcfg.description,
+        retention_days=pcfg.retention_days,
+        enabled=pcfg.enabled,
+    )
+    settings.pipelines[clean_id] = pcfg
+    await db_manager.sync_dynamic_columns(settings)
+    await config_manager.update_settings(settings)
+
+    return {"success": True, "pipeline": pcfg.model_dump()}
+
+
+@router.delete("/registry/{pipeline_id}")
+async def delete_pipeline(pipeline_id: str) -> Dict[str, Any]:
+    """Drop a pipeline table and remove it from settings and stage assignments."""
+    clean_id = pipeline_id.strip().lower()
+    settings = await config_manager.get_settings()
+    if clean_id not in settings.pipelines:
+        raise HTTPException(status_code=404, detail=f"Pipeline '{clean_id}' not found")
+    if len(settings.pipelines) <= 1:
+        raise HTTPException(status_code=400, detail="Cannot delete the only remaining pipeline.")
+
+    pcfg = settings.pipelines.pop(clean_id)
+    await db_manager.drop_pipeline_table(clean_id, pcfg.resolved_table_name())
+
+    for st in settings.stages:
+        if clean_id in st.pipeline_ids:
+            st.pipeline_ids = [pid for pid in st.pipeline_ids if pid != clean_id]
+
+    await config_manager.update_settings(settings)
+    return {"success": True, "deleted_pipeline": clean_id, "dropped_table": pcfg.resolved_table_name()}
+
+
 @router.post("/purge")
-async def purge_pipeline() -> Dict[str, Any]:
-    """Purge all records from SERVICES_PIPELINE and reset autoincrement ID sequence."""
+async def purge_pipeline(pipeline_id: Optional[str] = Query(None)) -> Dict[str, Any]:
+    """Purge all records from the target pipeline table and reset its autoincrement sequence."""
+    settings = await config_manager.get_settings()
+    p_cfg = settings.resolve_pipeline(pipeline_id)
+    table_name = p_cfg.resolved_table_name()
+
     async with db_manager.get_connection() as db:
-        res = await db.execute("DELETE FROM SERVICES_PIPELINE;")
+        res = await db.execute(f"DELETE FROM {table_name};")
         deleted_count = res.rowcount
         try:
-            await db.execute("DELETE FROM sqlite_sequence WHERE name = 'SERVICES_PIPELINE';")
+            await db.execute("DELETE FROM sqlite_sequence WHERE name = ?;", (table_name,))
         except Exception:
             pass
         await db.commit()
-    return {"success": True, "deleted_rows": deleted_count}
+    return {"success": True, "pipeline_id": p_cfg.id, "table_name": table_name, "deleted_rows": deleted_count}
 
 
 @router.get("")
 async def get_pipeline_items(
+    pipeline_id: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     status: Optional[str] = None,
     stage: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Retrieve universal pipeline entries with all dynamic columns ordered by preference."""
+    """Retrieve pipeline entries from the selected pipeline table with dynamic columns ordered by preference."""
+    settings = await config_manager.get_settings()
+    p_cfg = settings.resolve_pipeline(pipeline_id)
+    table_name = p_cfg.resolved_table_name()
+
     where_clauses = []
     params: List[Any] = []
 
@@ -131,34 +212,34 @@ async def get_pipeline_items(
         where_clauses.append("STATUS = ?")
         params.append(status)
     if stage is not None and str(stage).strip() != "":
-        stage_str = str(stage).strip()
         where_clauses.append("STAGE = ?")
-        params.append(stage_str)
+        params.append(str(stage).strip())
 
     where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
-    count_rows = await db_manager.query(f"SELECT COUNT(*) as total FROM SERVICES_PIPELINE {where_sql}", tuple(params))
+    count_rows = await db_manager.query(f"SELECT COUNT(*) as total FROM {table_name} {where_sql}", tuple(params))
     total = count_rows[0]["total"] if count_rows else 0
 
-    query_sql = f"SELECT * FROM SERVICES_PIPELINE {where_sql} ORDER BY ID DESC LIMIT ? OFFSET ?"
+    query_sql = f"SELECT * FROM {table_name} {where_sql} ORDER BY ID DESC LIMIT ? OFFSET ?"
     params.extend([limit, offset])
     items = await db_manager.query(query_sql, tuple(params))
 
-    columns = await db_manager.get_table_columns("SERVICES_PIPELINE")
+    columns = await db_manager.get_table_columns(table_name)
     all_col_names = [col["name"] for col in columns]
     col_types = {col["name"]: col["type"] for col in columns}
 
-    settings = await config_manager.get_settings()
-    pref_order = getattr(settings, "pipeline_column_order", []) or []
+    pref_order = p_cfg.column_order or []
     ordered_cols = sort_pipeline_columns(all_col_names, pref_order)
 
-    # Collect available stages from settings and DB
+    # Filter stages belonging to this pipeline
     configured_stages: List[Dict[str, Any]] = [
-        {"id": s.id, "name": s.name} for s in (getattr(settings, "stages", []) or [])
+        {"id": s.id, "name": s.name}
+        for s in (settings.stages or [])
+        if not s.pipeline_ids or p_cfg.id in s.pipeline_ids
     ]
     known_stage_ids = {st["id"] for st in configured_stages if st.get("id")}
     db_stages = await db_manager.query(
-        "SELECT DISTINCT STAGE FROM SERVICES_PIPELINE WHERE STAGE IS NOT NULL AND STAGE != ''"
+        f"SELECT DISTINCT STAGE FROM {table_name} WHERE STAGE IS NOT NULL AND STAGE != ''"
     )
     for row in db_stages:
         val = row.get("STAGE") if "STAGE" in row else row.get("stage")
@@ -170,10 +251,9 @@ async def get_pipeline_items(
                 configured_stages.append({"id": stage_val, "name": stage_val})
                 known_stage_ids.add(stage_val)
 
-    # Collect available statuses from standard list and DB
     standard_statuses: List[str] = ["PENDING", "COMPLETED", "SINK"]
     db_statuses = await db_manager.query(
-        "SELECT DISTINCT STATUS FROM SERVICES_PIPELINE WHERE STATUS IS NOT NULL AND STATUS != ''"
+        f"SELECT DISTINCT STATUS FROM {table_name} WHERE STATUS IS NOT NULL AND STATUS != ''"
     )
     known_statuses = set(standard_statuses)
     for row in db_statuses:
@@ -187,6 +267,8 @@ async def get_pipeline_items(
                 known_statuses.add(status_val)
 
     return {
+        "pipeline_id": p_cfg.id,
+        "table_name": table_name,
         "total": total,
         "limit": limit,
         "offset": offset,
@@ -199,10 +281,12 @@ async def get_pipeline_items(
 
 
 @router.get("/columns")
-async def get_pipeline_columns() -> List[Dict[str, Any]]:
-    """Get all current columns of the SERVICES_PIPELINE table with usage and depreciation metadata."""
+async def get_pipeline_columns(pipeline_id: Optional[str] = Query(None)) -> List[Dict[str, Any]]:
+    """Get all current columns of the target pipeline table with usage and deprecation metadata."""
     settings = await config_manager.get_settings()
-    pref_order = getattr(settings, "pipeline_column_order", []) or []
+    p_cfg = settings.resolve_pipeline(pipeline_id)
+    table_name = p_cfg.resolved_table_name()
+    pref_order = p_cfg.column_order or []
     services_dict = settings.services
 
     usage_map: Dict[str, List[str]] = {}
@@ -216,7 +300,7 @@ async def get_pipeline_columns() -> List[Dict[str, Any]]:
                 if svc_label not in usage_map[col_upper]:
                     usage_map[col_upper].append(svc_label)
 
-    raw_columns = await db_manager.get_table_columns("SERVICES_PIPELINE")
+    raw_columns = await db_manager.get_table_columns(table_name)
     all_col_names = [c["name"] for c in raw_columns]
     col_by_name = {c["name"]: c for c in raw_columns}
 
@@ -238,8 +322,8 @@ async def get_pipeline_columns() -> List[Dict[str, Any]]:
 
 
 @router.post("/columns")
-async def add_pipeline_column(req: AddColumnRequest) -> Dict[str, Any]:
-    """Dynamically add a column to SERVICES_PIPELINE under strict naming validation."""
+async def add_pipeline_column(req: AddColumnRequest, pipeline_id: Optional[str] = Query(None)) -> Dict[str, Any]:
+    """Dynamically add a column to the target pipeline table under strict naming validation."""
     clean_name = req.column_name.strip().upper()
 
     if clean_name in SYSTEM_RESERVED_COLUMNS:
@@ -254,10 +338,16 @@ async def add_pipeline_column(req: AddColumnRequest) -> Dict[str, Any]:
             detail=f"Invalid column name '{clean_name}'. Must match ^[A-Z0-9_]+$",
         )
 
+    settings = await config_manager.get_settings()
+    p_cfg = settings.resolve_pipeline(req.pipeline_id or pipeline_id)
+    table_name = p_cfg.resolved_table_name()
+
     try:
-        added = await db_manager.ensure_column("SERVICES_PIPELINE", clean_name, req.column_type)
+        added = await db_manager.ensure_column(table_name, clean_name, req.column_type)
         return {
             "success": True,
+            "pipeline_id": p_cfg.id,
+            "table_name": table_name,
             "column_name": clean_name,
             "column_type": req.column_type,
             "created": added,
@@ -268,31 +358,38 @@ async def add_pipeline_column(req: AddColumnRequest) -> Dict[str, Any]:
 
 
 @router.delete("/columns/{column_name}")
-async def delete_pipeline_column(column_name: str) -> Dict[str, Any]:
-    """Delete a user-defined column from SERVICES_PIPELINE."""
+async def delete_pipeline_column(column_name: str, pipeline_id: Optional[str] = Query(None)) -> Dict[str, Any]:
+    """Delete a user-defined column from the target pipeline table."""
     clean_name = column_name.strip().upper()
     if clean_name in SYSTEM_RESERVED_COLUMNS:
         raise HTTPException(status_code=400, detail=f"Cannot delete system column '{clean_name}'.")
 
+    settings = await config_manager.get_settings()
+    p_cfg = settings.resolve_pipeline(pipeline_id)
+    table_name = p_cfg.resolved_table_name()
+
     try:
-        dropped = await db_manager.drop_column("SERVICES_PIPELINE", clean_name)
+        dropped = await db_manager.drop_column(table_name, clean_name)
         if dropped:
-            settings = await config_manager.get_settings()
-            if clean_name in settings.pipeline_column_order:
-                settings.pipeline_column_order.remove(clean_name)
+            if clean_name in p_cfg.column_order:
+                p_cfg.column_order.remove(clean_name)
                 await config_manager.update_settings(settings)
-            return {"success": True, "message": f"Column '{clean_name}' dropped successfully."}
+            return {"success": True, "pipeline_id": p_cfg.id, "message": f"Column '{clean_name}' dropped successfully."}
         raise HTTPException(status_code=404, detail=f"Column '{clean_name}' not found.")
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/columns/prune")
-async def prune_deprecated_columns() -> Dict[str, Any]:
-    """Prune all dynamic columns in SERVICES_PIPELINE that are not used by any service."""
+async def prune_deprecated_columns(pipeline_id: Optional[str] = Query(None)) -> Dict[str, Any]:
+    """Prune all dynamic columns in the target pipeline table that are not used by any service."""
     settings = await config_manager.get_settings()
+    p_cfg = settings.resolve_pipeline(pipeline_id)
+    table_name = p_cfg.resolved_table_name()
     services_dict = settings.services
 
     active_target_cols = set()
@@ -301,38 +398,39 @@ async def prune_deprecated_columns() -> Dict[str, Any]:
             if m.target_column:
                 active_target_cols.add(m.target_column.strip().upper())
 
-    columns = await db_manager.get_table_columns("SERVICES_PIPELINE")
+    columns = await db_manager.get_table_columns(table_name)
     pruned = []
     for col in columns:
         c_name = col["name"].upper()
         if c_name not in SYSTEM_RESERVED_COLUMNS and c_name not in active_target_cols:
             try:
-                await db_manager.drop_column("SERVICES_PIPELINE", c_name)
+                await db_manager.drop_column(table_name, c_name)
                 pruned.append(c_name)
             except Exception as e:
-                print(f"[!] Error pruning column {c_name}: {e}")
+                print(f"[!] Error pruning column {c_name} from {table_name}: {e}")
 
     if pruned:
-        settings.pipeline_column_order = [c for c in settings.pipeline_column_order if c not in pruned]
+        p_cfg.column_order = [c for c in p_cfg.column_order if c not in pruned]
         await config_manager.update_settings(settings)
 
-    return {"success": True, "pruned_columns": pruned, "count": len(pruned)}
+    return {"success": True, "pipeline_id": p_cfg.id, "pruned_columns": pruned, "count": len(pruned)}
 
 
 @router.put("/columns/order")
-async def reorder_pipeline_columns(req: ReorderColumnsRequest) -> Dict[str, Any]:
-    """Persist preferred column order for user-defined columns."""
+async def reorder_pipeline_columns(req: ReorderColumnsRequest, pipeline_id: Optional[str] = Query(None)) -> Dict[str, Any]:
+    """Persist preferred column order for user-defined columns on the target pipeline."""
     settings = await config_manager.get_settings()
+    p_cfg = settings.resolve_pipeline(req.pipeline_id or pipeline_id)
     clean_order = [c.strip().upper() for c in req.column_order if c.strip().upper() not in SYSTEM_RESERVED_COLUMNS]
-    settings.pipeline_column_order = clean_order
+    p_cfg.column_order = clean_order
     await config_manager.update_settings(settings)
-    return {"success": True, "pipeline_column_order": clean_order}
+    return {"success": True, "pipeline_id": p_cfg.id, "pipeline_column_order": clean_order}
 
 
 @router.post("/sample")
 async def sample_app_api(req: SampleApiRequest) -> Dict[str, Any]:
-    """Sample an external service API to discover available payload fields with parameter resolution."""
-    s_id = req.service_id or req.app_id
+    """Service-agnostic live API sampler to discover available payload fields."""
+    s_id = req.service_id.strip()
     if not s_id:
         raise HTTPException(status_code=400, detail="service_id is required")
 
@@ -345,33 +443,35 @@ async def sample_app_api(req: SampleApiRequest) -> Dict[str, Any]:
     if not service_cfg.base_url:
         raise HTTPException(status_code=400, detail=f"Service '{s_id}' has no base_url configured")
 
-    endpoint = req.endpoint.strip()
+    endpoint = (req.endpoint or service_cfg.poll_endpoint or "").strip()
+    if not endpoint:
+        raise HTTPException(status_code=400, detail="No endpoint provided and service has no poll_endpoint configured")
+
     resolved_endpoint = endpoint
 
-    # Auto-resolve parameterized templates like /api/v3/episode/{id} or /api/v3/movie/{id}
-    if "{" in endpoint and "}" in endpoint:
+    # Dynamically resolve any {placeholder} using the service's configured poll_endpoint if available
+    if "{" in endpoint and "}" in endpoint and service_cfg.poll_endpoint and "{" not in service_cfg.poll_endpoint:
         try:
-            hist_url, hist_headers = prepare_service_request(service_cfg.base_url, "/api/v3/history?pageSize=1", service_cfg.api_key or "")
+            poll_url, poll_headers = prepare_service_request(
+                service_cfg.base_url, service_cfg.poll_endpoint, service_cfg.api_key or ""
+            )
             async with httpx.AsyncClient(timeout=5.0) as client:
-                hist_resp = await client.get(hist_url, headers=hist_headers)
-                if hist_resp.status_code == 200:
-                    hist_data = hist_resp.json()
-                    recs = hist_data.get("records", []) if isinstance(hist_data, dict) else []
+                poll_resp = await client.get(poll_url, headers=poll_headers)
+                if poll_resp.status_code == 200:
+                    recs, _, _ = _extract_payload_records(poll_resp.json())
                     if recs:
                         r0 = recs[0]
-                        ep_id = r0.get("episodeId") or r0.get("id") or 1
-                        movie_id = r0.get("movieId") or r0.get("id") or 1
-                        series_id = r0.get("seriesId") or r0.get("id") or 1
-                        resolved_endpoint = (
-                            resolved_endpoint
-                            .replace("{records.episodeId}", str(ep_id))
-                            .replace("{episodeId}", str(ep_id))
-                            .replace("{records.movieId}", str(movie_id))
-                            .replace("{movieId}", str(movie_id))
-                            .replace("{records.seriesId}", str(series_id))
-                            .replace("{seriesId}", str(series_id))
-                        )
-                        resolved_endpoint = re.sub(r"\{id\}", str(ep_id if "episode" in endpoint else movie_id), resolved_endpoint)
+                        ctx = {"records": r0, **r0}
+                        import re
+                        import urllib.parse
+                        for ph in re.findall(r"\{([^}]+)\}", endpoint):
+                            val = extract_dotted_value(ctx, ph)
+                            if val is None:
+                                val = ctx.get(ph)
+                            if val is not None:
+                                resolved_endpoint = resolved_endpoint.replace(
+                                    f"{{{ph}}}", urllib.parse.quote(str(val))
+                                )
         except Exception:
             pass
 
@@ -409,7 +509,7 @@ async def sample_app_api(req: SampleApiRequest) -> Dict[str, Any]:
 
 @router.post("/sandbox/enrichment")
 async def sandbox_enrichment(req: SandboxEnrichmentRequest) -> Dict[str, Any]:
-    """Test a chain of enrichment endpoints sequentially against an existing pipeline record, direct sample, or custom context."""
+    """Test a chain of enrichment endpoints sequentially against a pipeline record, direct sample, or custom context."""
     settings = await config_manager.get_settings()
     services_dict = settings.services
     if req.service_id not in services_dict:
@@ -421,32 +521,32 @@ async def sandbox_enrichment(req: SandboxEnrichmentRequest) -> Dict[str, Any]:
 
     logs: List[str] = []
 
-    # Fetch the base record if provided
     row_dict: Dict[str, Any] = {}
     if req.record_id is not None:
-        rows = await db_manager.query("SELECT * FROM SERVICES_PIPELINE WHERE ID = ?", (req.record_id,))
+        p_cfg = settings.resolve_pipeline(req.pipeline_id)
+        table_name = p_cfg.resolved_table_name()
+        rows = await db_manager.query(f"SELECT * FROM {table_name} WHERE ID = ?", (req.record_id,))
         if not rows:
             raise HTTPException(status_code=404, detail=f"Pipeline record with ID {req.record_id} not found")
         row_dict = dict(rows[0])
 
-    # Direct upstream sample fetching if sample_endpoint is provided
     sample_dict: Dict[str, Any] = {}
-    if req.sample_endpoint and req.sample_endpoint.strip():
-        s_endpoint = req.sample_endpoint.strip()
-        logs.append(f"[sample] GET {s_endpoint}")
-        sample_url, sample_headers = prepare_service_request(
-            service_cfg.base_url, s_endpoint, service_cfg.api_key or ""
-        )
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        if req.sample_endpoint and req.sample_endpoint.strip():
+            s_endpoint = req.sample_endpoint.strip()
+            logs.append(f"[sample] GET {s_endpoint}")
+            sample_url, sample_headers = prepare_service_request(
+                service_cfg.base_url, s_endpoint, service_cfg.api_key or ""
+            )
+            try:
                 s_resp = await client.get(sample_url, headers=sample_headers)
                 logs.append(f"[sample] HTTP {s_resp.status_code}")
                 if s_resp.status_code == 200:
                     s_json = s_resp.json()
                     if isinstance(s_json, dict):
                         sample_dict.update(s_json)
-                        recs = s_json.get("records") or s_json.get("Items") or s_json.get("files")
-                        if isinstance(recs, list) and recs and isinstance(recs[0], dict):
+                        recs, _, _ = _extract_payload_records(s_json)
+                        if recs:
                             first_rec = recs[0]
                             sample_dict.update(first_rec)
                             sample_dict["records"] = first_rec
@@ -457,62 +557,21 @@ async def sandbox_enrichment(req: SandboxEnrichmentRequest) -> Dict[str, Any]:
                             sample_dict["records"] = first_rec
                 else:
                     logs.append(f"[sample] Error: {s_resp.text[:100]}")
-        except Exception as e:
-            logs.append(f"[sample] Exception: {str(e)}")
+            except Exception as e:
+                logs.append(f"[sample] Exception: {str(e)}")
 
-    enrichment_data: Dict[str, Any] = {}
-    from src.core.scheduler import extract_dotted_value
-
-    for namespace, ep_template in req.enrichment_endpoints.items():
-        if not ep_template or not ep_template.strip():
-            continue
-
-        context_dict = {**row_dict, **sample_dict, **(req.custom_context or {}), **enrichment_data}
-        resolved_ep = ep_template.strip()
-
-        missing_ph = False
-        for ph in re.findall(r"\{([^}]+)\}", ep_template):
-            val = extract_dotted_value(context_dict, ph)
-            if val is None:
-                val = context_dict.get(ph)
-            if val is None:
-                val = context_dict.get(ph.upper())
-            if val is None:
-                val = context_dict.get(ph.lower())
-
-            if val is not None:
-                resolved_ep = resolved_ep.replace(f"{{{ph}}}", urllib.parse.quote(str(val)))
-            else:
-                missing_ph = True
-                logs.append(f"[{namespace}] Skipped: Missing placeholder {{{ph}}} in current context.")
-                break
-
-        if missing_ph or "{" in resolved_ep:
-            if not missing_ph:
-                logs.append(f"[{namespace}] Skipped: Unresolved placeholders remain in {resolved_ep}")
-            continue
-
-        logs.append(f"[{namespace}] GET {resolved_ep}")
-        enrich_url, enrich_headers = prepare_service_request(service_cfg.base_url, resolved_ep, service_cfg.api_key or "")
-
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                e_resp = await client.get(enrich_url, headers=enrich_headers)
-                logs.append(f"[{namespace}] HTTP {e_resp.status_code}")
-                if e_resp.status_code == 200:
-                    e_json = e_resp.json()
-                    if isinstance(e_json, dict):
-                        enrichment_data[namespace.strip()] = e_json
-                    elif isinstance(e_json, list):
-                        enrichment_data[namespace.strip()] = {"List": e_json}
-                else:
-                    logs.append(f"[{namespace}] Error: {e_resp.text[:100]}")
-        except Exception as e:
-            logs.append(f"[{namespace}] Exception: {str(e)}")
+        base_context = {**row_dict, **sample_dict, **(req.custom_context or {})}
+        enrichment_data = await fetch_enrichment_payloads(
+            base_url=service_cfg.base_url,
+            api_key=service_cfg.api_key or "",
+            enrichment_endpoints=req.enrichment_endpoints,
+            base_context=base_context,
+            logs=logs,
+            client=client,
+        )
 
     final_context = {**row_dict, **sample_dict, **(req.custom_context or {}), **enrichment_data}
 
-    # Filter flattened keys to remove raw sample wrapper noise and redundant records aliases
     all_flattened = flatten_json_keys(final_context)
     root_keys = set(final_context.keys())
     enrichment_namespaces = set(req.enrichment_endpoints.keys()) if req.enrichment_endpoints else set()
@@ -520,11 +579,8 @@ async def sandbox_enrichment(req: SandboxEnrichmentRequest) -> Dict[str, Any]:
     filtered_flattened: List[Dict[str, Any]] = []
     for item in all_flattened:
         path = item.get("path", "")
-        # Remove raw 'sample' wrapper paths
         if path == "sample" or path.startswith("sample.") or path.startswith("sample["):
             continue
-
-        # Remove redundant 'records' wrapper paths if the attribute is already exposed at root
         if "records" not in enrichment_namespaces:
             if path == "records":
                 continue
@@ -535,7 +591,6 @@ async def sandbox_enrichment(req: SandboxEnrichmentRequest) -> Dict[str, Any]:
                     continue
             elif path.startswith("records["):
                 continue
-
         filtered_flattened.append(item)
 
     return {
@@ -548,7 +603,7 @@ async def sandbox_enrichment(req: SandboxEnrichmentRequest) -> Dict[str, Any]:
 
 @router.get("/services/{service_id}/events")
 async def discover_service_events(service_id: str) -> Dict[str, Any]:
-    """Discover distinct event types from upstream service history."""
+    """Service-agnostic discovery of distinct event types from the service's configured poll_endpoint."""
     settings = await config_manager.get_settings()
     services_dict = settings.services
     if service_id not in services_dict:
@@ -557,17 +612,10 @@ async def discover_service_events(service_id: str) -> Dict[str, Any]:
     service_cfg = services_dict[service_id]
     if not service_cfg.base_url:
         raise HTTPException(status_code=400, detail=f"Service '{service_id}' has no base_url configured")
+    if not service_cfg.poll_endpoint:
+        return {"success": True, "service_id": service_id, "event_types": []}
 
-    url, headers = prepare_service_request(service_cfg.base_url, "/api/v3/history?pageSize=200", service_cfg.api_key or "")
-
-    EVENT_DESCRIPTIONS = {
-        "downloadFolderImported": ("File imported to media library", True),
-        "episodeFileRenamed": ("Episode file renamed to standard format", True),
-        "movieFileRenamed": ("Movie file renamed to standard format", True),
-        "episodeFileDeleted": ("File deleted from disk", False),
-        "movieFileDeleted": ("File deleted from disk", False),
-        "grabbed": ("Release sent to download client", False),
-    }
+    url, headers = prepare_service_request(service_cfg.base_url, service_cfg.poll_endpoint, service_cfg.api_key or "")
 
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
@@ -578,22 +626,21 @@ async def discover_service_events(service_id: str) -> Dict[str, Any]:
                     "error": f"API returned {resp.status_code}: {resp.text[:200]}",
                     "event_types": [],
                 }
-            payload = resp.json()
-            records = payload.get("records", []) if isinstance(payload, dict) else []
+            records, _, _ = _extract_payload_records(resp.json())
             discovered = set()
             for r in records:
-                ev = r.get("eventType")
-                if ev:
+                ev = r.get("eventType") or r.get("event") or r.get("type")
+                if ev and isinstance(ev, str):
                     discovered.add(ev)
 
-            event_items = []
-            for ev in sorted(discovered):
-                desc, default_active = EVENT_DESCRIPTIONS.get(ev, ("Custom service event", False))
-                event_items.append({
+            event_items = [
+                {
                     "event_type": ev,
-                    "description": desc,
-                    "default_active": default_active,
-                })
+                    "description": f"Discovered service event '{ev}'",
+                    "default_active": True,
+                }
+                for ev in sorted(discovered)
+            ]
 
             return {
                 "success": True,
@@ -609,15 +656,21 @@ async def discover_service_events(service_id: str) -> Dict[str, Any]:
 
 
 @router.get("/stats")
-async def get_pipeline_stats() -> Dict[str, Any]:
-    """Get aggregated pipeline statistics."""
-    total_res = await db_manager.query("SELECT COUNT(*) as cnt FROM SERVICES_PIPELINE")
+async def get_pipeline_stats(pipeline_id: Optional[str] = Query(None)) -> Dict[str, Any]:
+    """Get aggregated pipeline statistics for the selected pipeline."""
+    settings = await config_manager.get_settings()
+    p_cfg = settings.resolve_pipeline(pipeline_id)
+    table_name = p_cfg.resolved_table_name()
+
+    total_res = await db_manager.query(f"SELECT COUNT(*) as cnt FROM {table_name}")
     total = total_res[0]["cnt"] if total_res else 0
 
-    by_stage = await db_manager.query("SELECT STAGE, COUNT(*) as cnt FROM SERVICES_PIPELINE GROUP BY STAGE")
-    by_status = await db_manager.query("SELECT STATUS, COUNT(*) as cnt FROM SERVICES_PIPELINE GROUP BY STATUS")
+    by_stage = await db_manager.query(f"SELECT STAGE, COUNT(*) as cnt FROM {table_name} GROUP BY STAGE")
+    by_status = await db_manager.query(f"SELECT STATUS, COUNT(*) as cnt FROM {table_name} GROUP BY STATUS")
 
     return {
+        "pipeline_id": p_cfg.id,
+        "table_name": table_name,
         "total_items": total,
         "stages": {r["STAGE"]: r["cnt"] for r in by_stage},
         "statuses": {r["STATUS"]: r["cnt"] for r in by_status},

@@ -5,7 +5,7 @@ export const pipelineKeys = {
   columns: ['pipeline', 'columns']
 };
 
-let currentParams = { limit: 50, offset: 0 };
+let currentParams = { pipeline_id: 'default', limit: 50, offset: 0 };
 
 export const pipelineApi = {
   getPipeline: (params = {}, opts = {}) => {
@@ -17,6 +17,9 @@ export const pipelineApi = {
       ...opts
     };
     currentParams = { ...currentParams, ...cleanParams };
+    if (!currentParams.pipeline_id) {
+      currentParams.pipeline_id = 'default';
+    }
     if (currentParams.stage === '' || currentParams.stage === null) {
       delete currentParams.stage;
     }
@@ -30,6 +33,13 @@ export const pipelineApi = {
     );
   },
   getCurrentParams: () => ({ ...currentParams }),
-  getColumns: (opts) => queryCache.load(pipelineKeys.columns, () => http.get('/api/v1/pipeline/columns'), opts),
+  getColumns: (pipelineId = currentParams.pipeline_id || 'default') =>
+    http.get('/api/v1/pipeline/columns', { query: { pipeline_id: pipelineId } }),
+  saveColumnOrder: (pipelineId, columnOrder) =>
+    http.put('/api/v1/pipeline/columns/order', { column_order: columnOrder }, { query: { pipeline_id: pipelineId } }),
+  pruneColumns: (pipelineId) =>
+    http.post('/api/v1/pipeline/columns/prune', null, { query: { pipeline_id: pipelineId } }),
+  purgePipeline: (pipelineId) =>
+    http.post('/api/v1/pipeline/purge', null, { query: { pipeline_id: pipelineId } })
 };
 

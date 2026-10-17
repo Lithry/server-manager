@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.core.config import FieldMapping, ServiceConfig, Settings, StageConfig
-from src.core.predicates import TransformerEvaluator
+from src.core.transformers import TransformerEvaluator
 from src.core.scheduler import (
     TaskScheduler,
     _propagate_cross_service_table_mappings,

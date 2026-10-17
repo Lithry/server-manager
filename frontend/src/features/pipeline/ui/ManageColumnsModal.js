@@ -1,11 +1,11 @@
 import { html, nothing } from 'lit-html';
 import { Button } from '../../../shared/ui/atoms/Button/Button.js';
 import { Modal } from '../../../shared/ui/organisms/Modal/Modal.js';
-import { http, queryCache } from '../../../shared/api/index.js';
-import { pipelineKeys, pipelineApi } from '../api.js';
+import { pipelineApi } from '../api.js';
 
 export function createManageColumnsModal(store) {
   const state = store.get();
+  const activePipelineId = pipelineApi.getCurrentParams().pipeline_id || 'default';
   
   const handleClose = () => {
     store.set(s => ({ ...s, isManageColumnsModalOpen: false }));
@@ -32,33 +32,32 @@ export function createManageColumnsModal(store) {
   const handleSave = async () => {
     const order = state.columnsData.map(c => c.name);
     try {
-      await http.put('/api/v1/pipeline/columns/order', { column_order: order });
+      await pipelineApi.saveColumnOrder(activePipelineId, order);
       store.set(s => ({ ...s, isManageColumnsModalOpen: false }));
-      pipelineApi.getPipeline(); // Refresh pipeline data and columns
+      pipelineApi.getPipeline();
     } catch (err) {
-      alert("Failed to save column order: " + err.message);
+      alert('Failed to save column order: ' + err.message);
     }
   };
 
   const handlePrune = async () => {
-    if (!confirm('Are you sure you want to delete all deprecated columns? This cannot be undone.')) return;
+    if (!confirm('Are you sure you want to delete all deprecated columns in this pipeline? This cannot be undone.')) return;
     try {
-      await http.post('/api/v1/pipeline/columns/prune');
-      // Refetch columns
-      const cols = await http.get('/api/v1/pipeline/columns');
+      await pipelineApi.pruneColumns(activePipelineId);
+      const cols = await pipelineApi.getColumns(activePipelineId);
       store.set(s => ({ ...s, columnsData: cols }));
       pipelineApi.getPipeline();
     } catch (err) {
-      alert("Failed to prune columns: " + err.message);
+      alert('Failed to prune columns: ' + err.message);
     }
   };
 
   const body = html`
     <div class="u-mb-4">
       <p class="u-text-muted u-text-sm">
-        Change the display order of columns in the Universal Pipeline. System columns are always pinned to the left.
+        Change the display order of columns in pipeline <code>${activePipelineId}</code>. System columns are always pinned to the left.
         <br><br>
-        <strong>Note:</strong> Deprecated columns are columns that exist in the database but are no longer used by any Service Field Mapping.
+        <strong>Note:</strong> Deprecated columns are columns that exist in the database table but are no longer referenced by any Service Field Mapping.
       </p>
     </div>
 
@@ -101,10 +100,11 @@ export function createManageColumnsModal(store) {
   `;
 
   return Modal({
-    title: 'Manage Columns',
+    title: `Manage Columns (${activePipelineId})`,
     size: 'md',
     onClose: handleClose,
     body,
     footer
   });
 }
+

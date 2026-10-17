@@ -1,10 +1,7 @@
 """Comprehensive test suite for the single-line multi-branch transformer engine."""
 
 import unittest
-from src.core.predicates import (
-    SafeContext as PredicatesSafeContext,
-    TransformerEvaluator as PredicatesTransformerEvaluator,
-)
+from src.core.predicates import PredicateEvaluator
 from src.core.transformers import SafeContext, TransformerEvaluator
 
 
@@ -171,11 +168,22 @@ class TestTransformers(unittest.TestCase):
         self.assertFalse(valid)
         self.assertIn("Invalid transformer", msg)
 
-    def test_predicates_module_reexport(self):
-        """Verify backwards-compatible re-export from src.core.predicates."""
-        self.assertIs(PredicatesTransformerEvaluator, TransformerEvaluator)
-        self.assertIs(PredicatesSafeContext, SafeContext)
-        self.assertIs(TransformerEvaluator.SafeContext, SafeContext)
+    def test_json_list_string_auto_unpacking(self):
+        """Verify JSON list strings stored in SQLite TEXT columns are unpacked as Python lists in transformers and predicates."""
+        row_ctx = {
+            "GENRES": '["Action", "Sci-Fi", "Drama"]',
+            "EMPTY_TAGS": "[]",
+            "PLAIN_TEXT": "not a list",
+        }
+        # TransformerEvaluator
+        self.assertEqual(TransformerEvaluator.evaluate("len(GENRES)", None, row_ctx), 3)
+        self.assertEqual(TransformerEvaluator.evaluate("if 'Sci-Fi' in GENRES then 'YES' else 'NO'", None, row_ctx), "YES")
+        self.assertEqual(TransformerEvaluator.evaluate("len(EMPTY_TAGS)", None, row_ctx), 0)
+
+        # PredicateEvaluator
+        self.assertTrue(PredicateEvaluator.evaluate("len(GENRES) == 3 AND 'Action' in GENRES", row_ctx))
+        self.assertFalse(PredicateEvaluator.evaluate("'Comedy' in GENRES", row_ctx))
+        self.assertTrue(PredicateEvaluator.evaluate("len(EMPTY_TAGS) == 0", row_ctx))
 
     def test_error_handling(self):
         """Test evaluate error suppression and raise_errors flag."""

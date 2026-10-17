@@ -25,6 +25,7 @@ export function createSandboxPage() {
     const state = store.get();
     const snapshot = queryCache.read(settingsKeys.all);
     const services = snapshot?.data?.services || {};
+    const pipelines = snapshot?.data?.pipelines || {};
     const serviceKeys = Object.keys(services);
     const currentService = services[state.selectedService];
 
@@ -34,10 +35,12 @@ export function createSandboxPage() {
 
     return html`
       <div class="u-flex u-flex-col u-gap-3" style="height: 100%; min-height: 520px;">
-        <!-- Top Controls: Service, Record ID, Sample Endpoint, Mock Context, Actions -->
+        <!-- Top Controls: Service, Pipeline, Record ID, Sample Endpoint, Mock Context, Actions -->
         ${ContextSourceControls({
           services,
+          pipelines,
           selectedService: state.selectedService,
+          selectedPipelineId: state.selectedPipelineId || 'default',
           selectedRecordId: state.selectedRecordId,
           sampleEndpoint: state.sampleEndpoint,
           customContextText: state.customContextText,
@@ -46,6 +49,7 @@ export function createSandboxPage() {
           isLoading: state.isLoading,
           saveSuccess: state.saveSuccess,
           onServiceChange: (val) => store.set({ selectedService: val }),
+          onPipelineChange: (val) => store.set({ selectedPipelineId: val }),
           onRecordIdChange: (val) => store.set({ selectedRecordId: val }),
           onSampleEndpointChange: (val) => store.set({ sampleEndpoint: val }),
           onCustomContextChange: handleCustomContextChange,

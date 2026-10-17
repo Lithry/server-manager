@@ -21,9 +21,9 @@ Operating as an independent appliance on port **8099**, it bridges disparate hom
 2. **Pragmatic Anti-Wake Storage Policy**:
    Automated background daemons, ingestion loops, and health checks MUST NEVER trigger physical spin-up of idle mechanical hard drives (`/mnt/MediaServer1`, `/mnt/MediaServer2`). All file evaluations rely on NVMe SSD symlink inspection (`os.readlink()`), `/host/proc/diskstats`, and in-memory caches.
 3. **Decoupled Three-Tier Telemetry Architecture (Rule 9)**:
-   - **Tier 1 (Autonomous Background Ingestion)**: Ingestion tasks poll upstream APIs, normalize payloads, resolve tags, and write structured records into SQLite.
-   - **Tier 2 (Structured Database Storage)**: Local SQLite database (`SERVICES_PIPELINE`, `SYSTEM_INCIDENTS`, `ERROR_INDEX`, `CUSTOM_VIEWS`) stores pre-filtered records with concurrency handled via WAL mode.
-   - **Tier 3 (Stateless LLM Agent)**: Edge AI agents (LibreChat / Ollama `llama3.2:3b`) interact **strictly and exclusively** with Tier 2 structured data via management APIs (`/api/v1/meta/query`). The LLM never reads raw container logs or executes arbitrary host commands.
+   - **Tier 1 (Autonomous Background Ingestion)**: Stage-driven loops poll upstream APIs, normalize payloads, resolve enrichment endpoints lazily, and write structured records into SQLite pipeline tables.
+   - **Tier 2 (Structured Database Storage)**: Local SQLite database (`PIPELINES`, `PIPELINE_<SLUG>`, `SYSTEM_INCIDENTS`, `ERROR_INDEX`, `CUSTOM_VIEWS`, and persistent materialized custom tables) stores pre-filtered records with concurrency handled via WAL mode.
+   - **Tier 3 (Stateless LLM Agent)**: Edge AI agents interact **strictly and exclusively** with Tier 2 structured data via management APIs (`/api/v1/meta/query`). The LLM never reads raw container logs or executes arbitrary host commands.
 4. **Zero Backward Compatibility / Zero Duct-Tape Standard**:
    Architectural refactoring eliminates dead code, legacy shims, and brittle fallback logic. All schema evolutions and endpoint namespaces are explicit and strictly typed.
 
@@ -49,16 +49,17 @@ flowchart TD
             APP_MAIN["FastAPI Application (src/main.py)"]
             CONFIG_MGR["ConfigManager (src/core/config.py)"]
             DB_MGR["DatabaseManager (src/core/database.py)"]
-            SCHEDULER["Task Scheduler (src/core/scheduler.py)"]
-            PREDICATES["AST Predicate Engine (src/core/predicates.py)"]
+            SCHEDULER["Stage-Driven Scheduler (src/core/scheduler.py)"]
+            PREDICATES["AST Predicate & Transformer Engine"]
             GITOPS["GitOps Inspector (src/core/gitops.py)"]
         end
 
         subgraph Storage ["SQLite WAL Database (/data/server_manager.db)"]
-            TBL_PIPE[("SERVICES_PIPELINE")]
+            TBL_REG[("PIPELINES Registry")]
+            TBL_PIPE[("PIPELINE_<SLUG> Tables")]
             TBL_INC[("SYSTEM_INCIDENTS")]
             TBL_ERR[("ERROR_INDEX")]
-            TBL_VIEWS[("CUSTOM_VIEWS")]
+            TBL_VIEWS[("CUSTOM_VIEWS (VIEW & TABLE)")]
         end
 
         subgraph WebUI ["Modular WebUI (src/static/)"]
@@ -114,142 +115,136 @@ The container runs as an unprivileged service (`PUID=1000`, `PGID=1000`, `UMASK=
 
 ## 4. Universal Dynamic Multi-Pipeline Engine
 
-The core data structure is the dynamic pipeline table (`SERVICES_PIPELINE`), designed to ingest and correlate records from any upstream automation tool without schema lock-in.
+The core storage architecture supports one or multiple isolated pipeline tables (`PIPELINE_<SLUG>`, e.g., `PIPELINE_DEFAULT`) registered in the `PIPELINES` catalog table, designed to ingest and correlate records from any upstream HTTP JSON API without service-specific hardcoding.
 
-### 4.1 Dynamic Schema Mapper & Strict Sanitization
-- Upstream service payloads vary in naming and nesting. The schema mapper allows administrators to map any JSON attribute into SQLite columns.
+### 4.1 Multi-Pipeline Registry & Dynamic Schema Mapper
+- **Pipeline Registry (`PIPELINES`)**: Each pipeline defines an `ID`, `NAME`, `DESCRIPTION`, `TABLE_NAME` (`PIPELINE_<SLUG>`), `RETENTION_DAYS`, and `ENABLED` state. Stages can be assigned to one or multiple pipelines via `StageConfig.pipeline_ids`.
 - **SQL Sanitization**: Target column names must strictly match the regex `^[A-Z0-9_]+$`. Any column violating this pattern is rejected at the API layer.
-- **System Reserved Columns**: The following columns are protected and managed exclusively by the core engine:
+- **System Reserved Columns**: The following columns are protected and managed exclusively by the core engine on every `PIPELINE_<SLUG>` table:
   - `ID`: Autoincrement primary key.
-  - `PIPELINE_KEY`: Unique tracking identifier across services (e.g. `sonarr:1284`).
-  - `STAGE`: Current progression stage semantic slug (TEXT, immutable identifier).
+  - `PIPELINE_KEY`: Unique tracking identifier across services (e.g. `sensor:500`).
+  - `STAGE`: Current progression stage semantic slug (`TEXT`).
   - `STATUS`: Progression state (`PENDING`, `COMPLETED`, `SINK`).
-  - `CREATED_AT`: Immutable item creation timestamp established upon initial ingestion.
-  - `LAST_UPDATED`: Current ISO timestamp, updated strictly upon verified column value modifications.
-- **Automated DDL Evolution**: Saving field mappings automatically triggers non-destructive SQLite migrations:
+  - `CREATED_AT`: Immutable item creation timestamp stamped strictly by ServerManager's internal UTC clock (`CURRENT_TIMESTAMP`) upon initial ingestion.
+  - `LAST_UPDATED`: ISO timestamp updated strictly upon verified column value modifications or stage transitions.
+- **Automated DDL Evolution**: Saving field mappings automatically triggers non-destructive SQLite migrations across all pipeline tables to which the service's stages are assigned:
   ```sql
-  ALTER TABLE SERVICES_PIPELINE ADD COLUMN "<COLUMN_NAME>" <DATA_TYPE>;
+  ALTER TABLE PIPELINE_<SLUG> ADD COLUMN "<COLUMN_NAME>" <DATA_TYPE>;
   ```
-- **Column Renaming & Consolidation**: Renaming a column in settings updates the table schema (`RENAME COLUMN`) and merges existing data without loss.
+- **Column Renaming & Consolidation**: Renaming a target column for an existing `source_field` in settings updates the table schema (`RENAME COLUMN`) across pipelines and propagates the rename into `stage.service_mapping_scopes`.
 
-### 4.2 Namespaced Multi-Enrichment Architecture
-Primary events from services like Sonarr or Radarr (e.g., `/api/v3/history`) frequently provide only foreign keys (`seriesId`, `episodeId`).
+### 4.2 Lazy Namespaced Multi-Enrichment Architecture
+Primary events from upstream services frequently provide only foreign keys or summary attributes.
 - `ServiceConfig.enrichment_endpoints` supports discrete namespaces:
   ```json
   "enrichment_endpoints": {
-    "series": "/api/v3/series/{seriesId}",
-    "episode": "/api/v3/episode/{episodeId}"
+    "details": "/api/v1/items/{itemId}",
+    "metadata": "/api/v1/meta/{details.metaId}"
   }
   ```
-- Payloads are nested under their namespace key in the ingestion context dictionary:
-  - `context["series"]` contains series-level attributes.
-  - `context["episode"]` contains episode-level attributes.
-- This eliminates attribute collisions (such as `series.title` vs `episode.title`).
+- **Lazy Namespace Filtering**: During stage execution, `_compute_required_enrichment_namespaces` inspects the active stage's `service_mapping_scopes` (plus transitive placeholder dependencies) and executes HTTP GET requests **exclusively** for the enrichment namespaces required by that stage's monitored fields.
+- Payloads are nested under their namespace key in the ingestion context dictionary (`context["details"]`, `context["metadata"]`), eliminating attribute collisions.
 
 ### 4.3 Generic Dotted-Path List Projection (`extract_dotted_value`)
-- Nested structures and arrays of objects are extracted using mandatory `[*]` array traversal syntax (e.g., `movie.alternateTitles[*].title`, `tags[*].name`, `genres[*]`). Traversal over arrays without explicit `[*]` returns `None` to prevent accidental projections.
+- Nested structures and arrays of objects are extracted using mandatory `[*]` array traversal syntax (e.g., `items[*].title`, `tags[*].name`, `genres[*]`). Traversal over arrays without explicit `[*]` returns `None` to prevent accidental projections.
 - Explicit index traversal (e.g., `tags[0].name` or `tags.1.name`) remains supported for specific element access.
-- Terminal `[*]` notation (e.g., `episode.title[*]`) deterministically coerces single scalar values into single-element lists (`[val]`), enabling safe ingestion into accumulative array columns.
-- The extractor projects across collections, producing clean scalar lists without intermediate scripts.
+- Terminal `[*]` notation (e.g., `item.title[*]`) deterministically coerces single scalar values into single-element lists (`[val]`), enabling safe ingestion into accumulative array columns.
 
-### 4.4 In-Memory Tag Cache
-- Upstream media managers return numeric tag IDs (e.g., `tags: [1, 5]`).
-- The scheduler queries `/api/v3/tag` and caches the ID-to-label dictionary in memory with a 10-minute TTL.
-- Tag IDs are resolved to lowercase string lists (e.g., `['anime', 'airing']`) before conditional mapping occurs.
-
-### 4.5 Clean Database Principle & Cross-Service Array Merging
+### 4.4 Clean Database Principle, List Unpacking & Cross-Service Array Merging
 - **Null Normalization**: Empty strings, empty lists, empty dictionaries, and whitespace strings normalize to SQL `NULL`, preventing `"[]"` or `""` dead rows.
-- **Type-Safe Merging & Deduplication**: Downstream consumer stages accumulating array data (e.g., alternative titles from Sonarr merged with Japanese titles from Shoko) use `merge_field_value` to deduplicate and store a unified JSON array. Strict type boundaries are enforced: scalar-to-list and list-to-scalar cross-updates are safely rejected with error telemetry, while list-to-list updates deduplicate with case-insensitive and stripped-whitespace matching while preserving insertion order.
+- **Transparent JSON List Unpacking**: When SQLite `TEXT` columns containing serialized JSON arrays (`'["a", "b"]'`) are loaded into `PredicateEvaluator` or `TransformerEvaluator` (`SafeContext`), `parse_json_list_if_str` automatically deserializes them into native Python `list` objects so expressions such as `len(TAGS) > 0` and `'critical' in TAGS` work identically on payload lists and persisted database columns.
+- **Type-Safe Merging & Deduplication**: Downstream stages accumulating array data use `merge_field_value` (backed by unified `deduplicate_list` in `src/core/transformers.py`) to deduplicate and store a unified JSON array. Scalar-to-list and list-to-scalar cross-updates are safely rejected with error telemetry.
+
+### 4.5 Dual-Mode View & Persistent Custom Table Builder (`VIEW` & `TABLE`)
+Operators can project pipeline data into two complementary structures managed via `/api/v1/views` and registered in `CUSTOM_VIEWS`:
+1. **Virtual SQL Views (`MODE = 'VIEW'`)**: Lightweight `CREATE VIEW` projections for immediate ad-hoc inspection and temporary validation.
+2. **Persistent Custom Tables (`MODE = 'TABLE'`)**: Materialized SQLite tables populated from pipeline queries via `UPSERT` (`ON CONFLICT(SYNC_KEY_COLUMN) DO UPDATE`), preserving historical records even after source rows are pruned from `PIPELINE_<SLUG>` by retention policies. Supports both manual synchronization (`POST /api/v1/views/{name}/sync`) and automated periodic synchronization every $T_s$ seconds (`REFRESH_INTERVAL_SECONDS`), queryable via `GET /api/v1/views/{name}/data`.
 
 ### 4.6 Decoupled Developer API Sandbox & Payload Inspector
 The API Sandbox (`POST /api/v1/pipeline/sandbox/enrichment`) provides an isolated environment for operators to simulate, verify, and register secondary enrichment endpoints before committing them into pipeline stages.
-- **Database Decoupling**: Sandbox testing does not require an existing database record ID (`SERVICES_PIPELINE`), eliminating friction when testing new services or when pipeline tables are unpopulated. The `record_id` parameter is optional; if omitted, SQLite database lookups are bypassed entirely.
-- **Direct Upstream Sampling**: Operators can test against live upstream services by specifying a `sample_endpoint` (e.g., `/api/v3/history?pageSize=1`). The engine issues an asynchronous HTTP GET directly to the upstream service, injecting the response under the `"sample"` namespace as well as into the root context.
-- **Arbitrary Custom Mock Context**: Operators can provide custom JSON mock payloads (`custom_context`) to test edge cases, simulate downstream variables, or prototype transformation logic before real events arrive.
-- **Multi-Source Context Resolution & Sequential Chaining**: The evaluation context merges all available sources: `{**row_dict, **sample_dict, **custom_context, **enrichment_data}`. Secondary enrichment endpoints are evaluated sequentially, allowing downstream endpoint templates to interpolate variables discovered by upstream endpoints (e.g., `{series.id}`).
-- **Payload Inspection & Wildcard Discovery**: Flattens nested JSON payloads into dot-notation paths and explicit array wildcard notations (`[*]`). The WebUI `PayloadInspector` presents discovered keys with real-time search filtering, data type indicators, 1-click clipboard path copying, and 1-click `{path}` placeholder injection into endpoint templates.
+- **Database Decoupling**: Sandbox testing does not require an existing database record ID; `record_id` is optional (`pipeline_id` defaults to `"default"` when used).
+- **Direct Upstream Sampling**: Operators can test against live upstream services by specifying a `sample_endpoint`.
+- **Arbitrary Custom Mock Context**: Operators can provide custom JSON mock payloads (`custom_context`) to test edge cases or prototype transformation logic.
+- **Unified Enrichment Execution**: Both the Sandbox and `TaskScheduler` share the same `fetch_enrichment_payloads` engine in `src/core/scheduler.py`.
 
 ---
 
-## 5. Tri-State DAG Stage Engine (`SERVICES_PIPELINE`)
+## 5. Stage-Driven Tri-State DAG Engine (`PIPELINE_<SLUG>`)
 
-Processing follows a forward-only, directed acyclic graph (DAG) evaluated across three stage roles.
+Processing follows a forward-only, directed acyclic graph (DAG) driven by per-stage execution intervals (`StageConfig.interval_seconds`).
 
 ```mermaid
 stateDiagram-v2
-    [*] --> RootProducer : Upstream Event Ingest
+    [*] --> RootProducer : Stage Cycle (Lookback Window delta_t)
     state RootProducer {
-        [*] --> PENDING_ROOT
-        PENDING_ROOT --> COMPLETED_ROOT : Ingestion Grace Period (10m)
+        [*] --> PENDING_ROOT : complete_condition != NULL
+        [*] --> SINK_ROOT : complete_condition IS NULL (Root+Sink)
+        PENDING_ROOT --> COMPLETED_ROOT : Grace Period + complete_condition passes
     }
 
     COMPLETED_ROOT --> ConsumerStage : start_condition passes
-    COMPLETED_ROOT --> SinkStage : Direct Promotion (IS_ANIME == 0)
+    COMPLETED_ROOT --> SinkStage : start_condition passes
 
     state ConsumerStage {
-        [*] --> PENDING_CONSUMER : Enrich via Service APIs
+        [*] --> PENDING_CONSUMER : Scoped Enrichment via Service APIs
         PENDING_CONSUMER --> COMPLETED_CONSUMER : complete_condition passes
-        PENDING_CONSUMER --> StalledWatchdog : Timeout > 30m
+        PENDING_CONSUMER --> StalledWatchdog : Timeout > timeout_minutes
     }
 
     ConsumerStage --> SinkStage : start_condition passes
     
     state SinkStage {
-        [*] --> SINK : Terminal Archive / Library State
+        [*] --> SINK : Passive Monitoring / Retention Window
+        SINK --> SINK : Passive In-Place Update on Matching Root Event
     }
 
     StalledWatchdog --> SYSTEM_INCIDENTS : Emit WARN_PIPELINE_STALLED
-    SinkStage --> [*]
+    SinkStage --> [*] : Retention Pruning (LAST_UPDATED > retention_days)
 ```
 
-### 5.1 Stage Taxonomy
+### 5.1 Stage Taxonomy & Stage-Driven Execution
 
 1. **Root Producer Stage (`start_condition IS NULL`)**:
-   - Ingests brand new rows into `SERVICES_PIPELINE` from polling endpoints (e.g. Sonarr / Radarr history).
-   - Multiple root producers can exist for different services and workflows.
-   - Initial row state: `STAGE = stage.order`, `STATUS = 'PENDING'`.
-   - Transitions to `STATUS = 'COMPLETED'` once `grace_period_minutes` elapses (ensuring files are stable on disk).
+   - Runs on its own `interval_seconds` cycle (`_stage_loop`), polling all assigned services in `stage.service_ids` across all assigned `stage.pipeline_ids`.
+   - Filters incoming events using a relative lookback window ($\Delta t = \text{interval\_seconds}$) referenced against the upstream HTTP `Date` response header (with fallback to ServerManager UTC) and supports `{interval_seconds}`, `{interval_minutes}`, `{lookback_iso}`, and `{lookback_unix}` placeholders in `poll_endpoint`.
+   - Stamps `CREATED_AT` strictly with ServerManager's internal UTC clock.
+   - **Root + Sink Mode**: If `complete_condition` is empty/`None`, newly ingested rows enter `STATUS = 'SINK'` directly. Otherwise, they enter `STATUS = 'PENDING'` and transition to `STATUS = 'COMPLETED'` once `grace_period_minutes` elapses and `complete_condition` evaluates to `True`.
 2. **Consumer Stage (`start_condition != NULL` and `complete_condition != NULL`)**:
-   - Intermediate processing stage (e.g., Shoko recognition, AniDB metadata resolution).
-   - Evaluates rows with `STATUS = 'COMPLETED'` from earlier stages (`STAGE < current_stage.order`).
-   - Executes assigned service enrichment tasks using `{COLUMN_NAME}` placeholder interpolation.
+   - Runs on its own `interval_seconds` cycle, evaluating rows in this stage (`PENDING`) and promoting qualifying `COMPLETED` rows from earlier stages (`order < current_stage.order`).
+   - Executes assigned service enrichment tasks lazily for the stage's `service_mapping_scopes`.
    - Once `complete_condition` evaluates to `True`, the row advances to `STATUS = 'COMPLETED'`.
-3. **Sink Stage (`start_condition != NULL` and `complete_condition IS NULL`)**:
-   - Terminal collector stage (e.g., final library availability in Jellyfin, or cold storage archive).
-   - Qualifying rows transition directly to `STATUS = 'SINK'`.
-   - Terminal state: rows marked as `SINK` are excluded from all future stage promotions. Rendered with an amber badge in the WebUI.
+3. **Passive Sink Stage (`start_condition != NULL` and `complete_condition IS NULL`)**:
+   - **100% Passive**: Does not spawn an active polling task.
+   - Qualifying rows from upstream stages transition into the Sink Stage with `STATUS = 'SINK'`.
+   - **Passive In-Place Updates**: If a new event arrives during a Root Stage cycle with the same `PIPELINE_KEY` as an existing row (even if that row is in `SINK`), the Root Stage updates the changed monitored fields in-place and updates `LAST_UPDATED = CURRENT_TIMESTAMP` without resetting `STAGE` or `STATUS`.
+   - **Retention Pruning**: The background retention loop (`_retention_loop`) deletes exclusively rows where `STATUS = 'SINK'` and `LAST_UPDATED < datetime('now', '-N days')` according to each pipeline's `retention_days`.
 
 ### 5.2 Unidirectional Progression & Stage Skipping
-- Progression is strictly forward: a row at stage $N$ can only advance to stage $M$ where $M > N$.
-- Stages cannot transition backward.
-- Dynamic branching: items can skip intermediate consumer stages if their predicates do not match. For example, a non-anime item (`IS_ANIME == 0`) skips the Shoko recognition consumer stage and qualifies directly for downstream sink stages.
+- Progression is strictly forward: a row at stage order $N$ can only advance to stage order $M$ where $M > N$.
+- Dynamic branching: items can skip intermediate consumer stages if their `start_condition` predicates do not match and transition directly into a downstream Consumer or Sink stage.
 
 ### 5.3 AST-Based Safe Expression Evaluation & Transformer Engine
 Predicates and conditional transformers are parsed and evaluated using Python's standard `ast` module and sandboxed execution environments.
 - **Predicates (`src/core/predicates.py`)**:
   - Zero arbitrary code execution (`eval` is strictly forbidden for predicates).
-  - Supports boolean operators (`AND`, `OR`, `NOT`), comparisons (`==`, `!=`, `<`, `<=`, `>`, `>=`), and inclusion (`IN`, `NOT IN`).
-  - Normalizes SQL-style keywords (`IS NULL`, `IS NOT NULL`, `TRUE`, `FALSE`) into Python-compatible AST tokens.
-  - Context injection: row column values, stage indicators (`STAGE`), and stage completion flags (`stage.<slug>.completed`) are resolved dynamically in a case-insensitive manner.
+  - Supports boolean operators (`AND`, `OR`, `NOT`), comparisons (`==`, `!=`, `<`, `<=`, `>`, `>=`), inclusion (`IN`, `NOT IN`), and safe function calls (`len`, `lower`, `upper`, `str`, `int`, `float`, `bool`).
+  - Normalizes SQL-style keywords (`IS NULL`, `IS NOT NULL`, `TRUE`, `FALSE`) into Python-compatible AST tokens and automatically unpacks serialized JSON list strings from SQLite columns.
 - **Single-Line Multi-Branch Transformers (`src/core/transformers.py`)**:
   - Evaluates field mapping transformers using single-line human-friendly branching (`if ... then ... else if ... then ... else ...`), `elif`, and `return` syntaxes.
-  - Employs string literal masking (`_mask_strings`) to protect quoted values from regex token collision.
-  - Normalizes expressions into nested Python ternary expressions and validates syntax via `ast.parse(..., mode="eval")`.
-  - Runs in a restricted sandbox (`safe_globals = {"__builtins__": {}}`) with safe injected helpers (`str`, `int`, `bool`, `len`, `lower`, `upper`, `merge`) and case-insensitive `SafeContext`.
+  - Runs in a restricted sandbox (`safe_globals = {"__builtins__": {}}`) with safe injected helpers (`str`, `int`, `bool`, `len`, `lower`, `upper`, `merge`) and case-insensitive `SafeContext` that automatically unpacks JSON list strings.
 
 ### 5.4 Grace Periods & Watchdog Timeouts
 - **Ingestion Grace Period (`grace_period_minutes`, default 10m)**:
-  Prevents downstream stages from processing files while they are still being unpacked or transferred.
+  Enforced in `reconcile_stages` for Root Stages (`start_condition IS NULL`), holding newly ingested `PENDING` items until `elapsed_minutes >= grace_period_minutes` before allowing `complete_condition` promotion.
 - **Stage Watchdog Timeout (`timeout_minutes`, default 30m)**:
-  If a row remains in `PENDING` state within an intermediate stage longer than the configured timeout, the watchdog emits a normalized `WARN_PIPELINE_STALLED` incident.
+  Enforced in `reconcile_stages`: if a row remains in `PENDING` state longer than `timeout_minutes` since `LAST_UPDATED`, the watchdog emits a deduplicated `WARN_PIPELINE_STALLED` incident into `SYSTEM_INCIDENTS`.
 
 ### 5.5 Granular Stage-Scoped Field Mapping Selection (`service_mapping_scopes`)
 Stages can selectively restrict which field mappings of an assigned service are evaluated during execution, preventing unintended column overwrites across different lifecycle stages sharing the same service.
 - **Scope Model**: Configured via `service_mapping_scopes: Dict[str, list[str]]` on `StageConfig`, mapping `service_id` to a list of allowed uppercase column names (`target_column`).
 - **Default Fallback**: If a service key is omitted or contains an empty list, the engine evaluates all configured mappings for that service.
-- **Root Ingestion Scoping**: During initial root stage polling (`trigger_now`), only mapped attributes whose destination column is included in the active root stage's scope are inserted; unscoped columns remain `NULL`.
-- **Consumer Enrichment Scoping**: During intermediate enrichment (`_update_mapped_values_for_stage` and `_execute_consumer_enrichment`), secondary endpoint placeholders are resolved, but only fields matching the stage's allowed scope are calculated, coerced, merged, and updated in the database. Unscoped columns are skipped and preserved.
-- **Schema Sanitization & Rename Propagation**: When settings are saved, orphaned service keys and unmapped columns are automatically pruned from scopes. When an operator renames a target column in service settings, the rename is propagated into all referencing stage scopes automatically.
+- **Lazy Enrichment & Scoped Execution**: Both Root ingestion (`_ingest_root_service_for_stage`) and Consumer enrichment (`_execute_consumer_enrichment`) filter HTTP enrichment requests and field mapping evaluations strictly to the active stage's `service_mapping_scopes`.
+- **Schema Sanitization & Rename Propagation**: When settings are saved, orphaned service keys and unmapped columns are automatically pruned from scopes, and unambiguous `source_field` column renames are propagated across all pipeline tables and referencing stage scopes.
 
 ---
 
