@@ -104,6 +104,14 @@ class TestSbx01SandboxDecoupling(unittest.IsolatedAsyncioTestCase):
             self.assertIn("[sample] GET /api/v3/history?pageSize=1", logs_str)
             self.assertIn("[series] GET /api/v3/series/105", logs_str)
 
+            # Verify flattened_keys does not contain duplicate raw sample or records keys
+            flattened_paths = [item["path"] for item in result["flattened_keys"]]
+            self.assertFalse(any(p == "sample" or p.startswith("sample.") for p in flattened_paths))
+            self.assertFalse(any(p == "records" or p.startswith("records.") for p in flattened_paths))
+            self.assertIn("seriesId", flattened_paths)
+            self.assertIn("sourceTitle", flattened_paths)
+            self.assertIn("series.title", flattened_paths)
+
     async def test_sandbox_enrichment_with_record_id_and_not_found(self):
         """Case 3: record_id fetching from DB and 404 error when not found."""
         req = SandboxEnrichmentRequest(

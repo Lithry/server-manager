@@ -513,11 +513,38 @@ async def sandbox_enrichment(req: SandboxEnrichmentRequest) -> Dict[str, Any]:
             logs.append(f"[{namespace}] Exception: {str(e)}")
 
     final_context = {**row_dict, **sample_dict, **(req.custom_context or {}), **enrichment_data}
+
+    # Filter flattened keys to remove raw sample wrapper noise and redundant records aliases
+    all_flattened = flatten_json_keys(final_context)
+    root_keys = set(final_context.keys())
+    enrichment_namespaces = set(req.enrichment_endpoints.keys()) if req.enrichment_endpoints else set()
+
+    filtered_flattened: List[Dict[str, Any]] = []
+    for item in all_flattened:
+        path = item.get("path", "")
+        # Remove raw 'sample' wrapper paths
+        if path == "sample" or path.startswith("sample.") or path.startswith("sample["):
+            continue
+
+        # Remove redundant 'records' wrapper paths if the attribute is already exposed at root
+        if "records" not in enrichment_namespaces:
+            if path == "records":
+                continue
+            if path.startswith("records."):
+                rel_path = path[len("records."):]
+                top_key = rel_path.split(".")[0].split("[")[0]
+                if top_key in root_keys:
+                    continue
+            elif path.startswith("records["):
+                continue
+
+        filtered_flattened.append(item)
+
     return {
         "success": True,
         "logs": logs,
         "context_data": final_context,
-        "flattened_keys": flatten_json_keys(final_context)
+        "flattened_keys": filtered_flattened,
     }
 
 

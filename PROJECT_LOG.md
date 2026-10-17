@@ -1008,3 +1008,50 @@ This log maintains cross-session operational continuity, recording architectural
 - `src/api/pipeline.py`
 - `tests/test_sbx01_sandbox_decoupling.py`
 - `PROJECT_LOG.md`
+
+---
+
+## Session Milestone: 2026-10-17 — Sandbox Endpoint Suggestions Sampling Parameters Refinement
+
+### Role & Agent Assignment
+- **Frontend & WebUI Specialist (`Role 3` / `frontend-specialist`)**: Enhanced endpoint suggestion datalists in `ContextSourceControls.js` to include common sampling query parameters (`pageSize=1`).
+
+### Key Changes Implemented
+1. **Sampling Query Parameters in Known Endpoints (`ContextSourceControls.js`)**:
+   - Added `/api/v3/history?pageSize=1` and `/api/v3/queue?pageSize=1` at the top of the presets for Sonarr and Radarr.
+   - Retained full base endpoints (`/api/v3/history`, `/api/v3/queue`, etc.) for flexible selection.
+   - Preserved zero-fallback guarantee for unmapped or custom services.
+2. **Module Size & Standards Verification**:
+   - `frontend/src/features/sandbox/ui/ContextSourceControls.js` maintained at 209 lines (strictly under 250 lines).
+3. **Vite Production Compilation**:
+   - Ran `npm run build` with `Cwd: frontend`. Rebuilt `src/static/` with 0 errors.
+
+### Files Modified
+- `frontend/src/features/sandbox/ui/ContextSourceControls.js`
+- `src/static/*` (Production bundle)
+- `PROJECT_LOG.md`
+
+---
+
+## Session Milestone: 2026-10-17 — Sandbox Enrichment Flattened Keys Clutter Elimination
+
+### Role & Agent Assignment
+- **Backend Systems Engineer (`Role 2` / `backend-engineer`)**: Refined `sandbox_enrichment` in `src/api/pipeline.py` to prevent raw `sample.` wrapper and redundant `records.` alias keys from cluttering `flattened_keys`.
+
+### Architectural Decisions & Changes Applied
+1. **Flattened Keys Sanitization (`src/api/pipeline.py`)**:
+   - In `sandbox_enrichment`, `final_context` remains intact with raw wrappers (`sample`, `records`, root unpacked attributes, enrichment namespaces) so that placeholders and raw diagnostics continue to resolve seamlessly.
+   - When generating `flattened_keys` for operator inspection and autocomplete, filtered out:
+     - All keys with `path == "sample"` or matching prefix `sample.` / `sample[`.
+     - All redundant `records` / `records.` / `records[` keys whose attributes are already exposed at the root level (unless `"records"` is explicitly configured as a secondary enrichment namespace).
+   - Guarantees operators only see distinct root event attributes (`episodeId`, `seriesId`, `eventType`, etc.) and secondary enrichment namespaces (`episode.*`, `series.*`, etc.) with zero triple-duplication noise.
+2. **Automated Test Suite Expansion (`tests/test_sbx01_sandbox_decoupling.py`)**:
+   - Added assertions to `test_sandbox_enrichment_with_direct_sample_endpoint` verifying `flattened_keys` contains no `sample` or `records` prefixed keys, while confirming expected root fields (`seriesId`, `sourceTitle`) and secondary enrichment keys (`series.title`) remain present.
+3. **Verification**:
+   - Syntax validation via `py_compile`.
+   - Full test discovery execution (`.venv\Scripts\python.exe -m unittest discover -s tests`): 19/19 tests passing cleanly.
+
+### Files Modified
+- `src/api/pipeline.py`
+- `tests/test_sbx01_sandbox_decoupling.py`
+- `PROJECT_LOG.md`

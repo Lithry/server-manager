@@ -4,6 +4,8 @@ import { Icon } from '../../../shared/ui/atoms/Icon/Icon.js';
 
 const KNOWN_SERVICE_ENDPOINTS = {
   sonarr: [
+    '/api/v3/history?pageSize=1',
+    '/api/v3/queue?pageSize=1',
     '/api/v3/history',
     '/api/v3/queue',
     '/api/v3/series',
@@ -11,6 +13,8 @@ const KNOWN_SERVICE_ENDPOINTS = {
     '/api/v3/tag'
   ],
   radarr: [
+    '/api/v3/history?pageSize=1',
+    '/api/v3/queue?pageSize=1',
     '/api/v3/history',
     '/api/v3/queue',
     '/api/v3/movie',
